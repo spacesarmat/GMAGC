@@ -33,8 +33,22 @@ def test_close_up_projection_filling_the_frame_is_still_found():
     assert extract_projection(image) is not None
 
 
-def test_multiple_blobs_are_merged_into_one_crop():
-    photo = simulate_photo(sample_gobo(), np.random.default_rng(3))
-    crop = extract_projection(photo)
-    small = cv2.resize(crop, (64, 64))
-    assert (small > 127).sum() > 100
+def _two_blobs(edge_gap: int) -> np.ndarray:
+    """Two equal bright discs (radius 60) whose facing edges are `edge_gap` px apart on a 1024x768 frame."""
+    image = np.full((768, 1024, 3), 60, np.uint8)
+    color = (255, 245, 235)
+    cv2.circle(image, (300, 384), 60, color, -1)
+    cv2.circle(image, (300 + 120 + edge_gap, 384), 60, color, -1)
+    return image
+
+
+def test_nearby_blobs_are_merged_into_one_crop():
+    crop = extract_projection(_two_blobs(edge_gap=20))  # 20 px < merge kernel (6% of 1024 = 61 px)
+    assert crop is not None
+    assert crop.shape[1] >= 250  # spans both discs (about 260 px wide)
+
+
+def test_distant_blobs_are_not_merged():
+    crop = extract_projection(_two_blobs(edge_gap=200))  # 200 px > merge kernel
+    assert crop is not None
+    assert crop.shape[1] < 150  # only one disc (about 120 px wide)
