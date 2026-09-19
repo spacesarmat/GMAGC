@@ -1,0 +1,25 @@
+# Локальные данные: не коммитим (чужая библиотека гобо, 270+ МБ; реальные фото)
+gobos/
+photo/
+
+# Окружение и IDE
+.venv/
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Сборки Flet и артефакты
+build/
+dist/
+*.apk
+*.aab
+
+# Кэш индекса и локальные настройки
+.gmagc-cache/
