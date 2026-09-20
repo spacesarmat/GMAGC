@@ -1,5 +1,6 @@
 import numpy as np
 
+from gmagc_desktop.library import grouping
 from gmagc_desktop.library.grouping import group_duplicates
 
 
@@ -12,6 +13,16 @@ def mask(filled: slice) -> np.ndarray:
     image = np.zeros((8, 8), np.uint8)
     image[filled, :] = 255
     return image
+
+
+def _duplicated_library() -> tuple[np.ndarray, np.ndarray]:
+    """Construct a test library with 6 unique items + 3 duplicates of the first 3."""
+    rng = np.random.default_rng(0)
+    base = rng.normal(size=(6, 16)).astype(np.float32)
+    embeddings = np.concatenate([base, base[:3]])
+    embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+    masks = np.stack([mask(slice(i % 4, i % 4 + 3)) for i in range(6)] + [mask(slice(i % 4, i % 4 + 3)) for i in range(3)])
+    return embeddings, masks
 
 
 def test_identical_items_share_a_group_and_others_stay_alone():
@@ -35,15 +46,18 @@ def test_groups_are_transitive():
 
 
 def test_block_size_does_not_change_result():
-    rng = np.random.default_rng(0)
-    base = rng.normal(size=(6, 16)).astype(np.float32)
-    embeddings = np.concatenate([base, base[:3]])
-    embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
-    masks = np.stack([mask(slice(i % 4, i % 4 + 3)) for i in range(6)] + [mask(slice(i % 4, i % 4 + 3)) for i in range(3)])
+    embeddings, masks = _duplicated_library()
     assert group_duplicates(embeddings, masks, block=2).tolist() == group_duplicates(
         embeddings, masks, block=512
     ).tolist()
     assert group_duplicates(embeddings, masks).tolist()[6:] == [0, 1, 2]
+
+
+def test_pair_chunking_does_not_change_result(monkeypatch):
+    embeddings, masks = _duplicated_library()
+    baseline = group_duplicates(embeddings, masks)
+    monkeypatch.setattr(grouping, "PAIR_BUDGET_BYTES", 1)  # -> one pair per chunk
+    assert group_duplicates(embeddings, masks).tolist() == baseline.tolist()
 
 
 def test_empty_input():

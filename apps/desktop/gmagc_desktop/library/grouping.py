@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-PAIR_CHUNK = 100_000
+PAIR_BUDGET_BYTES = 32 * 1024 * 1024  # размер одного собранного массива масок при проверке пар
 
 
 def _find(parent: np.ndarray, item: int) -> int:
@@ -17,8 +17,10 @@ def _find(parent: np.ndarray, item: int) -> int:
 
 
 def _soft_iou_pairs(flat_masks: np.ndarray, left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    inter = np.minimum(flat_masks[left], flat_masks[right]).sum(axis=1)
-    union = np.maximum(flat_masks[left], flat_masks[right]).sum(axis=1)
+    first = flat_masks[left]
+    second = flat_masks[right]
+    inter = np.minimum(first, second).sum(axis=1)
+    union = np.maximum(first, second).sum(axis=1)
     return inter / np.maximum(union, 1e-6)
 
 
@@ -36,6 +38,7 @@ def group_duplicates(
         return parent.astype(np.int32)
     vectors = embeddings.astype(np.float32)
     flat = masks.reshape(count, -1).astype(np.float32) / 255.0
+    pair_chunk = max(1, PAIR_BUDGET_BYTES // (flat.shape[1] * flat.itemsize))
 
     for start in range(0, count, block):
         similarity = vectors[start : start + block] @ vectors.T
@@ -43,9 +46,9 @@ def group_duplicates(
         rows = rows + start
         keep = cols > rows
         rows, cols = rows[keep], cols[keep]
-        for chunk in range(0, len(rows), PAIR_CHUNK):
-            left = rows[chunk : chunk + PAIR_CHUNK]
-            right = cols[chunk : chunk + PAIR_CHUNK]
+        for chunk in range(0, len(rows), pair_chunk):
+            left = rows[chunk : chunk + pair_chunk]
+            right = cols[chunk : chunk + pair_chunk]
             similar = _soft_iou_pairs(flat, left, right) >= iou_threshold
             for a, b in zip(left[similar], right[similar], strict=True):
                 root_a, root_b = _find(parent, int(a)), _find(parent, int(b))
