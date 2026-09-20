@@ -91,43 +91,34 @@ def test_benchmark_real_photos_with_labels(tmp_path, capsys):
 
 
 def test_load_or_build_reuses_cache(tmp_path):
-    from gmagc_desktop.matcher.embedder import PixelEmbedder
     from PIL import Image
+    from gmagc_desktop.matcher.embedder import PixelEmbedder
 
     class CountingEmbedder(PixelEmbedder):
+        """PixelEmbedder, который считает, сколько СТРОК (изображений) он получил."""
+
         def __init__(self):
             super().__init__()
             self.rows_embedded = 0
 
         def embed(self, images):
-            # Count rows (number of images in this batch)
-            if isinstance(images, np.ndarray):
-                if images.ndim == 3:  # Single image (H, W, C)
-                    self.rows_embedded += 1
-                elif images.ndim == 4:  # Batch of images (N, H, W, C)
-                    self.rows_embedded += images.shape[0]
-                else:
-                    # Some other format, just count 1
-                    self.rows_embedded += 1
-            else:
-                # If it's a list or other sequence
-                self.rows_embedded += len(images)
+            self.rows_embedded += len(images)
             return super().embed(images)
 
     library = make_library(tmp_path)
     embedder = CountingEmbedder()
     path = tmp_path / "cache" / "idx.npz"
 
-    # First call: builds index, embeds library files (batched)
+    # First call: builds index, embeds 6 valid library files
     first = benchmark.load_or_build(library, embedder, path)
-    first_rows = embedder.rows_embedded
-    assert first_rows > 0, "first call should perform embeddings"
+    assert embedder.rows_embedded == 6, f"first call should embed 6 files, got {embedder.rows_embedded}"
     assert len(first) == 6, "index should have 6 files"
 
     # Second call: reuses cache, should not embed anything new
     second = benchmark.load_or_build(library, embedder, path)
-    second_rows = embedder.rows_embedded
-    assert second_rows == first_rows, f"second call should reuse cache, rows changed from {first_rows} to {second_rows}"
+    assert embedder.rows_embedded == 6, (
+        f"second call should reuse cache, rows should still be 6, got {embedder.rows_embedded}"
+    )
     assert len(second) == 6, "cached index should still have 6 files"
 
     # Add ONE new image to library (create a real image so it can be embedded)
@@ -135,10 +126,9 @@ def test_load_or_build_reuses_cache(tmp_path):
     Image.fromarray(np.eye(64, dtype=np.uint8) * 255, "L").save(new_photo / "diag.png")
 
     # Third call: incremental build, should embed the new file
-    benchmark.load_or_build(library, embedder, path)
-    third_rows = embedder.rows_embedded
-    assert third_rows > second_rows, f"third call should embed new file, rows changed from {first_rows} to {third_rows}"
-    assert third_rows == first_rows + 1, f"should have embedded exactly 1 new row, got delta of {third_rows - first_rows}"
+    third = benchmark.load_or_build(library, embedder, path)
+    assert embedder.rows_embedded == 7, f"third call should embed 1 new file, rows should be 7, got {embedder.rows_embedded}"
+    assert len(third) == 7, "index should now have 7 files"
 
 
 def test_real_eval_counts_a_family_hit(tmp_path):
