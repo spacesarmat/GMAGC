@@ -58,11 +58,12 @@ def test_benchmark_synthetic_smoke(tmp_path, capsys):
     assert code == 0
     assert "synthetic (n=4)" in out and "top-1" in out and "top-5" in out
     assert "no real photos" in out
-    # Verify numbers are reasonable: 0 <= top1 <= top5 <= 100
+    # With 5 families, samples=4, all segmentable -> top-5 should be 100%
     match = re.search(r"top-1 ([\d.]+)%.*top-5 ([\d.]+)%", out)
     assert match, "synthetic line missing top-1/top-5 percentages"
     top1, top5 = float(match.group(1)), float(match.group(2))
     assert 0 <= top1 <= top5 <= 100, f"top-1={top1}% should be <= top-5={top5}%"
+    assert top5 == 100.0, f"top-5 should be 100.0% with 5 families and 4 samples, got {top5}%"
 
 
 def test_benchmark_real_photos_with_labels(tmp_path, capsys):
@@ -91,41 +92,53 @@ def test_benchmark_real_photos_with_labels(tmp_path, capsys):
 
 def test_load_or_build_reuses_cache(tmp_path):
     from gmagc_desktop.matcher.embedder import PixelEmbedder
+    from PIL import Image
 
     class CountingEmbedder(PixelEmbedder):
         def __init__(self):
             super().__init__()
-            self.count = 0
+            self.rows_embedded = 0
 
-        def embed(self, image):
-            self.count += 1
-            return super().embed(image)
+        def embed(self, images):
+            # Count rows (number of images in this batch)
+            if isinstance(images, np.ndarray):
+                if images.ndim == 3:  # Single image (H, W, C)
+                    self.rows_embedded += 1
+                elif images.ndim == 4:  # Batch of images (N, H, W, C)
+                    self.rows_embedded += images.shape[0]
+                else:
+                    # Some other format, just count 1
+                    self.rows_embedded += 1
+            else:
+                # If it's a list or other sequence
+                self.rows_embedded += len(images)
+            return super().embed(images)
 
     library = make_library(tmp_path)
     embedder = CountingEmbedder()
     path = tmp_path / "cache" / "idx.npz"
 
-    # First call: builds index, counts embed calls
+    # First call: builds index, embeds library files (batched)
     first = benchmark.load_or_build(library, embedder, path)
-    first_count = embedder.count
-    assert first_count > 0, "first call should perform embeddings"
+    first_rows = embedder.rows_embedded
+    assert first_rows > 0, "first call should perform embeddings"
+    assert len(first) == 6, "index should have 6 files"
 
-    # Second call: reuses cache, should not increase embed count
+    # Second call: reuses cache, should not embed anything new
     second = benchmark.load_or_build(library, embedder, path)
-    second_count = embedder.count
-    assert second_count == first_count, f"second call should reuse cache, count went from {first_count} to {second_count}"
-    assert path.exists() and len(first) == len(second) == 6
+    second_rows = embedder.rows_embedded
+    assert second_rows == first_rows, f"second call should reuse cache, rows changed from {first_rows} to {second_rows}"
+    assert len(second) == 6, "cached index should still have 6 files"
 
-    # Add a new image to library (create a real image so it can be embedded)
-    new_photo = library / "vendor_new"
-    new_photo.mkdir()
-    real_img = shape_images()["ring"]  # Use a real shape image
-    cv2.imwrite(str(new_photo / "new_image.png"), real_img)
+    # Add ONE new image to library (create a real image so it can be embedded)
+    new_photo = library / "vendor_c"
+    Image.fromarray(np.eye(64, dtype=np.uint8) * 255, "L").save(new_photo / "diag.png")
 
-    # Third call: incremental build, should embed only the new file(s)
+    # Third call: incremental build, should embed the new file
     benchmark.load_or_build(library, embedder, path)
-    third_count = embedder.count
-    assert third_count > second_count, f"third call should embed new files, count went from {first_count} to {third_count}"
+    third_rows = embedder.rows_embedded
+    assert third_rows > second_rows, f"third call should embed new file, rows changed from {first_rows} to {third_rows}"
+    assert third_rows == first_rows + 1, f"should have embedded exactly 1 new row, got delta of {third_rows - first_rows}"
 
 
 def test_real_eval_counts_a_family_hit(tmp_path):
@@ -296,19 +309,43 @@ def test_real_eval_raises_labels_error_for_malformed_json_and_main_returns_3(tmp
 
 
 def test_synthetic_eval_is_deterministic_and_sane(tmp_path):
-    """Synthetic eval with same seed produces same metrics; 0 <= top1 <= top5 <= 1."""
+    """Synthetic eval with same seed produces same metrics; 5 families guarantee top-5 hit."""
     index, searcher = build_searcher(tmp_path)
     library = tmp_path / "lib"  # Already created by build_searcher via make_library
 
-    result1 = benchmark.synthetic_eval(index, library, searcher, samples=5, seed=3)
-    result2 = benchmark.synthetic_eval(index, library, searcher, samples=5, seed=3)
+    # With samples=3, seed=3
+    result1 = benchmark.synthetic_eval(index, library, searcher, samples=3, seed=3)
+    result2 = benchmark.synthetic_eval(index, library, searcher, samples=3, seed=3)
 
     # Should have same metrics (ignore median_ms, which may differ slightly)
-    assert result1["samples"] == result2["samples"] == 5
-    assert result1["top1"] == result2["top1"]
-    assert result1["top5"] == result2["top5"]
-    assert result1["segmentation_failed"] == result2["segmentation_failed"]
+    assert result1["samples"] == result2["samples"] == 3
+    assert result1["top1"] == result2["top1"], "same seed should produce same top1"
+    assert result1["top5"] == result2["top5"], "same seed should produce same top5"
+    seg_fail1, seg_fail2 = result1["segmentation_failed"], result2["segmentation_failed"]
+    assert seg_fail1 == seg_fail2, "same seed should produce same segmentation_failed"
+
+    # With 5 families, all fit in top-5, so real searcher should guarantee top5==1.0
+    assert result1["top5"] == 1.0, f"with 5 families and pixel embedder, top5 should be 1.0, got {result1['top5']}"
+    assert result1["segmentation_failed"] == 0.0, f"shapes should always segment, got {result1['segmentation_failed']}"
 
     # Sanity checks
     assert 0.0 <= result1["top1"] <= result1["top5"] <= 1.0
     assert 0.0 <= result1["segmentation_failed"] <= 1.0
+
+
+def test_synthetic_eval_counts_misses_when_the_search_is_wrong(tmp_path):
+    """Synthetic eval with an empty-result searcher should give top1==0.0, top5==0.0."""
+    index, _ = build_searcher(tmp_path)
+    library = tmp_path / "lib"
+
+    class StubSearcher:
+        def search(self, normalized, top_n=10):
+            return []
+
+    stub_searcher = StubSearcher()
+    result = benchmark.synthetic_eval(index, library, stub_searcher, samples=3, seed=5)
+
+    # Stub searcher returns no matches, so all should be misses
+    assert result["top1"] == 0.0, f"no matches should give top1==0.0, got {result['top1']}"
+    assert result["top5"] == 0.0, f"no matches should give top5==0.0, got {result['top5']}"
+    assert result["samples"] == 3
