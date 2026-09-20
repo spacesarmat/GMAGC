@@ -23,3 +23,6 @@ dist/
 
 # Кэш индекса и локальные настройки
 .gmagc-cache/
+
+# Скачанные модели (загружаются scripts/fetch_model.py, в git не хранятся)
+models/*.onnx
