@@ -127,3 +127,29 @@ def test_index_with_missing_model_returns_3(tmp_path, capsys):
     out, err = capsys.readouterr()
     assert code == 3
     assert not target.exists()
+
+
+def test_search_with_corrupt_model_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    garbage = tmp / "garbage.onnx"
+    garbage.write_bytes(b"not an onnx model")
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    code = cli.main(["search", str(photo), "--index", str(index_path), "--model", str(garbage)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+    assert "Traceback" not in err
+
+
+def test_index_with_corrupt_model_returns_3(tmp_path, capsys):
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    garbage = tmp_path / "garbage.onnx"
+    garbage.write_bytes(b"not an onnx model")
+    target = tmp_path / "y.npz"
+    code = cli.main(["index", str(library), "--index", str(target), "--model", str(garbage)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+    assert not target.exists()

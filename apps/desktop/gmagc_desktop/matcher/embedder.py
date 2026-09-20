@@ -66,9 +66,12 @@ class OnnxEmbedder:
         path = Path(model_path)
         self.model_id = f"onnx-{path.stem}-{path.stat().st_size}"
         self._batch_size = batch_size
-        self._session = ort.InferenceSession(
-            str(path), providers=providers or ["CPUExecutionProvider"]
-        )
+        try:
+            self._session = ort.InferenceSession(
+                str(path), providers=providers or ["CPUExecutionProvider"]
+            )
+        except Exception as error:  # onnxruntime-исключения наследуются от Exception: переводим в ValueError на границе
+            raise ValueError(f"cannot load ONNX model {path}: {error}") from error
         self._input_name = self._session.get_inputs()[0].name
 
     @staticmethod

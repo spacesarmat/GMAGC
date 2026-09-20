@@ -1,5 +1,6 @@
 import numpy as np
 import onnx
+import pytest
 from onnx import TensorProto, helper
 
 from gmagc_desktop.matcher.embedder import (
@@ -64,3 +65,15 @@ def test_pool_output_concatenates_cls_and_mean_patch():
     assert out.shape == (2, 8)
     assert np.array_equal(out[:, :4], tokens[:, 0])
     assert np.allclose(out[:, 4:], tokens[:, 1:].mean(axis=1))
+
+
+def test_onnx_embedder_rejects_garbage_empty_and_directory_models(tmp_path):
+    garbage = tmp_path / "garbage.onnx"
+    garbage.write_bytes(b"this is not an onnx model")
+    empty = tmp_path / "empty.onnx"
+    empty.write_bytes(b"")
+    folder = tmp_path / "folder.onnx"
+    folder.mkdir()
+    for bad in (garbage, empty, folder):
+        with pytest.raises(ValueError, match="cannot load ONNX model"):
+            OnnxEmbedder(bad)
