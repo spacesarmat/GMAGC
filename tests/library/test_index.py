@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -117,3 +118,70 @@ def test_load_returns_none_for_missing_or_corrupt_file(tmp_path):
     broken = tmp_path / "broken.npz"
     broken.write_bytes(b"not a zip")
     assert load_index(broken) is None
+
+
+def test_load_never_raises_on_damaged_cache(library, tmp_path):
+    target = tmp_path / "index.npz"
+    save_index(build_index(library, CountingEmbedder()), target)
+    data = target.read_bytes()
+    damaged = tmp_path / "damaged.npz"
+
+    damaged.write_bytes(data[: len(data) // 2])
+    assert load_index(damaged) is None
+
+    for offset in range(64, len(data) - 64, max(1, len(data) // 40)):
+        broken = bytearray(data)
+        for i in range(offset, offset + 8):
+            broken[i] ^= 0xFF
+        damaged.write_bytes(bytes(broken))
+        load_index(damaged)  # None или индекс допустимы, исключения быть не должно
+
+
+def test_missing_library_root_raises_instead_of_returning_an_empty_index(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        build_index(tmp_path / "unplugged", CountingEmbedder())
+
+
+def test_skipped_files_are_not_reopened_until_they_change(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    opened = []
+    real = index_module.load_library_gray
+    monkeypatch.setattr(index_module, "load_library_gray", lambda path: opened.append(Path(path).name) or real(path))
+
+    first = build_index(library, CountingEmbedder())
+    assert "blank.png" in opened
+    opened.clear()
+
+    second = build_index(library, CountingEmbedder(), existing=first)
+    assert opened == []  # ни один файл не открывался: строки и «пропущенные» взяты из кэша
+
+    os.utime(library / "blank.png", ns=(2_000_000_000, 2_000_000_000))
+    build_index(library, CountingEmbedder(), existing=second)
+    assert opened == ["blank.png"]  # изменившийся пропущенный файл пробуем снова
+
+
+def test_permission_and_program_errors_are_not_swallowed(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    def failing(error):
+        def loader(path):
+            raise error
+
+        return loader
+
+    monkeypatch.setattr(index_module, "load_library_gray", failing(PermissionError("locked")))
+    with pytest.raises(PermissionError):
+        build_index(library, CountingEmbedder())
+
+    monkeypatch.setattr(index_module, "load_library_gray", failing(TypeError("bug")))
+    with pytest.raises(TypeError):
+        build_index(library, CountingEmbedder())
+
+
+def test_corrupt_image_is_skipped_with_a_warning(library, caplog):
+    (library / "vendor_a" / "broken.png").write_bytes(b"not a png")
+    with caplog.at_level("WARNING"):
+        index = build_index(library, CountingEmbedder())
+    assert "vendor_a/broken.png" in [f.rel_path for f in index.skipped]
+    assert "broken.png" in caplog.text

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import zipfile
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
+from PIL import Image
 
 from gmagc_desktop.library.grouping import group_duplicates
 from gmagc_desktop.library.scan import LibraryFile, scan_library
@@ -17,6 +21,8 @@ from gmagc_desktop.matcher.imageio import load_library_gray
 from gmagc_desktop.matcher.normalize import normalize_gray
 from gmagc_desktop.matcher.search import SearchData
 from gmagc_desktop.matcher.shape import MASK_SIZE, soft_mask
+
+logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = 1
 ProgressCallback = Callable[[int, int], None]
@@ -42,10 +48,17 @@ class LibraryIndex:
         return SearchData(self.embeddings, self.masks, self.group_ids)
 
 
+_UNREADABLE = (OSError, ValueError, SyntaxError, cv2.error, Image.DecompressionBombError)
+
+
 def _load_normalized(path: Path) -> np.ndarray | None:
+    """Нормализованное изображение или None, если файл нечитаем. PermissionError и ошибки программы не глотаются."""
     try:
         return normalize_gray(load_library_gray(path))
-    except Exception:  # битый файл не должен ломать индексацию
+    except PermissionError:
+        raise
+    except _UNREADABLE as error:
+        logger.warning("skipping unreadable library file %s: %s", path, error)
         return None
 
 
@@ -58,6 +71,8 @@ def build_index(
     cancel: Callable[[], bool] | None = None,
 ) -> LibraryIndex:
     root = Path(root)
+    if not root.is_dir():
+        raise FileNotFoundError(f"library folder not found: {root}")
     scanned = scan_library(root)
 
     reusable: dict[LibraryFile, int] = {}
@@ -152,5 +167,5 @@ def load_index(path: str | Path) -> LibraryIndex | None:
                 group_ids=data["group_ids"],
                 skipped=_files(data["skipped_paths"], data["skipped_sizes"], data["skipped_mtimes"]),
             )
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+    except (OSError, KeyError, ValueError, EOFError, NotImplementedError, zipfile.BadZipFile, zlib.error):
         return None
