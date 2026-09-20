@@ -11,6 +11,8 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import benchmark  # noqa: E402
+import inspect_groups  # noqa: E402
+import report_photos  # noqa: E402
 
 from gmagc_desktop import cli  # noqa: E402
 from gmagc_desktop.matcher.search import Searcher  # noqa: E402
@@ -339,3 +341,106 @@ def test_synthetic_eval_counts_misses_when_the_search_is_wrong(tmp_path):
     assert result["top1"] == 0.0, f"no matches should give top1==0.0, got {result['top1']}"
     assert result["top5"] == 0.0, f"no matches should give top5==0.0, got {result['top5']}"
     assert result["samples"] == 3
+
+
+def test_report_photos_writes_html_and_label_template(tmp_path):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(out),
+            "--top", "3",
+        ]
+    )
+
+    html_text = out.read_text(encoding="utf-8")
+    template = json.loads((out.parent / "labels.template.json").read_text(encoding="utf-8"))
+    assert code == 0
+    assert "a.png" in html_text and "vendor_" in html_text and "data:image/png;base64," in html_text
+    assert template == {"a.png": None}
+
+
+def test_inspect_groups_lists_duplicate_families(tmp_path, capsys):
+    library = make_library(tmp_path)
+    index_path = tmp_path / "idx.npz"
+    cli.main(["index", str(library), "--index", str(index_path)])
+    capsys.readouterr()
+    sheet = tmp_path / "sheet.png"
+
+    code = inspect_groups.main(
+        ["--library", str(library), "--index", str(index_path), "--out", str(sheet)]
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0 and "5 families, 1 with duplicates, 2 files in them" in out
+    assert "vendor_b/ell.png" in out and "vendor_c/ell_small.png" in out
+    assert sheet.exists()
+
+
+def test_report_photos_survives_an_unreadable_photo(tmp_path):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "good.png", shape_images()["ell"], 5)
+    # Create an unreadable file
+    (photos / "bad.png").write_bytes(b"junk")
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(out),
+        ]
+    )
+
+    html_text = out.read_text(encoding="utf-8")
+    template = json.loads((out.parent / "labels.template.json").read_text(encoding="utf-8"))
+    assert code == 0
+    assert "cannot read photo" in html_text
+    assert "good.png" in html_text
+    assert "bad.png" in html_text
+    assert template == {"bad.png": None, "good.png": None}
+
+
+def test_report_photos_missing_photos_folder_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(tmp_path / "nonexistent"),
+            "--out", str(out),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "photos folder not found" in err
+
+
+def test_report_photos_missing_library_returns_3(tmp_path, capsys):
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(tmp_path / "nonexistent_lib"),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(out),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "cannot read library" in err or "cannot read" in err or "FileNotFoundError" in err

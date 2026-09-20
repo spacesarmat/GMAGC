@@ -13,3 +13,4 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402", "I001"]  # sys.path подменяется до импортов намеренно
 "tests/test_scripts.py" = ["E402", "I001"]
+"tests/test_thumbs.py" = ["E402", "I001"]
