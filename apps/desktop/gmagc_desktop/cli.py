@@ -6,6 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from gmagc_desktop.library.index import build_index, load_index, save_index
 from gmagc_desktop.matcher.embedder import Embedder, OnnxEmbedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_photo_bgr
@@ -17,12 +19,32 @@ def make_embedder(model: str | None) -> Embedder:
     return OnnxEmbedder(model) if model else PixelEmbedder()
 
 
+def _read_photo(path: str | Path) -> np.ndarray | None:
+    """Load photo from path; return None after printing error message to stderr."""
+    try:
+        return load_photo_bgr(path)
+    except (OSError, ValueError) as error:
+        print(f"cannot read photo {path}: {error}", file=sys.stderr)
+        return None
+
+
+def _build_embedder(model: str | None) -> Embedder | None:
+    """Build embedder; return None after printing error message to stderr."""
+    try:
+        return make_embedder(model)
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"cannot load model {model}: {error}", file=sys.stderr)
+        return None
+
+
 def _progress(done: int, total: int) -> None:
     print(f"\rindexing {done}/{total}", end="", file=sys.stderr, flush=True)
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    embedder = make_embedder(args.model)
+    embedder = _build_embedder(args.model)
+    if embedder is None:
+        return 3
     try:
         index = build_index(
             args.library, embedder, existing=load_index(args.index), progress=_progress
@@ -42,14 +64,19 @@ def _cmd_search(args: argparse.Namespace) -> int:
     if index is None:
         print("index not found or unreadable; run 'index' first", file=sys.stderr)
         return 1
-    embedder = make_embedder(args.model)
+    photo = _read_photo(args.photo)
+    if photo is None:
+        return 3
+    embedder = _build_embedder(args.model)
+    if embedder is None:
+        return 3
     if index.model_id != embedder.model_id:
         print(
             f"index was built with '{index.model_id}', search uses '{embedder.model_id}'",
             file=sys.stderr,
         )
         return 1
-    normalized = normalize_photo(load_photo_bgr(args.photo))
+    normalized = normalize_photo(photo)
     if normalized is None:
         print("projection not found on the photo", file=sys.stderr)
         return 2

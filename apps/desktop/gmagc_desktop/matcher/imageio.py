@@ -24,6 +24,8 @@ def load_library_gray(path: str | Path) -> np.ndarray:
 def load_photo_bgr(path: str | Path) -> np.ndarray:
     """Фото -> uint8 HxWx3 BGR (с учётом EXIF-ориентации, поддерживает не-ASCII пути)."""
     data = np.fromfile(str(path), dtype=np.uint8)
+    if data.size == 0:
+        raise ValueError(f"cannot decode image: {path}")
     image = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"cannot decode image: {path}")

@@ -67,6 +67,7 @@ def test_search_without_projection_returns_2(indexed, capsys):
 def test_search_without_index_returns_1(tmp_path, capsys):
     photo = save_photo(tmp_path, "p.png", np.full((32, 32, 3), 90, np.uint8))
     assert cli.main(["search", str(photo), "--index", str(tmp_path / "nope.npz")]) == 1
+    assert "index not found" in capsys.readouterr().err
 
 
 def test_search_with_other_model_than_index_returns_1(indexed, monkeypatch, capsys):
@@ -75,3 +76,54 @@ def test_search_with_other_model_than_index_returns_1(indexed, monkeypatch, caps
     monkeypatch.setattr(cli, "make_embedder", lambda model: PixelEmbedder(side=8))
     assert cli.main(["search", str(photo), "--index", str(index_path)]) == 1
     assert "index was built with" in capsys.readouterr().err
+
+
+def test_search_with_missing_photo_returns_3(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    msg = "model must not be built before photo is read"
+    monkeypatch.setattr(cli, "make_embedder", lambda model: (_ for _ in ()).throw(AssertionError(msg)))
+    code = cli.main(["search", str(tmp / "nope.png"), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+    assert "Traceback" not in err
+
+
+def test_search_with_zero_byte_photo_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    path = tmp / "empty.jpg"
+    path.write_bytes(b"")
+    code = cli.main(["search", str(path), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+
+
+def test_search_with_non_image_photo_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    path = tmp / "text.png"
+    path.write_bytes(b"not an image")
+    code = cli.main(["search", str(path), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+
+
+def test_search_with_missing_model_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    code = cli.main(["search", str(photo), "--index", str(index_path), "--model", str(tmp / "nope.onnx")])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+
+
+def test_index_with_missing_model_returns_3(tmp_path, capsys):
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    target = tmp_path / "x.npz"
+    code = cli.main(["index", str(library), "--index", str(target), "--model", str(tmp_path / "nope.onnx")])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert not target.exists()

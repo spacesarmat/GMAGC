@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from PIL import Image
 
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr
@@ -48,3 +49,10 @@ def test_photo_is_bgr_and_non_ascii_path_works(tmp_path):
 
     assert bgr.shape == (6, 10, 3)
     assert tuple(bgr[0, 0]) == (0, 0, 255)  # красный в BGR
+
+
+def test_empty_photo_file_raises_value_error(tmp_path):
+    path = tmp_path / "empty.jpg"
+    path.write_bytes(b"")
+    with pytest.raises(ValueError):
+        load_photo_bgr(path)
