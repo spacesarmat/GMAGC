@@ -10,6 +10,9 @@ on:
 env:
   # держать в синхронизации с apps/*/pyproject.toml и requirements-dev.txt
   FLET_VERSION: "1.0.0"
+  # Flet выводит символы вне cp1252; на Windows без UTF-8 сборка падает
+  PYTHONUTF8: "1"
+  FLET_CLI_NO_RICH_OUTPUT: "1"
 
 jobs:
   build:
