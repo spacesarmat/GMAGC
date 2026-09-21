@@ -2918,7 +2918,7 @@ git commit -m "build: sign the Android APK with a persistent key so updates inst
 
 ### Task 8: Окно с просьбой поддержать автора
 
-Решения (пользователь дал ссылку и попросил всплывающее окно; частоту выбрал я, чтобы окно не раздражало): первое окно на 5-м запуске, дальше не чаще раза в 30 дней; кнопки «Поддержать» (открывает ссылку в браузере и больше не напоминает), «Позже» (напомнит через 30 дней), «Больше не показывать»; окно не показывается, пока идёт индексация, поиск или отправка; постоянная ссылка «Поддержать автора» внизу экрана (ПК) и на экране подключения (Android) работает всегда и не меняет расписание.
+Решения (пользователь дал ссылку и попросил всплывающее окно; частоту выбрал я, чтобы окно не раздражало): первое окно на 5-м запуске, дальше не чаще раза в 30 дней; кнопки «Поддержать» (открывает ссылку в браузере и больше не напоминает), «Позже» (напомнит через 30 дней), «Больше не показывать»; окно не показывается, пока идёт индексация, поиск или отправка; постоянные ссылки «Поддержать автора» и «Telegram автора» (`https://t.me/Andy_bum`) внизу экрана (ПК) и на экране подключения (Android) работают всегда и не меняют расписание; ссылки на донаты и Telegram также вносятся в README и заметки релиза.
 
 **Files:**
 - Create: `packages/common/gmagc_common/support.py` (+ копии скриптом), `apps/desktop/src/gmagc_desktop/ui/support.py`, `apps/mobile/src/gmagc_mobile/support.py`
@@ -2926,7 +2926,7 @@ git commit -m "build: sign the Android APK with a persistent key so updates inst
 - Test: `tests/common/test_support.py`, `tests/desktop/test_support_prompt.py`, `tests/mobile/test_mobile_support.py`
 
 **Interfaces:**
-- Produces (`gmagc_common.support`): `SUPPORT_URL` (`https://boosty.to/djmaker/posts/8e816e07-aada-48f5-9280-579c6ffff5c2`), `FIRST_ASK_LAUNCH = 5`, `REMIND_AFTER_SECONDS = 30 суток`, ответы `SUPPORT`, `LATER`, `NEVER`; `SupportState(launches=0, last_ask=0.0, muted=False)`; `register_launch(state)`, `should_ask(state, now) -> bool`, `after_answer(state, now, answer) -> SupportState`.
+- Produces (`gmagc_common.support`): `SUPPORT_URL` (`https://boosty.to/djmaker/donate`), `FIRST_ASK_LAUNCH = 5`, `REMIND_AFTER_SECONDS = 30 суток`, ответы `SUPPORT`, `LATER`, `NEVER`; `SupportState(launches=0, last_ask=0.0, muted=False)`; `register_launch(state)`, `should_ask(state, now) -> bool`, `after_answer(state, now, answer) -> SupportState`.
 - Produces (ПК): `Settings.launches`, `Settings.support_last_ask`, `Settings.support_muted`; `SearchService.support_state()`, `save_support_state(state)`; `ui.support.SupportPrompt(page, service, *, open_url=webbrowser.open, now=time.time, delay=8.0, busy=lambda: False)` с `link`, `start()`, `show()`, `on_support`, `on_later`, `on_never`, `on_open_link`; `DesktopApp(..., support=True, support_delay=8.0)`.
 - Produces (Android): `gmagc_mobile.support.SupportPrompt(prefs, launcher, page, *, now=time.time, delay=8.0, busy=lambda: False)` c `link`, async `startup()`, `show()`, `on_support`, `on_later`, `on_never`, `on_open_link`; `MobileApp(..., support=False, support_delay=8.0)`.
 
@@ -2937,6 +2937,7 @@ git commit -m "build: sign the Android APK with a persistent key so updates inst
 import pytest
 
 from gmagc_common.support import (
+    AUTHOR_TELEGRAM_URL,
     FIRST_ASK_LAUNCH,
     LATER,
     NEVER,
@@ -2959,8 +2960,9 @@ def launched(times):
     return state
 
 
-def test_the_link_is_the_authors_boosty_page():
-    assert SUPPORT_URL == "https://boosty.to/djmaker/posts/8e816e07-aada-48f5-9280-579c6ffff5c2"
+def test_the_links_are_the_authors_donation_page_and_telegram():
+    assert SUPPORT_URL == "https://boosty.to/djmaker/donate"
+    assert AUTHOR_TELEGRAM_URL == "https://t.me/Andy_bum"
 
 
 def test_launches_are_counted_and_the_first_ask_waits_for_the_fifth_launch():
@@ -2995,7 +2997,7 @@ def test_a_clock_that_went_back_asks_again_and_an_unknown_answer_is_an_error():
 
 ```python
 # path: tests/desktop/test_support_prompt.py
-from gmagc_common.support import FIRST_ASK_LAUNCH, REMIND_AFTER_SECONDS, SUPPORT_URL
+from gmagc_common.support import AUTHOR_TELEGRAM_URL, FIRST_ASK_LAUNCH, REMIND_AFTER_SECONDS, SUPPORT_URL
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_desktop.service.settings import Settings, load_settings, save_settings
 from gmagc_desktop.ui.support import SupportPrompt
@@ -3098,13 +3100,21 @@ def test_the_permanent_link_opens_the_page_and_never_changes_the_schedule(tmp_pa
     prompt.on_open_link(None)
 
     assert opened == [SUPPORT_URL] and service.settings.support_last_ask == 0.0 and service.settings.support_muted is False
+
+
+def test_the_telegram_link_opens_the_authors_account(tmp_path):
+    prompt, _, _, opened = make(tmp_path, launches=1)
+
+    prompt.on_open_telegram(None)
+
+    assert opened == [AUTHOR_TELEGRAM_URL] and AUTHOR_TELEGRAM_URL == "https://t.me/Andy_bum"
 ```
 
 ```python
 # path: tests/mobile/test_mobile_support.py
 import asyncio
 
-from gmagc_common.support import REMIND_AFTER_SECONDS, SUPPORT_URL
+from gmagc_common.support import AUTHOR_TELEGRAM_URL, REMIND_AFTER_SECONDS, SUPPORT_URL
 from gmagc_mobile.support import KEY_LAST, KEY_LAUNCHES, KEY_MUTED, SupportPrompt
 from tests.fakes import StubPage
 from tests.fakes_mobile import FakeLauncher, FakePrefs
@@ -3175,6 +3185,14 @@ def test_the_permanent_link_opens_the_page_without_touching_the_schedule():
     run(prompt.on_open_link(None))
 
     assert launcher.opened == [SUPPORT_URL] and KEY_LAST not in prefs.data and KEY_MUTED not in prefs.data
+
+
+def test_the_telegram_link_opens_the_authors_account():
+    prompt, _, launcher, _ = make()
+
+    run(prompt.on_open_telegram(None))
+
+    assert launcher.opened == [AUTHOR_TELEGRAM_URL]
 ```
 
 В `tests/fakes.py` в `StubPage.__init__` добавить `self.dialogs = []`, а в класс методы:
@@ -3202,7 +3220,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-SUPPORT_URL = "https://boosty.to/djmaker/posts/8e816e07-aada-48f5-9280-579c6ffff5c2"
+SUPPORT_URL = "https://boosty.to/djmaker/donate"
+AUTHOR_TELEGRAM_URL = "https://t.me/Andy_bum"  # Telegram автора: постоянная ссылка на экранах
 FIRST_ASK_LAUNCH = 5  # первое окно не раньше пятого запуска
 REMIND_AFTER_SECONDS = 30 * 24 * 60 * 60  # «Позже» напоминает через 30 суток
 
@@ -3266,6 +3285,7 @@ from collections.abc import Callable
 import flet as ft
 
 from gmagc_common.support import (
+    AUTHOR_TELEGRAM_URL,
     DIALOG_TEXT,
     DIALOG_TITLE,
     LATER,
@@ -3297,6 +3317,7 @@ class SupportPrompt:
         self.delay = delay
         self.busy = busy
         self.link = ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.on_open_link)
+        self.telegram_link = ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.on_open_telegram)
         self._dialog: ft.AlertDialog | None = None
 
     def start(self) -> None:
@@ -3341,9 +3362,12 @@ class SupportPrompt:
 
     def on_open_link(self, _event) -> None:
         self.open_url(SUPPORT_URL)
+
+    def on_open_telegram(self, _event) -> None:
+        self.open_url(AUTHOR_TELEGRAM_URL)
 ```
 
-Правки `apps/desktop/src/gmagc_desktop/ui/app.py`: параметры `support: bool = True, support_delay: float = 8.0` в `DesktopApp.__init__`; `self.support = SupportPrompt(page, service, open_url=open_url, delay=support_delay, busy=lambda: self._busy) if support else None`; в `footer` после `self.check_label,` добавить `*([self.support.link] if self.support else []),`; после `self.page.add(...)` добавить `if self.support is not None: self.support.start()`. В `make_app` тестов ПК `services.setdefault("support", False)`.
+Правки `apps/desktop/src/gmagc_desktop/ui/app.py`: параметры `support: bool = True, support_delay: float = 8.0` в `DesktopApp.__init__`; `self.support = SupportPrompt(page, service, open_url=open_url, delay=support_delay, busy=lambda: self._busy) if support else None`; в `footer` после `self.check_label,` добавить `*([self.support.link, self.support.telegram_link] if self.support else []),`; после `self.page.add(...)` добавить `if self.support is not None: self.support.start()`. В `make_app` тестов ПК `services.setdefault("support", False)`.
 
 ```python
 # path: apps/mobile/src/gmagc_mobile/support.py
@@ -3358,6 +3382,7 @@ from collections.abc import Callable
 import flet as ft
 
 from gmagc_common.support import (
+    AUTHOR_TELEGRAM_URL,
     DIALOG_TEXT,
     DIALOG_TITLE,
     LATER,
@@ -3393,6 +3418,7 @@ class SupportPrompt:
         self.delay = delay
         self.busy = busy
         self.link = ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.on_open_link)
+        self.telegram_link = ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.on_open_telegram)
 
     async def _load(self) -> SupportState:
         try:
@@ -3455,14 +3481,17 @@ class SupportPrompt:
     async def on_open_link(self, _event) -> None:
         await self._open()
 
-    async def _open(self) -> None:
+    async def on_open_telegram(self, _event) -> None:
+        await self._open(AUTHOR_TELEGRAM_URL)
+
+    async def _open(self, url: str = SUPPORT_URL) -> None:
         try:
-            await self.launcher.launch_url(SUPPORT_URL)
+            await self.launcher.launch_url(url)
         except Exception:  # noqa: BLE001 - нет браузера: окно всё равно закрываем
             pass
 ```
 
-Правки `apps/mobile/src/gmagc_mobile/app.py`: параметры `support: bool = False, support_delay: float = 8.0` в `MobileApp.__init__` (в тестах ничего не меняется: по умолчанию выключено); `self.support = SupportPrompt(prefs, launcher, page, delay=support_delay, busy=lambda: self._busy) if support and launcher is not None else None` (для этого `MobileApp` получает `prefs`: либо параметром, либо через `ConnectionStore`; проще передать `prefs` отдельным необязательным параметром `prefs=None`); в `connect_view` перед строкой версии добавить `*([self.support.link] if self.support else []),`; в конец `start()` (после `_begin_update_check`) добавить `if self.support is not None: self.support_task = asyncio.create_task(self.support.startup())`. В `build_page`: `support=True`, `prefs=prefs` передаются в `MobileApp` (в тестах `build_page` передают `support=False`).
+Правки `apps/mobile/src/gmagc_mobile/app.py`: параметры `support: bool = False, support_delay: float = 8.0` в `MobileApp.__init__` (в тестах ничего не меняется: по умолчанию выключено); `self.support = SupportPrompt(prefs, launcher, page, delay=support_delay, busy=lambda: self._busy) if support and launcher is not None else None` (для этого `MobileApp` получает `prefs`: либо параметром, либо через `ConnectionStore`; проще передать `prefs` отдельным необязательным параметром `prefs=None`); в `connect_view` перед строкой версии добавить `*([self.support.link, self.support.telegram_link] if self.support else []),`; в конец `start()` (после `_begin_update_check`) добавить `if self.support is not None: self.support_task = asyncio.create_task(self.support.startup())`. В `build_page`: `support=True`, `prefs=prefs` передаются в `MobileApp` (в тестах `build_page` передают `support=False`).
 
 - [ ] **Step 4: Run the tests**
 
