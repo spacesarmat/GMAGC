@@ -56,7 +56,8 @@ def _cmd_index(args: argparse.Namespace) -> int:
     print(file=sys.stderr)
     save_index(index, args.index)
     unique = len(set(index.group_ids.tolist()))
-    print(f"{len(index)} files indexed ({unique} unique), {len(index.skipped)} skipped")
+    retry = f", {len(index.transient)} unreadable now (will be retried)" if index.transient else ""
+    print(f"{len(index)} files indexed ({unique} unique), {len(index.skipped)} skipped{retry}")
     return 0
 
 

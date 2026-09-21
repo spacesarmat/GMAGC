@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
+from PIL import Image, UnidentifiedImageError
 
 from gmagc_desktop.library.index import (
     IndexCancelled,
@@ -232,3 +234,94 @@ def test_file_vanishing_between_walk_and_stat_is_skipped_by_the_build(library, m
     paths = [f.rel_path for f in index.files]
     assert "vendor_a/ring.png" not in paths and "vendor_a/dots.png" in paths
     assert len(index) == 5 and [f.rel_path for f in index.skipped] == ["blank.png"]
+
+
+def _fail_on(monkeypatch, name, error_factory):
+    """Подменяет загрузчик: файл с именем name падает с error_factory() (пока флаг не сброшен)."""
+    from gmagc_desktop.library import index as index_module
+
+    real = index_module.load_library_gray
+    state = {"failing": True, "opened": []}
+
+    def loader(path):
+        state["opened"].append(Path(path).name)
+        if state["failing"] and Path(path).name == name:
+            raise error_factory()
+        return real(path)
+
+    monkeypatch.setattr(index_module, "load_library_gray", loader)
+    return state
+
+
+def test_transient_read_failure_is_retried_and_never_persisted(library, tmp_path, monkeypatch, caplog):
+    state = _fail_on(monkeypatch, "ring.png", lambda: OSError("device not ready"))
+
+    with caplog.at_level("WARNING"):
+        first = build_index(library, CountingEmbedder())
+
+    assert [f.rel_path for f in first.transient] == ["vendor_a/ring.png"]
+    assert "vendor_a/ring.png" not in [f.rel_path for f in first.skipped]
+    assert "vendor_a/ring.png" not in [f.rel_path for f in first.files]
+    assert "ring.png" in caplog.text and "device not ready" in caplog.text
+
+    target = tmp_path / "cache" / "index.npz"
+    save_index(first, target)
+    with np.load(target) as data:
+        persisted = set(data["rel_paths"].tolist()) | set(data["skipped_paths"].tolist())
+    assert "vendor_a/ring.png" not in persisted
+    loaded = load_index(target)
+    assert loaded.transient == []
+
+    state["failing"] = False
+    embedder = CountingEmbedder()
+    second = build_index(library, embedder, existing=loaded)
+
+    assert embedder.count == 1  # пересчитан только файл, который раньше не удалось прочитать
+    assert "vendor_a/ring.png" in [f.rel_path for f in second.files]
+    assert second.transient == [] and [f.rel_path for f in second.skipped] == ["blank.png"]
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: UnidentifiedImageError("cannot identify image file"),
+        lambda: ValueError("bad value"),
+        lambda: SyntaxError("broken PNG file"),
+        lambda: cv2.error("bad image"),
+        lambda: Image.DecompressionBombError("too large"),
+    ],
+    ids=["unidentified", "value", "syntax", "cv2", "bomb"],
+)
+def test_definitive_decode_failures_are_skipped_and_persisted(library, tmp_path, monkeypatch, make_error):
+    _fail_on(monkeypatch, "ring.png", make_error)
+
+    index = build_index(library, CountingEmbedder())
+
+    assert "vendor_a/ring.png" in [f.rel_path for f in index.skipped]
+    assert index.transient == []
+    target = tmp_path / "index.npz"
+    save_index(index, target)
+    assert "vendor_a/ring.png" in [f.rel_path for f in load_index(target).skipped]
+
+
+def test_corrupt_png_stays_skipped_and_is_not_reopened(library, monkeypatch):
+    (library / "vendor_a" / "broken.png").write_bytes(b"not a png")
+    first = build_index(library, CountingEmbedder())
+    assert "vendor_a/broken.png" in [f.rel_path for f in first.skipped] and first.transient == []
+
+    state = _fail_on(monkeypatch, "nothing.png", RuntimeError)  # только для учёта открытых файлов
+    second = build_index(library, CountingEmbedder(), existing=first)
+
+    assert state["opened"] == []
+    assert "vendor_a/broken.png" in [f.rel_path for f in second.skipped]
+
+
+def test_library_where_every_read_is_transient_raises_none_could_be_read(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    def unplugged(path):
+        raise OSError("device not ready")
+
+    monkeypatch.setattr(index_module, "load_library_gray", unplugged)
+    with pytest.raises(LibraryScanError, match=r"none of the 7 library files could be read"):
+        build_index(library, CountingEmbedder())

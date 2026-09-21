@@ -34,6 +34,30 @@ def test_index_reports_counts(tmp_path, capsys):
     assert "6 files indexed (5 unique), 1 skipped" in capsys.readouterr().out
 
 
+def test_index_reports_files_that_are_unreadable_right_now_and_writes_no_trace_of_them(tmp_path, monkeypatch, capsys):
+    from gmagc_desktop.library import index as index_module
+
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    real = index_module.load_library_gray
+
+    def loader(path):
+        if path.name == "ring.png":
+            raise OSError("device not ready")
+        return real(path)
+
+    monkeypatch.setattr(index_module, "load_library_gray", loader)
+    target = tmp_path / "i.npz"
+
+    assert cli.main(["index", str(library), "--index", str(target)]) == 0
+
+    out = capsys.readouterr().out
+    assert "5 files indexed (4 unique), 1 skipped, 1 unreadable now (will be retried)" in out
+    with np.load(target) as data:
+        assert "vendor_a/ring.png" not in data["rel_paths"].tolist() + data["skipped_paths"].tolist()
+
+
 def test_index_of_missing_library_returns_3_and_writes_nothing(tmp_path, capsys):
     target = tmp_path / "i.npz"
     assert cli.main(["index", str(tmp_path / "nope"), "--index", str(target)]) == 3

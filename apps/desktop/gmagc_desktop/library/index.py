@@ -12,7 +12,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from gmagc_desktop.library.grouping import group_duplicates
 from gmagc_desktop.library.scan import LibraryFile, scan_library_checked
@@ -48,6 +48,8 @@ class LibraryIndex:
     masks: np.ndarray  # (N, 64, 64) uint8
     group_ids: np.ndarray  # (N,) int32
     skipped: list[LibraryFile] = field(default_factory=list)
+    # Не удалось прочитать сейчас (временный сбой). В кэш не сохраняется: следующая сборка попробует снова.
+    transient: list[LibraryFile] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.files)
@@ -56,18 +58,31 @@ class LibraryIndex:
         return SearchData(self.embeddings, self.masks, self.group_ids)
 
 
-_UNREADABLE = (OSError, ValueError, SyntaxError, cv2.error, Image.DecompressionBombError)
+# Окончательные сбои декодирования: файл испорчен, повторное открытие ничего не изменит.
+# UnidentifiedImageError — подкласс OSError, поэтому перехватывается раньше общего OSError.
+_DEFINITIVE = (UnidentifiedImageError, ValueError, SyntaxError, cv2.error, Image.DecompressionBombError)
+
+
+class _TransientReadError(Exception):
+    """Временный сбой чтения (устройство не готово, сетевой сбой, блокировка): файл повторят при следующей сборке."""
 
 
 def _load_normalized(path: Path) -> np.ndarray | None:
-    """Нормализованное изображение или None, если файл нечитаем. PermissionError и ошибки программы не глотаются."""
+    """Нормализованное изображение или None, если файл окончательно нечитаем (испорчен или пустой).
+
+    Прочие OSError — временный сбой: _TransientReadError. PermissionError и ошибки программы не глотаются.
+    """
     try:
-        return normalize_gray(load_library_gray(path))
+        normalized = normalize_gray(load_library_gray(path))
     except PermissionError:
         raise
-    except _UNREADABLE as error:
+    except _DEFINITIVE as error:
         logger.warning("skipping unreadable library file %s: %s", path, error)
         return None
+    except OSError as error:
+        logger.warning("library file %s cannot be read right now, will retry next time: %s", path, error)
+        raise _TransientReadError(str(error)) from error
+    return normalized
 
 
 def build_index(
@@ -98,6 +113,7 @@ def build_index(
 
     todo = [f for f in scanned if f not in reusable and f not in known_skipped]
     skipped = [f for f in scanned if f in known_skipped]
+    transient: list[LibraryFile] = []
     fresh: dict[LibraryFile, tuple[np.ndarray, np.ndarray]] = {}
 
     for start in range(0, len(todo), batch_size):
@@ -105,7 +121,11 @@ def build_index(
             raise IndexCancelled()
         loaded: list[tuple[LibraryFile, np.ndarray]] = []
         for file in todo[start : start + batch_size]:
-            normalized = _load_normalized(root / file.rel_path)
+            try:
+                normalized = _load_normalized(root / file.rel_path)
+            except _TransientReadError:
+                transient.append(file)
+                continue
             if normalized is None:
                 skipped.append(file)
             else:
@@ -127,7 +147,7 @@ def build_index(
     ).astype(np.float32)
     masks = np.stack([existing.masks[reusable[f]] if f in reusable else fresh[f][0] for f in files])
     return LibraryIndex(
-        embedder.model_id, files, embeddings, masks, group_duplicates(embeddings, masks), skipped
+        embedder.model_id, files, embeddings, masks, group_duplicates(embeddings, masks), skipped, transient
     )
 
 
