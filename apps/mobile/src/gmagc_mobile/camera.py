@@ -8,6 +8,7 @@ import flet_camera as fc
 import flet_permission_handler as ph
 
 FOCUS_SETTLE_SECONDS = 0.8  # сколько ждать наведения, прежде чем зафиксировать фокус после касания
+UNSUPPORTED_TEXT = "Камера доступна только на телефоне (Android): здесь можно выбрать фото из галереи"
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -15,8 +16,9 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 
 class CameraController:
-    def __init__(self, camera, permission, settle_seconds: float = FOCUS_SETTLE_SECONDS):
+    def __init__(self, camera, permission, settle_seconds: float = FOCUS_SETTLE_SECONDS, supported: bool = True):
         self.camera = camera
+        self.supported = supported
         self.permission = permission
         self.settle_seconds = settle_seconds
         self.ready = False
@@ -28,6 +30,9 @@ class CameraController:
 
     async def start(self) -> bool:
         """Просит разрешение и включает заднюю камеру; причину неудачи кладёт в error."""
+        if not self.supported:
+            self.error = UNSUPPORTED_TEXT
+            return False
         try:
             if await self.permission.request(ph.Permission.CAMERA) != ph.PermissionStatus.GRANTED:
                 self.error = "Нет доступа к камере: разрешите его в настройках телефона"

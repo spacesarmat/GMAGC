@@ -356,3 +356,58 @@ def test_build_page_wires_services_and_starts(monkeypatch):
 
     assert page.title == f"{NAME} {VERSION}" and script.connections == [PC] and views(app) == ["camera"]
     assert len(page.services) == 4
+
+
+def build_on(platform, web=False):
+    page = StubPage()
+    page.platform = platform
+    page.web = web
+    script = Script()
+    app = asyncio.run(
+        build_page(
+            page,
+            prefs=FakePrefs(),
+            permission=FakePermission(),
+            picker=FakePicker(),
+            clipboard=FakeClipboard(),
+            client_factory=script.factory,
+        )
+    )
+    return app
+
+
+def test_the_camera_control_is_used_only_on_supported_platforms():
+    import flet_camera as fc
+
+    for platform, web in ((ft.PagePlatform.ANDROID, False), (ft.PagePlatform.IOS, False), (ft.PagePlatform.WINDOWS, True)):
+        app = build_on(platform, web)
+        assert app.camera.supported is True and isinstance(app.preview, fc.Camera), platform
+
+
+def test_on_a_desktop_a_placeholder_replaces_the_camera_so_the_screen_still_works():
+    import flet_camera as fc
+
+    for platform in (ft.PagePlatform.WINDOWS, ft.PagePlatform.MACOS, ft.PagePlatform.LINUX):
+        app = build_on(platform)
+        assert app.camera.supported is False and not isinstance(app.preview, fc.Camera)
+        assert views(app) == ["connect"]
+
+    connect_manually(app)
+    assert views(app) == ["camera"] and "только на телефоне" in app.camera_message.value
+    assert app.capture_button.disabled and not app.gallery_button.disabled
+
+
+def test_the_last_error_line_disappears_after_a_successful_connection_and_when_changing_the_pc():
+    script = Script()
+    script.verify_result = ClientError(client.UNREACHABLE, "TimeoutError: x")
+    app, _, _, _, _ = start(script=script)
+    connect_manually(app)
+    assert app.diag_text.visible and app.last_error
+
+    script.verify_result = Script().verify_result
+    connect_manually(app)
+    assert views(app) == ["camera"] and not app.diag_text.visible and app.last_error == ""
+
+    app._remember("что-то пошло не так")  # noqa: SLF001
+    run(app.on_change_pc(None))
+    assert not app.diag_text.visible

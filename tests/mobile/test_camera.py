@@ -179,3 +179,14 @@ def test_pause_and_resume_only_touch_a_ready_camera_and_never_raise():
     asyncio.run(controller.pause())
     asyncio.run(controller.resume())
     assert api.calls[-2:] == [("pause",), ("resume",)]
+
+
+def test_an_unsupported_platform_reports_it_without_touching_the_camera():
+    permission = FakePermission()
+    api = FakeCameraApi()
+    controller = CameraController(api, permission, settle_seconds=0, supported=False)
+
+    assert asyncio.run(controller.start()) is False
+
+    assert not controller.ready and "только на телефоне" in controller.error
+    assert permission.requested == [] and api.calls == []

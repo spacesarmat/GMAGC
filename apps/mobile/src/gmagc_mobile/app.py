@@ -104,7 +104,7 @@ class MobileApp:
         )
 
         # камера
-        self.camera_title = ft.Text("", size=14)
+        self.camera_title = ft.Text("", size=14, expand=True)  # переносится на несколько строк, кнопка справа остаётся видна
         self.marker = ft.Container(
             width=MARKER_SIZE,
             height=MARKER_SIZE,
@@ -231,6 +231,10 @@ class MobileApp:
         self.diag_text.value = f"Последняя ошибка: {text}"
         self.diag_text.visible = True
 
+    def _clear_diag(self) -> None:
+        self.last_error = ""
+        self.diag_text.visible = False
+
     def _show_connect(self, error: str | None = None) -> None:
         self.connect_error.value = error or ""
         self.connect_error.visible = bool(error)
@@ -307,6 +311,7 @@ class MobileApp:
         self.connection, self.client = connection, client
         await self.store.save(connection)
         self._fill(connection)
+        self._clear_diag()
         self.status_text = status_line(connection, status)
         self._set_busy(False)
         self._show_camera(MODE_SHOOT, note=None if status.indexed else NO_INDEX_NOTE)
@@ -326,6 +331,7 @@ class MobileApp:
     async def on_change_pc(self, _event) -> None:
         await self.store.clear()
         self.connection = self.client = None
+        self._clear_diag()
         self._show_connect()
 
     # ---- QR ------------------------------------------------------------------
@@ -527,13 +533,27 @@ class MobileApp:
         self.page.update()
 
 
+def camera_supported(page: ft.Page) -> bool:
+    """Контрол Camera в Flet 1.0.0 работает только на Android, iOS и в вебе (на других платформах бросает исключение)."""
+    if getattr(page, "web", False):
+        return True
+    return getattr(page, "platform", None) in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS)
+
+
+def _camera_placeholder() -> ft.Control:
+    return ft.Container(ft.Text("Камера доступна только на телефоне (Android)"), alignment=ft.Alignment.CENTER, expand=True)
+
+
 async def build_page(page: ft.Page, **services) -> MobileApp:
     """Собирает экран из служб Flet (в тестах их подменяют) и запускает подключение."""
     page.title = f"{NAME} {VERSION}"
     prefs = services.pop("prefs", None) or ft.SharedPreferences()
     permission = services.pop("permission", None) or ph.PermissionHandler()
-    camera_control = services.pop("camera_control", None) or fc.Camera(expand=True, preview_enabled=True)
-    controller = services.pop("controller", None) or CameraController(camera_control, permission)
+    supported = camera_supported(page)
+    camera_control = services.pop("camera_control", None) or (
+        fc.Camera(expand=True, preview_enabled=True) if supported else _camera_placeholder()
+    )
+    controller = services.pop("controller", None) or CameraController(camera_control, permission, supported=supported)
     app = MobileApp(page, ConnectionStore(prefs), controller, preview=camera_control, **services)
     page.services.extend([prefs, permission, app.picker, app.clipboard])
     app.build()
