@@ -34,6 +34,22 @@ jobs:
       - run: python -m pip install "flet==$FLET_VERSION"
       - name: Сборка
         run: flet build windows apps/desktop --yes --no-rich-output -v --build-version "$VERSION" --build-number "$GITHUB_RUN_NUMBER"
+      - name: Дымовая проверка запуска
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem apps/desktop/build/windows -Filter *.exe | Select-Object -First 1
+          $err = Join-Path $env:RUNNER_TEMP "app_err.txt"
+          $out = Join-Path $env:RUNNER_TEMP "app_out.txt"
+          $p = Start-Process -FilePath $exe.FullName -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          Start-Sleep -Seconds 25
+          $exited = $p.HasExited
+          if (-not $exited) { Stop-Process -Id $p.Id -Force }
+          Write-Host "--- stderr ---"
+          Get-Content $err -ErrorAction SilentlyContinue
+          Write-Host "--- stdout ---"
+          Get-Content $out -ErrorAction SilentlyContinue
+          if ($exited) { throw "Приложение завершилось само, код $($p.ExitCode)" }
+          if ((Select-String -Path $err, $out -Pattern "Traceback" -Quiet)) { throw "В выводе приложения есть ошибка Python" }
       - name: Упаковка
         run: |
           mkdir -p dist
