@@ -15,6 +15,12 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 
+# Ключи подписи (хранятся вне репозитория и в секретах GitHub)
+*.p12
+*.jks
+*.keystore
+GMAGC-keys/
+
 # Сборки Flet и артефакты
 build/
 dist/

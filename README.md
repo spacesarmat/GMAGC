@@ -81,6 +81,8 @@ $env:PYTHONPATH = "apps\desktop\src"    # bash: export PYTHONPATH=apps/desktop/s
 - Windows: SmartScreen → «Подробнее» → «Выполнить в любом случае»;
 - Android: разрешить установку из неизвестных источников.
 
+**Подпись Android.** APK подписывается постоянным ключом (иначе телефон не даёт поставить новую версию поверх старой): ключ и пароль лежат вне репозитория у автора (`GMAGC-keys`) и в секретах GitHub `ANDROID_KEYSTORE_B64` и `ANDROID_KEYSTORE_PASSWORD`, workflow сверяет отпечаток подписи (`apksigner verify`). **Потеря ключа означает, что уже установленные приложения нельзя обновить**, поэтому копию ключа нужно хранить в надёжном месте. Сборки из форков без секретов подписываются временным отладочным ключом.
+
 APK собирается только под **arm64-v8a** (`target_arch`, около 58 МБ; все современные телефоны; для 32-битных ARM и эмуляторов x86_64 соберите свой APK: `flet build apk apps/mobile --arch armeabi-v7a`).
 
 Настройки Android-сборки лежат в `apps/mobile/pyproject.toml`: `permissions = ["camera"]` (разрешение камеры в манифесте) и `[tool.flet.android.manifest_application] usesCleartextTraffic = "true"` (HTTP по локальной сети). Для чтения QR нужны колёса `pyzbar` и `Pillow` (есть на pypi.flet.dev), тесты чтения QR в CI ставят библиотеку zbar.
