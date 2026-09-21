@@ -45,6 +45,19 @@ $env:PYTHONPATH = "apps\desktop\src"    # bash: export PYTHONPATH=apps/desktop/s
 
 Версия Flet записана в четырёх местах и меняется вместе: `FLET_VERSION` в трёх `build-*.yml`, `dependencies` в `apps/*/pyproject.toml` и `requirements-dev.txt`. Версия приложения (`VERSION` в `about.py` обоих приложений, `version` в их `pyproject.toml`) меняется вместе с тегом.
 
+## Локальная разработка (Windows)
+
+Один раз: Python 3.12 (`winget install Python.Python.3.12`), Visual Studio 2022 с «Desktop development with C++», режим разработчика Windows. Окружение для сборки: `py -3.12 -m venv $env:USERPROFILE\.venv312`, затем `$env:USERPROFILE\.venv312\Scripts\python.exe -m pip install flet==1.0.0 -r requirements-dev.txt` (Flutter Flet скачает сам).
+
+| Что | Команда | Время |
+|---|---|---|
+| Тесты и линтер | `.venv\Scripts\python.exe -m pytest -q`, `... -m ruff check .` | секунды |
+| Экран без упаковки (горячая перезагрузка) | `$env:USERPROFILE\.venv312\Scripts\flet.exe run apps/desktop/src/main.py -d` | секунды |
+| Сборка Windows + проверка запуска | `.\scripts\build_windows.ps1` | несколько минут |
+| Финальные сборки Windows, macOS, Android | тег `v*` → GitHub Actions | ~10 минут |
+
+Логи собранного приложения: `%LOCALAPPDATA%\@ANDY_BUM\GMAGC\console.log`. macOS локально на Windows не собрать, только через GitHub.
+
 ## Разработка
 
 ```powershell
