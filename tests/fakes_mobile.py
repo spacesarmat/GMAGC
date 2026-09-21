@@ -15,12 +15,13 @@ def cam(direction: str):
 class FakeCameraApi:
     """Замена fc.Camera: записывает вызовы в calls."""
 
-    def __init__(self, cameras=None, min_zoom=1.0, max_zoom=6.0, picture=b"JPEG-shot", fail=None):
+    def __init__(self, cameras=None, min_zoom=1.0, max_zoom=6.0, picture=b"JPEG-shot", fail=None, picture_failures=0):
         self.cameras = list(cameras) if cameras is not None else [cam("front"), cam("back")]
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
         self.picture = picture
         self.fail = fail  # имя метода, который должен упасть
+        self.picture_failures = picture_failures  # сколько первых снимков упадёт, как при потерянном контроллере
         self.calls = []
 
     def _maybe_fail(self, name):
@@ -61,6 +62,9 @@ class FakeCameraApi:
 
     async def take_picture(self):
         self._maybe_fail("take_picture")
+        if self.picture_failures > 0:
+            self.picture_failures -= 1
+            raise RuntimeError("Exception: Camera is not initialized. Call initialize() first.")
         self.calls.append(("take_picture",))
         return self.picture
 

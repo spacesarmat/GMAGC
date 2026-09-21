@@ -81,6 +81,8 @@ $env:PYTHONPATH = "apps\desktop\src"    # bash: export PYTHONPATH=apps/desktop/s
 - Windows: SmartScreen → «Подробнее» → «Выполнить в любом случае»;
 - Android: разрешить установку из неизвестных источников.
 
+APK собирается только под **arm64-v8a** (`target_arch`, около 58 МБ; все современные телефоны; для 32-битных ARM и эмуляторов x86_64 соберите свой APK: `flet build apk apps/mobile --arch armeabi-v7a`).
+
 Настройки Android-сборки лежат в `apps/mobile/pyproject.toml`: `permissions = ["camera"]` (разрешение камеры в манифесте) и `[tool.flet.android.manifest_application] usesCleartextTraffic = "true"` (HTTP по локальной сети). Для чтения QR нужны колёса `pyzbar` и `Pillow` (есть на pypi.flet.dev), тесты чтения QR в CI ставят библиотеку zbar.
 
 Версия Flet записана в четырёх местах и меняется вместе: `FLET_VERSION` в трёх `build-*.yml`, `dependencies` в `apps/*/pyproject.toml` и `requirements-dev.txt`. Версия приложения (`VERSION` в `about.py` обоих приложений, `version` в их `pyproject.toml`) меняется вместе с тегом.
@@ -125,7 +127,7 @@ docs/                         спецификация, план реализа�
 
 ## Дальше
 
-Полировка и релиз 1.0: значок приложения, APK по архитектурам (сейчас около 140 МБ), подпись сборок, проверка на разных телефонах. Известные отложенные доработки перечислены в конце плана `docs/superpowers/plans/2026-09-19-gmagc-core-matcher.md`.
+Полировка и релиз 1.0: значок приложения, подпись сборок, проверка на разных телефонах. Известные отложенные доработки перечислены в конце плана `docs/superpowers/plans/2026-09-19-gmagc-core-matcher.md`.
 
 ## Лицензия
 

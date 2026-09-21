@@ -8,6 +8,7 @@ import flet_camera as fc
 import flet_permission_handler as ph
 
 FOCUS_SETTLE_SECONDS = 0.8  # сколько ждать наведения, прежде чем зафиксировать фокус после касания
+RETRY_SECONDS = 0.5  # пауза перед второй попыткой запуска: виджет камеры мог ещё не появиться на экране
 UNSUPPORTED_TEXT = "Камера доступна только на телефоне (Android): здесь можно выбрать фото из галереи"
 
 
@@ -16,8 +17,16 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 
 class CameraController:
-    def __init__(self, camera, permission, settle_seconds: float = FOCUS_SETTLE_SECONDS, supported: bool = True):
+    def __init__(
+        self,
+        camera,
+        permission,
+        settle_seconds: float = FOCUS_SETTLE_SECONDS,
+        supported: bool = True,
+        retry_seconds: float = RETRY_SECONDS,
+    ):
         self.camera = camera
+        self.retry_seconds = retry_seconds
         self.supported = supported
         self.permission = permission
         self.settle_seconds = settle_seconds
@@ -29,27 +38,46 @@ class CameraController:
         self.focus_locked = False
 
     async def start(self) -> bool:
-        """Просит разрешение и включает заднюю камеру; причину неудачи кладёт в error."""
+        """Просит разрешение и включает заднюю камеру; причину неудачи кладёт в error.
+
+        Каждый запуск создаёт новый контроллер камеры (приближение и фокус сбрасываются). При сбое плагина
+        делается вторая попытка: после возврата на экран виджет камеры мог ещё не успеть появиться.
+        """
         if not self.supported:
             self.error = UNSUPPORTED_TEXT
             return False
-        try:
-            if await self.permission.request(ph.Permission.CAMERA) != ph.PermissionStatus.GRANTED:
-                self.error = "Нет доступа к камере: разрешите его в настройках телефона"
+        self.ready = False
+        for attempt in (1, 2):
+            try:
+                if await self.permission.request(ph.Permission.CAMERA) != ph.PermissionStatus.GRANTED:
+                    self.error = "Нет доступа к камере: разрешите его в настройках телефона"
+                    return False
+                cameras = await self.camera.get_available_cameras()
+                if not cameras:
+                    self.error = "Камера не найдена"
+                    return False
+                chosen = next((c for c in cameras if c.lens_direction == fc.CameraLensDirection.BACK), cameras[0])
+                await self.camera.initialize(chosen, fc.ResolutionPreset.HIGH, enable_audio=False)
+            except Exception as error:  # noqa: BLE001 - экран должен показать причину, а не закрыться
+                self.error = f"Ошибка камеры: {error}"
+                if attempt == 1:
+                    await asyncio.sleep(self.retry_seconds)
+                    continue
                 return False
-            cameras = await self.camera.get_available_cameras()
-            if not cameras:
-                self.error = "Камера не найдена"
-                return False
-            chosen = next((c for c in cameras if c.lens_direction == fc.CameraLensDirection.BACK), cameras[0])
-            await self.camera.initialize(chosen, fc.ResolutionPreset.HIGH, enable_audio=False)
-        except Exception as error:  # noqa: BLE001 - экран должен показать причину, а не закрыться
-            self.error = f"Ошибка камеры: {error}"
-            return False
+            break
         await self._read_zoom_range()
+        self.focus_locked = False
         self.ready = True
         self.error = ""
         return True
+
+    def invalidate(self) -> None:
+        """Помечает камеру неготовой: Flet убирает виджет камеры со скрытым экраном вместе с её контроллером."""
+        self.ready = False
+
+    async def restart(self) -> bool:
+        self.invalidate()
+        return await self.start()
 
     async def _read_zoom_range(self) -> None:
         try:
@@ -57,7 +85,7 @@ class CameraController:
             self.max_zoom = float(await self.camera.get_max_zoom_level())
         except Exception:  # noqa: BLE001 - без диапазона камера работает, но без приближения
             self.min_zoom = self.max_zoom = 1.0
-        self.zoom = self.min_zoom
+        self.zoom = _clamp(1.0, self.min_zoom, self.max_zoom) if self.max_zoom > self.min_zoom else self.min_zoom
 
     async def set_zoom(self, value: float) -> float:
         """Устанавливает приближение в пределах диапазона камеры; возвращает фактическое значение."""

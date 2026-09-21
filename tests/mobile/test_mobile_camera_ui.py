@@ -13,7 +13,7 @@ from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, Script
 
 def make_running_app(camera_api=None):
     camera_api = camera_api or FakeCameraApi(min_zoom=1.0, max_zoom=5.0)
-    controller = CameraController(camera_api, FakePermission(), settle_seconds=0)
+    controller = CameraController(camera_api, FakePermission(), settle_seconds=0, retry_seconds=0)
     prefs = FakePrefs({"gmagc.host": "192.168.1.121", "gmagc.port": 8765, "gmagc.code": "ZBZ36YNK"})
     app = MobileApp(
         StubPage(),
@@ -24,6 +24,7 @@ def make_running_app(camera_api=None):
         clipboard=FakeClipboard(),
         client_factory=Script().factory,
         marker_seconds=0,
+        mount_seconds=0,
     )
     app.build()
     asyncio.run(app.start())
