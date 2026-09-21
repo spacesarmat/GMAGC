@@ -25,7 +25,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libzbar0
       - name: Библиотека zbar для тестов чтения QR (macOS)
         if: runner.os == 'macOS'
-        run: brew install zbar
+        run: |
+          brew install zbar
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
       - run: python -m ruff check .

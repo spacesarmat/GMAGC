@@ -12,7 +12,7 @@ from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.app import MobileApp, build_page
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import ClientError
-from gmagc_mobile.qr import QrUnavailable
+from gmagc_mobile.qr import QrImageError, QrUnavailable
 from gmagc_mobile.store import KEY_CODE, KEY_HOST, KEY_PORT, ConnectionStore
 from tests.fakes import FakeClipboard, FakePicker, StubPage, texts, walk
 from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, Script, sample_response
@@ -168,14 +168,36 @@ def test_the_qr_scan_reads_the_link_and_connects():
     assert app.mode == "shoot" and app.capture_button.visible and not app.scan_now_button.visible
 
 
-def test_a_qr_scan_without_a_code_asks_to_move_closer():
+def test_a_qr_scan_without_a_code_asks_to_move_closer_and_appends_the_diagnosis():
     app, _, script, _, _ = start()
+    app.qr_diagnose = lambda data: f"снимок: {len(data)} байт; самопроверка: ок"
     run(app.on_scan_qr(None))
 
     run(app.on_scan_now(None))
 
     assert script.connections == [] and views(app) == ["camera"] and app.mode == "scan"
     assert "QR-код не найден" in app.camera_message.value and not app.scan_now_button.disabled
+    assert "[снимок: 9 байт; самопроверка: ок]" in app.camera_message.value and "вручную" in app.camera_message.value
+    assert "самопроверка" in app.diag_text.value
+
+
+def test_an_unreadable_shot_is_reported_with_the_reason():
+    def reader(data):
+        raise QrImageError("UnidentifiedImageError: cannot identify image file")
+
+    app, _, _, _, _ = start(qr_reader=reader)
+    run(app.on_scan_qr(None))
+
+    run(app.on_scan_now(None))
+
+    assert "не удалось прочитать" in app.camera_message.value and "UnidentifiedImageError" in app.camera_message.value
+
+
+def test_the_scan_screen_offers_manual_entry():
+    app, _, _, _, _ = start()
+    run(app.on_scan_qr(None))
+
+    assert app.cancel_scan_button.visible and app.cancel_scan_button.content == "Ввести вручную"
 
 
 def test_an_unavailable_qr_reader_asks_for_manual_entry():

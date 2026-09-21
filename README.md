@@ -102,6 +102,8 @@ APK собирается только под **arm64-v8a** (`target_arch`, ок�
 
 Логи собранного приложения: `%LOCALAPPDATA%\@ANDY_BUM\GMAGC\console.log`. macOS локально на Windows не собрать, только через GitHub.
 
+Значок приложения лежит в `apps/*/src/assets/icon.png` (Flet сам создаёт из него значки для Windows, macOS и Android); исходный рисунок: `docs/branding/icon.png`, фон подложки задан `icon_background` в `pyproject.toml`.
+
 ## Разработка
 
 ```powershell

@@ -7,7 +7,7 @@ import io
 import segno
 
 
-def qr_png(text: str, scale: int = 5) -> bytes:
+def qr_png(text: str, scale: int = 8) -> bytes:
     buffer = io.BytesIO()
-    segno.make(text, error="m").save(buffer, kind="png", scale=scale, border=2)
+    segno.make(text, error="m").save(buffer, kind="png", scale=scale, border=4)
     return buffer.getvalue()
