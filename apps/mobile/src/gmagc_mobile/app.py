@@ -26,7 +26,7 @@ from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
-from gmagc_mobile.qr import QrUnavailable, connection_from_qr
+from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
 
@@ -51,6 +51,7 @@ class MobileApp:
         clipboard=None,
         client_factory: Callable[[Connection], GmagcClient] = GmagcClient,
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
+        qr_diagnose: Callable[[bytes], str] = diagnose,
         marker_seconds: float = 1.5,
         mount_seconds: float = 0.3,
         clock: Callable[[], float] = time.monotonic,
@@ -65,6 +66,7 @@ class MobileApp:
         self.clipboard = clipboard or ft.Clipboard()
         self.client_factory = client_factory
         self.qr_reader = qr_reader
+        self.qr_diagnose = qr_diagnose
         self.marker_seconds = marker_seconds
         self.mount_seconds = mount_seconds  # пауза, чтобы виджет камеры успел появиться на экране до запуска камеры
         self._clock = clock
@@ -134,7 +136,7 @@ class MobileApp:
         self.capture_button = ft.Button("Снять", on_click=self.on_capture)
         self.gallery_button = ft.Button("Из галереи", on_click=self.on_gallery)
         self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
-        self.cancel_scan_button = ft.Button("Отмена", on_click=self.on_cancel_scan, visible=False)
+        self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
         self.camera_message = ft.Text("", visible=False, selectable=True)
         self.busy_ring = ft.ProgressRing(visible=False, width=24, height=24)
@@ -411,22 +413,28 @@ class MobileApp:
         self._set_busy(True)
         connection = None
         failure = ""
+        data = b""
         try:
             data = await self._take_picture()
             connection = await asyncio.to_thread(self.qr_reader, data)
         except QrUnavailable:
             failure = "Чтение QR недоступно на этом телефоне: введите адрес и код вручную."
+        except QrImageError as error:
+            failure = f"Снимок камеры не удалось прочитать ({error}). Введите адрес и код вручную."
         except Exception as error:  # noqa: BLE001
             failure = f"Ошибка камеры: {error}"
         self._set_busy(False)
         if connection is not None:
             await self._connect(connection)
             return
-        self._camera_note(
-            failure
-            or "QR-код не найден. Поднесите камеру ближе (приближение и касание для фокуса помогают): "
-            "код должен быть целиком в кадре и чётким."
-        )
+        if not failure:
+            failure = (
+                "QR-код не найден. Поднесите камеру ближе (приближение и касание для фокуса помогают): "
+                "код должен быть целиком в кадре и чётким. Если не выходит, введите адрес и код вручную."
+            )
+        if data:  # диагностика: что за снимок получила программа и работает ли чтение QR на этом телефоне
+            failure += f" [{await asyncio.to_thread(self.qr_diagnose, data)}]"
+        self._camera_note(failure)
 
     # ---- съёмка и поиск --------------------------------------------------------
     async def on_capture(self, _event) -> None:
