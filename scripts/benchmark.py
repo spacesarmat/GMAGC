@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "apps" / "desktop"))
+sys.path.insert(0, str(ROOT / "apps" / "desktop" / "src"))
 
 from gmagc_desktop.cli import build_embedder  # noqa: E402
 from gmagc_desktop.library.index import (  # noqa: E402

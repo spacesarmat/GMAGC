@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "apps" / "desktop"))
+sys.path.insert(0, str(ROOT / "apps" / "desktop" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from benchmark import PHOTO_SUFFIXES, load_or_build  # noqa: E402

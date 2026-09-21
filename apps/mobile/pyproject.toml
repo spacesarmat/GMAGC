@@ -1,0 +1,20 @@
+[project]
+name = "gmagc-mobile"
+version = "0.2.0"
+description = "GMAGC: поиск гобо по фото (Android-клиент, камера)"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "@ANDY_BUM" }]
+dependencies = [
+  "flet==1.0.0",
+  "flet-camera==1.0.0",
+  "flet-permission-handler==1.0.0",
+]
+
+[tool.flet]
+product = "GMAGC"
+company = "@ANDY_BUM"
+copyright = "Copyright (C) 2026 @ANDY_BUM"
+org = "com.spacesarmat"
+
+[tool.flet.app]
+path = "src"  # main.py лежит в src/

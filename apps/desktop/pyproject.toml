@@ -1,0 +1,21 @@
+[project]
+name = "gmagc-desktop"
+version = "0.2.0"
+description = "GMAGC: поиск гобо по фото (ПК-приложение)"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "@ANDY_BUM" }]
+dependencies = [
+  "flet==1.0.0",
+  "numpy",
+  "opencv-python-headless",
+  "Pillow",
+]
+
+[tool.flet]
+product = "GMAGC"
+company = "@ANDY_BUM"
+copyright = "Copyright (C) 2026 @ANDY_BUM"
+org = "com.spacesarmat"
+
+[tool.flet.app]
+path = "src"  # main.py лежит в src/
