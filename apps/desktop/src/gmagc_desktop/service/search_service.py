@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from gmagc_common.protocol import is_valid_code
+from gmagc_common.updates import parse_version
 from gmagc_desktop.library.cache import update_index
 from gmagc_desktop.library.index import LibraryIndex, ProgressCallback, load_index
 from gmagc_desktop.matcher.embedder import Embedder, PixelEmbedder
@@ -125,6 +126,16 @@ class SearchService:
 
     def set_server_enabled(self, enabled: bool) -> None:
         self._update_settings(server_enabled=enabled)
+
+    def set_check_updates(self, enabled: bool) -> None:
+        self._update_settings(check_updates=enabled)
+
+    def mark_update_checked(self, when: float) -> None:
+        self._update_settings(last_update_check=float(when))
+
+    def skip_update(self, version: str) -> None:
+        """Запоминает версию, о которой больше не напоминать (неверный формат сбрасывает пропуск)."""
+        self._update_settings(skipped_version=version if parse_version(version) else "")
 
     def status(self) -> IndexStatus | None:
         index = self._index

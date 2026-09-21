@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from gmagc_common.protocol import DEFAULT_PORT, is_valid_code, normalize_code
+from gmagc_common.updates import parse_version
 
 APP_FOLDER = "GMAGC"
 MAX_TOP_N = 50
@@ -35,6 +37,9 @@ class Settings:
     server_enabled: bool = True
     port: int = DEFAULT_PORT
     access_code: str = ""
+    check_updates: bool = True
+    skipped_version: str = ""
+    last_update_check: float = 0.0
 
 
 def _is_int(value: object) -> bool:
@@ -54,12 +59,25 @@ def load_settings(path: str | Path) -> Settings:
     server_enabled = raw.get("server_enabled", True)
     port = raw.get("port", DEFAULT_PORT)
     access_code = raw.get("access_code", "")
+    check_updates = raw.get("check_updates", True)
+    skipped_version = raw.get("skipped_version", "")
+    last_update_check = raw.get("last_update_check", 0.0)
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
         server_enabled=server_enabled if isinstance(server_enabled, bool) else True,
         port=port if _is_int(port) and 1024 <= port <= MAX_PORT else DEFAULT_PORT,
         access_code=normalize_code(access_code) if isinstance(access_code, str) and is_valid_code(access_code) else "",
+        check_updates=check_updates if isinstance(check_updates, bool) else True,
+        skipped_version=skipped_version if isinstance(skipped_version, str) and parse_version(skipped_version) else "",
+        last_update_check=(
+            float(last_update_check)
+            if isinstance(last_update_check, int | float)
+            and not isinstance(last_update_check, bool)
+            and math.isfinite(last_update_check)
+            and last_update_check >= 0
+            else 0.0
+        ),
     )
 
 
