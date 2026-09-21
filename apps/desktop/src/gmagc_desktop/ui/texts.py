@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from gmagc_desktop.service.results import LOW_CONFIDENCE_SCORE, IndexStatus, Outcome
+import time
+
+from gmagc_desktop.service.results import LOW_CONFIDENCE_SCORE, IndexStatus, Outcome, SearchOutcome
 
 
 def _number(value: int) -> str:
@@ -30,3 +32,18 @@ def outcome_message(kind: Outcome) -> str | None:
     if kind is Outcome.NO_PROJECTION:
         return "Проекция на фото не найдена: переснимите ближе, затемните фон."
     return None
+
+
+def _stamp(when: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(when))
+
+
+def source_text(when: float, client: str) -> str:
+    return f"Запрос с телефона {client}, {_stamp(when)}"
+
+
+def history_text(when: float, client: str, outcome: SearchOutcome) -> str:
+    if outcome.kind is Outcome.NO_PROJECTION or not outcome.results:
+        return f"{_stamp(when)} · {client} · проекция не найдена"
+    top = outcome.results[0]
+    return f"{_stamp(when)} · {client} · {top.name} {score_text(top.score)}"

@@ -2326,7 +2326,7 @@ def make_app(tmp_path, *, enabled=True, addresses=("192.168.1.5",), server=None,
 
 def record(number=1, client="192.168.1.23", outcome=None):
     full_path = os.path.join(os.sep, "lib", "v", f"g{number}.png")
-    result = Result(1, f"g{number}.png", f"v/g{number}.png", full_path, 0.9, (), b"PNG")
+    result = Result(1, f"g{number}.png", f"v/g{number}.png", full_path, 0.9, (), b"\x89PNG")
     default = SearchOutcome(Outcome.FOUND, (result,), b"\x89PNG", 5.0)
     return RequestRecord(f"r{number}", 1_700_000_000.0 + number, client, b"\x89PNG-photo", outcome or default)
 
