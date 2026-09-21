@@ -1,10 +1,12 @@
 """Заглушки для тестов экрана: страница, диалог выбора файла, буфер обмена, сервер телефона."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import flet as ft
 
 from gmagc_desktop.server.runner import ServerStartError
+from gmagc_desktop.update.installer import InstallCancelled
 
 
 class FakeView:
@@ -28,6 +30,7 @@ class StubPage:
         self.services = []
         self.updates = 0
         self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
+        self.dialogs = []
 
     def add(self, *controls):
         self.added.extend(controls)
@@ -37,6 +40,12 @@ class StubPage:
 
     def run_thread(self, handler, *args, **kwargs):
         handler(*args, **kwargs)
+
+    def show_dialog(self, dialog):
+        self.dialogs.append(dialog)
+
+    def pop_dialog(self):
+        return self.dialogs.pop() if self.dialogs else None
 
 
 class FakePicker:
@@ -91,6 +100,46 @@ class FakeServer:
         self.stops += 1
         self.running = False
         self.port = 0
+
+
+class FakeUpdates:
+    """Замена UpdateManager: запоминает вызовы, ответы задаются в тесте."""
+
+    def __init__(self, offer=None, check_error=None, install_error=None):
+        self.offer = offer
+        self.check_error = check_error
+        self.install_error = install_error
+        self.checks = []
+        self.skipped = []
+        self.installs = []
+        self.cleaned = 0
+        self.progress_steps = ((5_000_000, 10_000_000), (10_000_000, 10_000_000))
+        self.during_install = None  # вызывается между шагами загрузки (например, нажатие «Отмена»)
+
+    def cleanup(self):
+        self.cleaned += 1
+
+    def check(self, *, force=False):
+        self.checks.append(force)
+        if self.check_error:
+            raise self.check_error
+        return self.offer
+
+    def skip(self, version):
+        self.skipped.append(version)
+
+    def install(self, offer, progress=None, cancel=None):
+        self.installs.append(offer)
+        if self.install_error:
+            raise self.install_error
+        for done, total in self.progress_steps:
+            if progress:
+                progress(done, total)
+            if self.during_install:
+                self.during_install()
+            if cancel and cancel():
+                raise InstallCancelled()
+        return Path("apply-update.cmd")
 
 
 def walk(control):

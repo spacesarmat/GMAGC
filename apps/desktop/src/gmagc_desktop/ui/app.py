@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 
@@ -20,7 +21,10 @@ from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import data_dir
+from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
+from gmagc_desktop.ui.update_bar import UpdateBar
+from gmagc_desktop.update.manager import UpdateManager
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
@@ -40,6 +44,12 @@ class DesktopApp:
         server=None,
         addresses: Callable[[], list[str]] = lan_addresses,
         qr: Callable[[str], bytes] = qr_png,
+        updates=None,
+        open_url: Callable[[str], object] = webbrowser.open,
+        quit_app: Callable[[], None] | None = None,
+        update_delay: float = 5.0,
+        support: bool = True,
+        support_delay: float = 8.0,
     ):
         self.page = page
         self.service = service
@@ -51,6 +61,16 @@ class DesktopApp:
         self.server.on_request = self.on_phone_request
         self.addresses = addresses
         self.qr = qr
+        self.support = (
+            SupportPrompt(page, service, open_url=open_url, delay=support_delay, busy=lambda: self._busy)
+            if support
+            else None
+        )
+        self.update_bar = (
+            UpdateBar(page, service, updates, open_url=open_url, quit_app=quit_app, delay=update_delay)
+            if updates is not None
+            else None
+        )
         self.history: list[RequestRecord] = []
         self._busy = False
         self._cancel = False
@@ -95,6 +115,8 @@ class DesktopApp:
         status = self.service.load()
         self.library_text.value = self.service.settings.library_dir or "не выбрана"
         self.status_label.value = status_text(status)
+        if self.update_bar is not None:
+            self.update_bar.switch.value = self.service.settings.check_updates
         self.page.services.extend([self.picker, self.clipboard])
         if self.service.settings.server_enabled:
             self.server_switch.value = True
@@ -122,6 +144,7 @@ class DesktopApp:
                 ft.Text(PHONE_HINT, size=12),
                 self.history_title,
                 self.history_column,
+                *([self.update_bar.switch] if self.update_bar else []),
             ],
             spacing=8,
             width=320,
@@ -150,6 +173,8 @@ class DesktopApp:
                 ft.Text(f"{NAME} {VERSION} · Автор: {AUTHOR}", size=12),
                 ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
                 self.check_label,
+                *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
+                *([self.support.link, self.support.telegram_link] if self.support else []),
             ],
             spacing=12,
         )
@@ -157,6 +182,7 @@ class DesktopApp:
             ft.SafeArea(
                 ft.Column(
                     [
+                        *([self.update_bar.container] if self.update_bar else []),
                         ft.Row(
                             [left, ft.VerticalDivider(), right],
                             expand=True,
@@ -169,6 +195,10 @@ class DesktopApp:
                 expand=True,
             )
         )
+        if self.update_bar is not None:
+            self.update_bar.start()
+        if self.support is not None:
+            self.support.start()
         demo_photo = os.environ.get("GMAGC_DEMO_PHOTO")
         if demo_photo:
             self.page.run_thread(lambda: self._run_demo(os.environ.get("GMAGC_DEMO_LIBRARY", ""), demo_photo))
@@ -461,6 +491,9 @@ def build_page(page: ft.Page, service: SearchService | None = None, **services) 
     window = getattr(page, "window", None)
     if window is not None:
         window.width, window.height = 1100, 760
-    app = DesktopApp(page, service or SearchService(data_dir()), **services)
+    service = service or SearchService(data_dir())
+    if "updates" not in services:  # updates=None в тестах отключает обновления
+        services["updates"] = UpdateManager(service, data_dir())
+    app = DesktopApp(page, service, **services)
     app.build()
     return app
