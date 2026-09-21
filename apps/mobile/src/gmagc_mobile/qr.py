@@ -85,7 +85,8 @@ def describe_shot(data: bytes) -> str:
     """Формат, размер файла и размеры кадра: `JPEG, 212 КБ, 1280×720`."""
     text = f"{_image_kind(data)}, {len(data) // 1024} КБ"
     try:
-        Image, _ = _load()
+        from PIL import Image  # только Pillow: размеры видны, даже если библиотека zbar не загрузилась
+
         with Image.open(io.BytesIO(data)) as picture:
             text += f", {picture.width}×{picture.height}"
     except Exception:  # noqa: BLE001 - диагностика не должна падать
