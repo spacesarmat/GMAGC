@@ -105,6 +105,16 @@ class FakePrefs:
         return self.data.pop(key, None) is not None
 
 
+class FakeLauncher:
+    """Замена ft.UrlLauncher."""
+
+    def __init__(self):
+        self.opened = []
+
+    async def launch_url(self, url, **kwargs):
+        self.opened.append(url)
+
+
 def item(rank, name, path, score, copies=()):
     return ResultItem(rank, name, path, score, tuple(copies), b"\x89PNG-thumb")
 

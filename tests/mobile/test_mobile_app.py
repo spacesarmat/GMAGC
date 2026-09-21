@@ -440,11 +440,12 @@ def test_build_page_wires_services_and_starts(monkeypatch):
             clipboard=FakeClipboard(),
             client_factory=script.factory,
             mount_seconds=0,
+            tracker=None,
         )
     )
 
     assert page.title == f"{NAME} {VERSION}" and script.connections == [PC] and views(app) == ["camera"]
-    assert len(page.services) == 4
+    assert len(page.services) == 5  # хранилище, разрешение, выбор файла, буфер обмена, загрузчик ссылок
 
 
 def build_on(platform, web=False):
@@ -461,6 +462,7 @@ def build_on(platform, web=False):
             clipboard=FakeClipboard(),
             client_factory=script.factory,
             mount_seconds=0,
+            tracker=None,
         )
     )
     return app

@@ -29,6 +29,8 @@ from gmagc_mobile.imaging import prepare_upload
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
+from gmagc_mobile.update_bar import UpdateBar
+from gmagc_mobile.updates import UpdateTracker
 
 MODE_SHOOT = "shoot"
 MODE_SCAN = "scan"
@@ -57,6 +59,10 @@ class MobileApp:
         clock: Callable[[], float] = time.monotonic,
         back_seconds: float = 2.5,
         hint_seconds: float | None = None,
+        tracker=None,
+        launcher=None,
+        check_on_start: bool = True,
+        update_delay: float = 3.0,
     ):
         self.page = page
         self.store = store
@@ -74,6 +80,10 @@ class MobileApp:
         self.hint_seconds = back_seconds if hint_seconds is None else hint_seconds  # сколько висит подсказка о выходе
         self._last_back = -1e9
         self._hint_token = 0
+        self.launcher = launcher
+        self.check_on_start = check_on_start
+        self.update_task: asyncio.Task | None = None
+        self.update_bar = UpdateBar(tracker, launcher, page, delay=update_delay) if tracker is not None else None
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
         self.mode = MODE_SHOOT
@@ -108,6 +118,7 @@ class MobileApp:
                 self.code_field,
                 ft.Row([self.connect_button, self.connect_busy], spacing=12),
                 self.connect_error,
+                *self._update_controls(),
                 ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=12),
             ],
             spacing=12,
@@ -212,14 +223,37 @@ class MobileApp:
         self.page.add(
             ft.SafeArea(
                 ft.Column(
-                    [self.connect_view, self.camera_view, self.results_view, self.back_hint, self.diag_text],
+                    [
+                        *([self.update_bar.container] if self.update_bar else []),
+                        self.connect_view,
+                        self.camera_view,
+                        self.results_view,
+                        self.back_hint,
+                        self.diag_text,
+                    ],
                     expand=True,
                 ),
                 expand=True,
             )
         )
 
+    def _update_controls(self) -> list[ft.Control]:
+        if self.update_bar is None:
+            return []
+        return [self.update_bar.switch, ft.Row([self.update_bar.check_button, self.update_bar.status], wrap=True)]
+
     async def start(self) -> None:
+        await self._start_flow()
+        await self._begin_update_check()
+
+    async def _begin_update_check(self) -> None:
+        if self.update_bar is None:
+            return
+        await self.update_bar.load()
+        if self.check_on_start and self.update_bar.switch.value:
+            self.update_task = asyncio.create_task(self.update_bar.startup())
+
+    async def _start_flow(self) -> None:
         demo_link = os.environ.get("GMAGC_MOBILE_DEMO_LINK")
         if demo_link:
             await self._demo(demo_link, os.environ.get("GMAGC_MOBILE_DEMO_PHOTO"))
@@ -624,8 +658,14 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
         fc.Camera(expand=True, preview_enabled=True) if supported else _camera_placeholder()
     )
     controller = services.pop("controller", None) or CameraController(camera_control, permission, supported=supported)
-    app = MobileApp(page, ConnectionStore(prefs), controller, preview=camera_control, **services)
-    page.services.extend([prefs, permission, app.picker, app.clipboard])
+    launcher = services.pop("launcher", None) or ft.UrlLauncher()
+    tracker = services.pop("tracker", "default")  # tracker=None в тестах отключает обновления
+    if tracker == "default":
+        tracker = UpdateTracker(prefs)
+    app = MobileApp(
+        page, ConnectionStore(prefs), controller, preview=camera_control, tracker=tracker, launcher=launcher, **services
+    )
+    page.services.extend([prefs, permission, app.picker, app.clipboard, launcher])
     app.build()
     await app.start()
     return app
