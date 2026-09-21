@@ -23,3 +23,7 @@ def test_the_qr_and_image_libraries_are_dependencies_and_flet_stays_pinned():
 
     assert "pyzbar" in dependencies and "Pillow" in dependencies
     assert "flet==1.0.0" in dependencies and "flet-camera==1.0.0" in dependencies
+
+
+def test_the_apk_is_built_for_arm64_only_to_keep_it_small():
+    assert load()["tool"]["flet"]["android"]["target_arch"] == ["arm64-v8a"]

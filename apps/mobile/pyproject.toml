@@ -1,6 +1,6 @@
 [project]
 name = "gmagc-mobile"
-version = "0.5.0"
+version = "0.5.1"
 description = "GMAGC: поиск гобо по фото (Android-клиент)"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "@ANDY_BUM" }]
@@ -21,6 +21,9 @@ permissions = ["camera"]  # android.permission.CAMERA в манифесте: б�
 
 [tool.flet.app]
 path = "src"  # main.py лежит в src/
+
+[tool.flet.android]
+target_arch = ["arm64-v8a"]  # только arm64: APK ~58 МБ вместо ~151 МБ с тремя архитектурами (другие: flet build apk --arch ...)
 
 [tool.flet.android.manifest_application]
 usesCleartextTraffic = "true"  # телефон общается с ПК по HTTP в локальной сети
