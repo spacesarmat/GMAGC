@@ -325,6 +325,9 @@ product = "GMAGC"
 company = "@ANDY_BUM"
 copyright = "Copyright (C) 2026 @ANDY_BUM"
 org = "com.spacesarmat"
+
+[tool.flet.app]
+path = "src"  # main.py лежит в src/
 ```
 
 - [ ] **Step 4: Run tests and ruff**
@@ -553,6 +556,9 @@ product = "GMAGC"
 company = "@ANDY_BUM"
 copyright = "Copyright (C) 2026 @ANDY_BUM"
 org = "com.spacesarmat"
+
+[tool.flet.app]
+path = "src"  # main.py лежит в src/
 ```
 
 Пустой `apps/mobile/src/gmagc_mobile/__init__.py` создаётся отдельно (`touch`).
