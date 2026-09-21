@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _thumbs import square_pad  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "apps" / "desktop"))
+sys.path.insert(0, str(ROOT / "apps" / "desktop" / "src"))
 
 from gmagc_desktop.library.index import load_index  # noqa: E402
 from gmagc_desktop.matcher.imageio import load_library_gray  # noqa: E402
