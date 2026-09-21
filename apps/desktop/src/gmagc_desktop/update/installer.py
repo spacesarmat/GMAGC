@@ -159,6 +159,13 @@ def _ditto(zip_path: Path, dest: Path) -> None:
         raise InstallError(f"Не удалось распаковать обновление: {error}") from error
 
 
+def _is_unsafe_name(name: str) -> bool:
+    """Путь из архива, опасный на любой ОС: абсолютный, с диском, с «..» или с обратной косой чертой."""
+    if "\\" in name or name.startswith("/") or (len(name) > 1 and name[1] == ":"):
+        return True
+    return ".." in name.split("/")
+
+
 def stage(zip_path: Path, staging_dir: Path, platform: str) -> Path:
     """Распаковывает архив во временную папку (без выхода за её пределы) и возвращает распакованное приложение."""
     root = staging_dir.resolve()
@@ -172,7 +179,7 @@ def stage(zip_path: Path, staging_dir: Path, platform: str) -> Path:
             raise InstallError("Архив обновления слишком велик после распаковки")
         for info in infos:
             destination = (root / info.filename).resolve()
-            if destination != root and root not in destination.parents:
+            if _is_unsafe_name(info.filename) or (destination != root and root not in destination.parents):
                 raise InstallError("Архив обновления содержит небезопасный путь: установка отменена")
         root.mkdir(parents=True, exist_ok=True)
         if platform == "macos":
