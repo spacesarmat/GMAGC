@@ -1,0 +1,44 @@
+import sys
+
+from gmagc_desktop.service.settings import Settings, data_dir, load_settings, save_settings
+
+
+def test_missing_and_corrupt_files_give_defaults(tmp_path):
+    assert load_settings(tmp_path / "nope.json") == Settings()
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert load_settings(broken) == Settings()
+
+    listing = tmp_path / "list.json"
+    listing.write_text("[1, 2]", encoding="utf-8")
+    assert load_settings(listing) == Settings()
+
+
+def test_roundtrip_keeps_a_cyrillic_library_path(tmp_path):
+    target = tmp_path / "data" / "settings.json"
+
+    save_settings(Settings(library_dir="D:\\Библиотека гобо", top_n=15), target)
+
+    assert load_settings(target) == Settings(library_dir="D:\\Библиотека гобо", top_n=15)
+
+
+def test_invalid_values_fall_back_to_defaults(tmp_path):
+    target = tmp_path / "settings.json"
+    target.write_text('{"library_dir": 5, "top_n": 999}', encoding="utf-8")
+
+    assert load_settings(target) == Settings(library_dir="", top_n=10)
+
+
+def test_data_dir_can_be_overridden_and_follows_the_platform(monkeypatch, tmp_path):
+    monkeypatch.setenv("GMAGC_DATA_DIR", str(tmp_path / "custom"))
+    assert data_dir() == tmp_path / "custom"
+
+    monkeypatch.delenv("GMAGC_DATA_DIR")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    assert data_dir().parts[-2:] == ("@ANDY_BUM", "GMAGC")
+    assert str(data_dir()).startswith(str(tmp_path / "local"))
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert data_dir().parts[-3:] == ("Library", "Application Support", "GMAGC")
