@@ -16,7 +16,7 @@
 - Рантайм-зависимости только: numpy, opencv-python-headless, onnxruntime, Pillow. PyTorch в рантайме не используется.
 - Библиотека `gobos/` (11 192 файла, PNG+BMP) и фото `photo/` **не коммитятся** (`.gitignore`); тесты и CI используют только синтетические данные.
 - Формат библиотеки: PNG и BMP; у ~80% PNG прозрачный фон, композитим на **чёрный**; служебные файлы игнорируются (`question.bmp`).
-- Нормализация обеих сторон: сдвиг по центроиду яркой области, масштаб по описанной окружности, квадрат **224×224**, серые уровни сохраняются, вне области чёрный.
+- Нормализация обеих сторон: сдвиг по центроиду яркой области, масштаб по 99,5-му перцентилю расстояний от центроида (близко к описанной окружности, но устойчиво к шуму), квадрат **224×224**, серые уровни сохраняются, вне области чёрный.
 - Повороты и зеркало применяются к **запросу**: 24 поворота × зеркало = 48 вариантов. В индексе один вектор на файл, кэш `float16`.
 - Уточнение формы для top-K (по умолчанию **20**), выдача top-N (по умолчанию **10**).
 - Фото перед сегментацией уменьшается до ~1024 px по длинной стороне.
@@ -70,7 +70,7 @@ docs/benchmarks/                       результаты замеров
 - Produces:
   - `LIBRARY_EXTENSIONS: frozenset[str]` (`{".png", ".bmp"}`), `IGNORED_LIBRARY_NAMES: frozenset[str]` (`{"question.bmp"}`)
   - `load_library_gray(path: str | Path) -> np.ndarray` (uint8, 2D, прозрачность на чёрном)
-  - `load_photo_bgr(path: str | Path) -> np.ndarray` (uint8, HxWx3, BGR; работает с не-ASCII путями, применяет EXIF-ориентацию)
+  - `load_photo_bgr(path: str | Path) -> np.ndarray` (uint8, HxWx3, BGR; работает с не-ASCII путями, применяет EXIF-ориентацию) Пустой файл даёт `ValueError` (а не `cv2.error`).
 
 - [ ] **Step 1: Каркас и зависимости**
 
@@ -92,6 +92,7 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402", "I001"]  # sys.path подменяется до импортов намеренно
 "tests/test_scripts.py" = ["E402", "I001"]
+"tests/test_thumbs.py" = ["E402", "I001"]
 ```
 
 `requirements-dev.txt`:
@@ -116,6 +117,7 @@ Expected: установка без ошибок.
 ```python
 # path: tests/matcher/test_imageio.py
 import numpy as np
+import pytest
 from PIL import Image
 
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr
@@ -165,6 +167,13 @@ def test_photo_is_bgr_and_non_ascii_path_works(tmp_path):
 
     assert bgr.shape == (6, 10, 3)
     assert tuple(bgr[0, 0]) == (0, 0, 255)  # красный в BGR
+
+
+def test_empty_photo_file_raises_value_error(tmp_path):
+    path = tmp_path / "empty.jpg"
+    path.write_bytes(b"")
+    with pytest.raises(ValueError):
+        load_photo_bgr(path)
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -202,6 +211,8 @@ def load_library_gray(path: str | Path) -> np.ndarray:
 def load_photo_bgr(path: str | Path) -> np.ndarray:
     """Фото -> uint8 HxWx3 BGR (с учётом EXIF-ориентации, поддерживает не-ASCII пути)."""
     data = np.fromfile(str(path), dtype=np.uint8)
+    if data.size == 0:
+        raise ValueError(f"cannot decode image: {path}")
     image = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError(f"cannot decode image: {path}")
@@ -211,7 +222,7 @@ def load_photo_bgr(path: str | Path) -> np.ndarray:
 - [ ] **Step 5: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/matcher/test_imageio.py -v`
-Expected: 4 passed.
+Expected: 5 passed.
 
 ```bash
 git add pyproject.toml requirements-dev.txt apps tests
@@ -416,11 +427,25 @@ def test_close_up_projection_filling_the_frame_is_still_found():
     assert extract_projection(image) is not None
 
 
-def test_multiple_blobs_are_merged_into_one_crop():
-    photo = simulate_photo(sample_gobo(), np.random.default_rng(3))
-    crop = extract_projection(photo)
-    small = cv2.resize(crop, (64, 64))
-    assert (small > 127).sum() > 100
+def _two_blobs(edge_gap: int) -> np.ndarray:
+    """Two equal bright discs (radius 60) whose facing edges are `edge_gap` px apart on a 1024x768 frame."""
+    image = np.full((768, 1024, 3), 60, np.uint8)
+    color = (255, 245, 235)
+    cv2.circle(image, (300, 384), 60, color, -1)
+    cv2.circle(image, (300 + 120 + edge_gap, 384), 60, color, -1)
+    return image
+
+
+def test_nearby_blobs_are_merged_into_one_crop():
+    crop = extract_projection(_two_blobs(edge_gap=20))  # 20 px < merge kernel (6% of 1024 = 61 px)
+    assert crop is not None
+    assert crop.shape[1] >= 250  # spans both discs (about 260 px wide)
+
+
+def test_distant_blobs_are_not_merged():
+    crop = extract_projection(_two_blobs(edge_gap=200))  # 200 px > merge kernel
+    assert crop is not None
+    assert crop.shape[1] < 150  # only one disc (about 120 px wide)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -580,7 +605,7 @@ def extract_projection(bgr: np.ndarray) -> np.ndarray | None:
 - [ ] **Step 5: Run tests, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/matcher/test_segment.py -v`
-Expected: 5 passed. Если `test_many_seeds...` падает на конкретном seed, отладить симулятор/пороги на этом seed (не ослаблять диапазон размеров).
+Expected: 6 passed. Если `test_many_seeds...` падает на конкретном seed, отладить симулятор/пороги на этом seed (не ослаблять диапазон размеров).
 
 ```bash
 git add apps tests
@@ -712,7 +737,7 @@ git commit -m "feat: add rotation and mirror variants" -m "Co-Authored-By: Claud
   - `l2_normalize(vectors: np.ndarray) -> np.ndarray`
   - `PixelEmbedder(side: int = 16)`: baseline без модели (`model_id = "pixels-16"`).
   - `pool_output(output: np.ndarray) -> np.ndarray`: `(N, D)` остаётся как есть; `(N, T, D)` превращается в `concat(токен 0, среднее остальных)`, то есть `(N, 2D)`.
-  - `OnnxEmbedder(model_path: str | Path, batch_size: int = 32, providers: list[str] | None = None)`: вход `pixel_values` `(N, 3, H, W)`, серое изображение дублируется в 3 канала и нормализуется ImageNet-статистикой; `model_id = "onnx-<имя файла без расширения>-<размер файла в байтах>"`.
+  - `OnnxEmbedder(model_path: str | Path, batch_size: int = 32, providers: list[str] | None = None)`: вход `pixel_values` `(N, 3, H, W)`, серое изображение дублируется в 3 канала и нормализуется ImageNet-статистикой; `model_id = "onnx-<имя файла без расширения>-<размер файла в байтах>"`. Ошибки загрузки модели onnxruntime (`InvalidProtobuf`, `Fail` наследуются напрямую от `Exception`) переводятся на границе в `ValueError("cannot load ONNX model ...")` с сохранением причины; несуществующий файл даёт `FileNotFoundError`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -720,6 +745,7 @@ git commit -m "feat: add rotation and mirror variants" -m "Co-Authored-By: Claud
 # path: tests/matcher/test_embedder.py
 import numpy as np
 import onnx
+import pytest
 from onnx import TensorProto, helper
 
 from gmagc_desktop.matcher.embedder import (
@@ -771,11 +797,24 @@ def test_onnx_embedder_preprocess_and_output(tmp_path):
     assert embedder.model_id.startswith("onnx-tiny-")
 
 
-def test_onnx_embedder_handles_many_batches(tmp_path):
+def test_onnx_embedder_handles_many_batches_and_keeps_order(tmp_path):
     model_path = tmp_path / "tiny.onnx"
     make_mean_model(model_path)
-    out = OnnxEmbedder(model_path, batch_size=32).embed(np.zeros((70, 224, 224), np.uint8))
+    embedder = OnnxEmbedder(model_path, batch_size=32)
+    # Каждое изображение — своя константа, поэтому перепутанный порядок батчей заметен
+    images = np.stack([np.full((224, 224), 10 + 3 * i, np.uint8) for i in range(70)])
+
+    out = embedder.embed(images)
+
     assert out.shape == (70, 3)
+    assert len({tuple(np.round(row, 5)) for row in out}) == 70  # строки различимы: проверка не пустая
+    for i in (0, 1, 31, 32, 33, 63, 64, 69):  # границы батчей по 32
+        assert np.allclose(out[i], embedder.embed(images[i : i + 1])[0], atol=1e-6)
+
+
+def test_pixel_embedder_empty_batch_returns_an_empty_matrix_like_onnx(tmp_path):
+    out = PixelEmbedder().embed(np.zeros((0, 224, 224), np.uint8))
+    assert out.shape == (0, 0) and out.dtype == np.float32
 
 
 def test_pool_output_concatenates_cls_and_mean_patch():
@@ -784,6 +823,18 @@ def test_pool_output_concatenates_cls_and_mean_patch():
     assert out.shape == (2, 8)
     assert np.array_equal(out[:, :4], tokens[:, 0])
     assert np.allclose(out[:, 4:], tokens[:, 1:].mean(axis=1))
+
+
+def test_onnx_embedder_rejects_garbage_empty_and_directory_models(tmp_path):
+    garbage = tmp_path / "garbage.onnx"
+    garbage.write_bytes(b"this is not an onnx model")
+    empty = tmp_path / "empty.onnx"
+    empty.write_bytes(b"")
+    folder = tmp_path / "folder.onnx"
+    folder.mkdir()
+    for bad in (garbage, empty, folder):
+        with pytest.raises(ValueError, match="cannot load ONNX model"):
+            OnnxEmbedder(bad)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -830,6 +881,8 @@ class PixelEmbedder:
         self.model_id = f"pixels-{side}"
 
     def embed(self, images: np.ndarray) -> np.ndarray:
+        if len(images) == 0:
+            return np.zeros((0, 0), dtype=np.float32)
         small = np.stack(
             [
                 cv2.resize(image, (self.side, self.side), interpolation=cv2.INTER_AREA)
@@ -863,9 +916,12 @@ class OnnxEmbedder:
         path = Path(model_path)
         self.model_id = f"onnx-{path.stem}-{path.stat().st_size}"
         self._batch_size = batch_size
-        self._session = ort.InferenceSession(
-            str(path), providers=providers or ["CPUExecutionProvider"]
-        )
+        try:
+            self._session = ort.InferenceSession(
+                str(path), providers=providers or ["CPUExecutionProvider"]
+            )
+        except Exception as error:  # onnxruntime-исключения наследуются от Exception: переводим в ValueError на границе
+            raise ValueError(f"cannot load ONNX model {path}: {error}") from error
         self._input_name = self._session.get_inputs()[0].name
 
     @staticmethod
@@ -889,7 +945,7 @@ class OnnxEmbedder:
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/matcher/test_embedder.py -v`
-Expected: 5 passed.
+Expected: 7 passed.
 
 ```bash
 git add apps tests
@@ -1078,12 +1134,15 @@ git commit -m "feat: add soft shape matcher with rotation and mirror search" -m 
 # path: tests/fixtures.py
 """Маленькая синтетическая библиотека гобо для тестов индекса, поиска и CLI."""
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 from PIL import Image
 
+from gmagc_desktop.library import scan
 from tests.helpers import l_shape, sample_gobo
 
 
@@ -1140,12 +1199,42 @@ def write_library(root: Path) -> None:
     Image.fromarray(np.zeros((64, 64), np.uint8), "L").save(root / "blank.png")
     Image.fromarray(images["ring"]).convert("RGB").save(root / "question.bmp")
     (root / "notes.txt").write_text("not an image", encoding="utf-8")
+
+
+def make_folder_unlistable(monkeypatch, folder_name: str) -> None:
+    """Подменяет os.walk в scan: папку folder_name «нельзя прочитать» (вызывается onerror), остальные обходятся как есть."""
+    real_walk = os.walk
+
+    def fake_walk(top, topdown=True, onerror=None, followlinks=False):
+        for dirpath, dirnames, filenames in real_walk(top, topdown, None, followlinks):
+            if Path(dirpath).name == folder_name:
+                if onerror is not None:
+                    onerror(PermissionError(13, "Access is denied", dirpath))
+                continue
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(scan, "os", SimpleNamespace(walk=fake_walk))
+
+
+def make_file_vanish_during_walk(monkeypatch, rel_path: str) -> None:
+    """Подменяет os.walk в scan: файл rel_path удаляется уже после того, как обход его перечислил (до stat())."""
+    real_walk = os.walk
+
+    def fake_walk(top, topdown=True, onerror=None, followlinks=False):
+        target = Path(top) / rel_path
+        for dirpath, dirnames, filenames in real_walk(top, topdown, onerror, followlinks):
+            if Path(dirpath) == target.parent and target.exists():
+                target.unlink()
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(scan, "os", SimpleNamespace(walk=fake_walk))
 ```
 
 ```python
 # path: tests/library/test_scan.py
+from gmagc_desktop.library import scan as scan_module
 from gmagc_desktop.library.scan import LibraryFile, scan_library
-from tests.fixtures import write_library
+from tests.fixtures import make_file_vanish_during_walk, make_folder_unlistable, write_library
 
 
 def test_scan_finds_only_supported_files_sorted_and_posix(tmp_path):
@@ -1177,6 +1266,39 @@ def test_library_file_is_hashable_and_compares_by_value():
 
 def test_missing_root_gives_empty_list(tmp_path):
     assert scan_library(tmp_path / "nope") == []
+
+
+def test_checked_scan_reports_an_unlistable_directory(tmp_path, monkeypatch):
+    write_library(tmp_path)
+    make_folder_unlistable(monkeypatch, "vendor_b")
+
+    files, problems = scan_module.scan_library_checked(tmp_path)
+
+    assert len(problems) == 1 and "cannot list directory" in problems[0] and "vendor_b" in problems[0]
+    assert "vendor_b/ell.png" not in [f.rel_path for f in files]
+    assert "vendor_a/ring.png" in [f.rel_path for f in files]
+
+
+def test_checked_scan_reports_a_missing_root_as_a_problem(tmp_path):
+    files, problems = scan_module.scan_library_checked(tmp_path / "nope")
+    assert files == [] and len(problems) == 1 and "nope" in problems[0]
+
+
+def test_checked_scan_has_no_problems_on_a_healthy_library(tmp_path):
+    write_library(tmp_path)
+    files, problems = scan_module.scan_library_checked(tmp_path)
+    assert problems == [] and files == scan_library(tmp_path)
+
+
+def test_file_vanishing_between_walk_and_stat_is_skipped_not_a_problem(tmp_path, monkeypatch):
+    write_library(tmp_path)
+    make_file_vanish_during_walk(monkeypatch, "vendor_a/ring.png")
+
+    files, problems = scan_module.scan_library_checked(tmp_path)
+
+    assert problems == []
+    assert "vendor_a/ring.png" not in [f.rel_path for f in files]
+    assert "vendor_a/dots.png" in [f.rel_path for f in files]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1206,28 +1328,45 @@ class LibraryFile:
     mtime_ns: int
 
 
-def scan_library(root: str | Path) -> list[LibraryFile]:
-    """Все поддерживаемые файлы библиотеки, отсортированные по rel_path."""
+def scan_library_checked(root: str | Path) -> tuple[list[LibraryFile], list[str]]:
+    """Файлы библиотеки (отсортированы по rel_path) и список проблем обхода.
+
+    Непрочитанная папка (нет доступа, отключённый диск и т. п.) попадает в problems, а не молча пропускается.
+    Файл, исчезнувший между обходом и stat(), просто пропускается: его уже нет, это не проблема.
+    """
     root = Path(root)
     found: list[LibraryFile] = []
-    for dirpath, _dirnames, names in os.walk(root):
+    problems: list[str] = []
+
+    def on_error(error: OSError) -> None:
+        problems.append(f"cannot list directory {error.filename}: {error}")
+
+    for dirpath, _dirnames, names in os.walk(root, onerror=on_error):
         directory = Path(dirpath)
         for name in names:
             if Path(name).suffix.lower() not in LIBRARY_EXTENSIONS:
                 continue
             if directory == root and name.lower() in IGNORED_LIBRARY_NAMES:
                 continue
-            stat = (directory / name).stat()
+            try:
+                stat = (directory / name).stat()
+            except FileNotFoundError:
+                continue
             rel = (directory / name).relative_to(root).as_posix()
             found.append(LibraryFile(rel, stat.st_size, stat.st_mtime_ns))
     found.sort(key=lambda f: f.rel_path)
-    return found
+    return found, problems
+
+
+def scan_library(root: str | Path) -> list[LibraryFile]:
+    """Все поддерживаемые файлы библиотеки, отсортированные по rel_path (без сведений о проблемах обхода)."""
+    return scan_library_checked(root)[0]
 ```
 
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/library/test_scan.py -v`
-Expected: 3 passed.
+Expected: 7 passed.
 
 ```bash
 git add apps tests
@@ -1244,7 +1383,7 @@ git commit -m "feat: add library scanning and synthetic test library" -m "Co-Aut
 
 **Interfaces:**
 - Consumes: ничего (только numpy).
-- Produces: `group_duplicates(embeddings: np.ndarray, masks: np.ndarray, cosine_threshold: float = 0.97, iou_threshold: float = 0.85, block: int = 512) -> np.ndarray`: `int32` `(N,)`, идентификатор семейства = наименьший индекс участника. Два файла объединяются, если косинус эмбеддингов ≥ порога **и** мягкий IoU масок (без поворота) ≥ порога; объединение транзитивно.
+- Produces: `group_duplicates(embeddings: np.ndarray, masks: np.ndarray, cosine_threshold: float = 0.97, iou_threshold: float = 0.85, block: int = 512) -> np.ndarray`: `int32` `(N,)`, идентификатор семейства = наименьший индекс участника. Два файла объединяются, если косинус эмбеддингов ≥ порога **и** мягкий IoU масок (без поворота) ≥ порога; объединение транзитивно. Пары проверяются порциями с бюджетом `PAIR_BUDGET_BYTES` (32 МБ на собранный массив масок), а не по числу пар: при масках 64×64 порция в 100 000 пар заняла бы ~1,6 ГБ.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1252,6 +1391,7 @@ git commit -m "feat: add library scanning and synthetic test library" -m "Co-Aut
 # path: tests/library/test_grouping.py
 import numpy as np
 
+from gmagc_desktop.library import grouping
 from gmagc_desktop.library.grouping import group_duplicates
 
 
@@ -1264,6 +1404,16 @@ def mask(filled: slice) -> np.ndarray:
     image = np.zeros((8, 8), np.uint8)
     image[filled, :] = 255
     return image
+
+
+def _duplicated_library() -> tuple[np.ndarray, np.ndarray]:
+    """Construct a test library with 6 unique items + 3 duplicates of the first 3."""
+    rng = np.random.default_rng(0)
+    base = rng.normal(size=(6, 16)).astype(np.float32)
+    embeddings = np.concatenate([base, base[:3]])
+    embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
+    masks = np.stack([mask(slice(i % 4, i % 4 + 3)) for i in range(6)] + [mask(slice(i % 4, i % 4 + 3)) for i in range(3)])
+    return embeddings, masks
 
 
 def test_identical_items_share_a_group_and_others_stay_alone():
@@ -1287,15 +1437,18 @@ def test_groups_are_transitive():
 
 
 def test_block_size_does_not_change_result():
-    rng = np.random.default_rng(0)
-    base = rng.normal(size=(6, 16)).astype(np.float32)
-    embeddings = np.concatenate([base, base[:3]])
-    embeddings /= np.linalg.norm(embeddings, axis=1, keepdims=True)
-    masks = np.stack([mask(slice(i % 4, i % 4 + 3)) for i in range(6)] + [mask(slice(i % 4, i % 4 + 3)) for i in range(3)])
+    embeddings, masks = _duplicated_library()
     assert group_duplicates(embeddings, masks, block=2).tolist() == group_duplicates(
         embeddings, masks, block=512
     ).tolist()
     assert group_duplicates(embeddings, masks).tolist()[6:] == [0, 1, 2]
+
+
+def test_pair_chunking_does_not_change_result(monkeypatch):
+    embeddings, masks = _duplicated_library()
+    baseline = group_duplicates(embeddings, masks)
+    monkeypatch.setattr(grouping, "PAIR_BUDGET_BYTES", 1)  # -> one pair per chunk
+    assert group_duplicates(embeddings, masks).tolist() == baseline.tolist()
 
 
 def test_empty_input():
@@ -1318,7 +1471,7 @@ from __future__ import annotations
 
 import numpy as np
 
-PAIR_CHUNK = 100_000
+PAIR_BUDGET_BYTES = 32 * 1024 * 1024  # размер одного собранного массива масок при проверке пар
 
 
 def _find(parent: np.ndarray, item: int) -> int:
@@ -1331,8 +1484,10 @@ def _find(parent: np.ndarray, item: int) -> int:
 
 
 def _soft_iou_pairs(flat_masks: np.ndarray, left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    inter = np.minimum(flat_masks[left], flat_masks[right]).sum(axis=1)
-    union = np.maximum(flat_masks[left], flat_masks[right]).sum(axis=1)
+    first = flat_masks[left]
+    second = flat_masks[right]
+    inter = np.minimum(first, second).sum(axis=1)
+    union = np.maximum(first, second).sum(axis=1)
     return inter / np.maximum(union, 1e-6)
 
 
@@ -1350,6 +1505,7 @@ def group_duplicates(
         return parent.astype(np.int32)
     vectors = embeddings.astype(np.float32)
     flat = masks.reshape(count, -1).astype(np.float32) / 255.0
+    pair_chunk = max(1, PAIR_BUDGET_BYTES // (flat.shape[1] * flat.itemsize))
 
     for start in range(0, count, block):
         similarity = vectors[start : start + block] @ vectors.T
@@ -1357,9 +1513,9 @@ def group_duplicates(
         rows = rows + start
         keep = cols > rows
         rows, cols = rows[keep], cols[keep]
-        for chunk in range(0, len(rows), PAIR_CHUNK):
-            left = rows[chunk : chunk + PAIR_CHUNK]
-            right = cols[chunk : chunk + PAIR_CHUNK]
+        for chunk in range(0, len(rows), pair_chunk):
+            left = rows[chunk : chunk + pair_chunk]
+            right = cols[chunk : chunk + pair_chunk]
             similar = _soft_iou_pairs(flat, left, right) >= iou_threshold
             for a, b in zip(left[similar], right[similar], strict=True):
                 root_a, root_b = _find(parent, int(a)), _find(parent, int(b))
@@ -1372,7 +1528,7 @@ def group_duplicates(
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/library/test_grouping.py -v`
-Expected: 5 passed.
+Expected: 6 passed.
 
 ```bash
 git add apps tests
@@ -1404,7 +1560,7 @@ import pytest
 from gmagc_desktop.library.grouping import group_duplicates
 from gmagc_desktop.matcher.embedder import PixelEmbedder
 from gmagc_desktop.matcher.normalize import normalize_gray
-from gmagc_desktop.matcher.search import SearchData, Searcher
+from gmagc_desktop.matcher.search import IndexMismatchError, SearchData, Searcher
 from gmagc_desktop.matcher.shape import soft_mask
 from gmagc_desktop.matcher.variants import rotate_image
 from tests.fixtures import shape_images
@@ -1439,6 +1595,18 @@ def test_rotated_query_finds_its_family_and_reports_members(library, w_embed):
         assert angle_error(top.angle, 223.0) < 3.0 and not top.mirrored
 
 
+@pytest.mark.parametrize("w", [0.0, 0.3, 0.5, 1.0])
+def test_score_is_the_weighted_sum_of_embed_and_shape_scores(library, w):
+    names, normalized, embedder, data = library
+    query = rotate_image(normalized[names.index("gobo")], 40.0)
+
+    matches = Searcher(data, embedder, w_embed=w).search(query, top_n=10)
+
+    assert len(matches) > 1
+    for match in matches:
+        assert match.score == pytest.approx(w * max(match.embed_score, 0.0) + (1 - w) * match.shape_score)
+
+
 def test_mirrored_query_is_flagged_mirrored(library):
     names, normalized, embedder, data = library
     query = rotate_image(np.ascontiguousarray(normalized[names.index("ell")][:, ::-1]), 60.0)
@@ -1465,6 +1633,16 @@ def test_top_n_limits_results_and_empty_index_is_safe(library):
         np.zeros((0, 0), np.float32), np.zeros((0, 64, 64), np.uint8), np.zeros(0, np.int32)
     )
     assert Searcher(empty, embedder).search(normalized[0]) == []
+
+
+def test_embedder_with_other_dimensions_than_the_index_is_rejected_clearly(library):
+    names, normalized, embedder, data = library  # индекс построен PixelEmbedder(side=16): 256 измерений
+    other = PixelEmbedder(side=8)  # 64 измерения
+
+    with pytest.raises(IndexMismatchError, match="256 dimensions but the embedder produced 64; rebuild the index"):
+        Searcher(data, other).search(normalized[0])
+
+    assert isinstance(IndexMismatchError("x"), ValueError)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1488,6 +1666,12 @@ import numpy as np
 from gmagc_desktop.matcher.embedder import Embedder
 from gmagc_desktop.matcher.shape import ShapeMatcher, soft_mask
 from gmagc_desktop.matcher.variants import DEFAULT_ROTATIONS, query_variants
+
+DEFAULT_W_EMBED = 0.5  # вес эмбеддинга в итоговой оценке (остальное — форма); единый по умолчанию для всех входов
+
+
+class IndexMismatchError(ValueError):
+    """Размерность векторов индекса не совпадает с размерностью эмбеддера: индекс построен другой моделью."""
 
 
 @dataclass(frozen=True)
@@ -1515,7 +1699,7 @@ class Searcher:
         embedder: Embedder,
         n_rotations: int = DEFAULT_ROTATIONS,
         shortlist: int = 20,
-        w_embed: float = 0.5,
+        w_embed: float = DEFAULT_W_EMBED,
     ):
         self._data = data
         self._embedder = embedder
@@ -1533,6 +1717,11 @@ class Searcher:
 
         variants = query_variants(normalized_query, self._n_rotations, mirror=True)
         query_vectors = self._embedder.embed(variants)  # (V, D)
+        if query_vectors.shape[1] != data.embeddings.shape[1]:
+            raise IndexMismatchError(
+                f"index vectors have {data.embeddings.shape[1]} dimensions "
+                f"but the embedder produced {query_vectors.shape[1]}; rebuild the index"
+            )
         best_embed = (data.embeddings @ query_vectors.T).max(axis=1)  # (N,)
 
         candidates: list[int] = []
@@ -1570,7 +1759,7 @@ class Searcher:
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/matcher/test_search.py -v`
-Expected: 6 passed (3 параметризованных + 3 обычных).
+Expected: 11 passed.
 
 ```bash
 git add apps tests
@@ -1590,26 +1779,31 @@ git commit -m "feat: add searcher combining embeddings, shape rerank and familie
 - Produces:
   - `FORMAT_VERSION = 1`; `class IndexCancelled(Exception)`; `ProgressCallback = Callable[[int, int], None]` (`done, total` по новым/изменённым файлам).
   - `LibraryIndex(model_id: str, files: list[LibraryFile], embeddings: np.ndarray, masks: np.ndarray, group_ids: np.ndarray, skipped: list[LibraryFile])`: `__len__`, `search_data() -> SearchData`.
-  - `build_index(root, embedder, existing: LibraryIndex | None = None, progress: ProgressCallback | None = None, batch_size: int = 64, cancel: Callable[[], bool] | None = None) -> LibraryIndex`: повторно использует строки `existing`, если совпали `model_id` и `(rel_path, size, mtime_ns)`; нечитаемые и пустые файлы попадают в `skipped` и не обрабатываются повторно, пока не изменятся; `cancel()` возвращает True между пакетами -> `IndexCancelled`.
-  - `save_index(index, path) -> None` (атомарно через временный файл, эмбеддинги в `float16`), `load_index(path) -> LibraryIndex | None` (`None`, если файла нет, он повреждён или другая версия формата).
+  - `build_index(root, embedder, existing: LibraryIndex | None = None, progress: ProgressCallback | None = None, batch_size: int = 64, cancel: Callable[[], bool] | None = None) -> LibraryIndex`: повторно использует строки `existing`, если совпали `model_id` и `(rel_path, size, mtime_ns)`; нечитаемые и пустые файлы попадают в `skipped` и не обрабатываются повторно, пока не изменятся; `cancel()` возвращает True между пакетами -> `IndexCancelled`. Если `root` не каталог, поднимает `FileNotFoundError` (иначе пустой индекс затёр бы кэш). Нечитаемые файлы (`OSError`, `ValueError`, `SyntaxError`, `cv2.error`, `DecompressionBombError`) пропускаются с предупреждением в лог; `PermissionError` и ошибки программы не глотаются.
+  - `save_index(index, path) -> None` (атомарно через временный файл, эмбеддинги в `float16`), `load_index(path) -> LibraryIndex | None` (`None`, если файла нет, он повреждён или другая версия формата). Перехватывается также `zlib.error`, `EOFError` и `NotImplementedError` из разбора повреждённого архива.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # path: tests/library/test_index.py
 import os
+from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
+from PIL import Image, UnidentifiedImageError
 
 from gmagc_desktop.library.index import (
     IndexCancelled,
+    LibraryNotFound,
+    LibraryScanError,
     build_index,
     load_index,
     save_index,
 )
 from gmagc_desktop.matcher.embedder import PixelEmbedder
-from tests.fixtures import write_library
+from tests.fixtures import make_file_vanish_during_walk, make_folder_unlistable, write_library
 
 
 class CountingEmbedder(PixelEmbedder):
@@ -1716,6 +1910,224 @@ def test_load_returns_none_for_missing_or_corrupt_file(tmp_path):
     broken = tmp_path / "broken.npz"
     broken.write_bytes(b"not a zip")
     assert load_index(broken) is None
+
+
+def test_load_returns_none_when_the_npy_header_is_cut_off(tmp_path):
+    """Оборванный заголовок .npy внутри npz: numpy бросает tokenize.TokenError, а не ValueError."""
+    import struct
+    import zipfile
+
+    header = b"{'descr': '<i8', 'fortran_order': False, 'shape': (1,"
+    header += b" " * ((64 - (10 + len(header) + 1) % 64) % 64) + b"\n"
+    npy = b"\x93NUMPY\x01\x00" + struct.pack("<H", len(header)) + header + b"\x00" * 8
+    damaged = tmp_path / "cut_header.npz"
+    with zipfile.ZipFile(damaged, "w") as archive:
+        archive.writestr("format_version.npy", npy)
+
+    assert load_index(damaged) is None
+
+
+def test_load_never_raises_on_damaged_cache(library, tmp_path):
+    target = tmp_path / "index.npz"
+    save_index(build_index(library, CountingEmbedder()), target)
+    data = target.read_bytes()
+    damaged = tmp_path / "damaged.npz"
+
+    damaged.write_bytes(data[: len(data) // 2])
+    assert load_index(damaged) is None
+
+    for offset in range(64, len(data) - 64, max(1, len(data) // 40)):
+        broken = bytearray(data)
+        for i in range(offset, offset + 8):
+            broken[i] ^= 0xFF
+        damaged.write_bytes(bytes(broken))
+        load_index(damaged)  # None или индекс допустимы, исключения быть не должно
+
+
+def test_missing_library_root_raises_instead_of_returning_an_empty_index(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        build_index(tmp_path / "unplugged", CountingEmbedder())
+
+
+def test_skipped_files_are_not_reopened_until_they_change(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    opened = []
+    real = index_module.load_library_gray
+    monkeypatch.setattr(index_module, "load_library_gray", lambda path: opened.append(Path(path).name) or real(path))
+
+    first = build_index(library, CountingEmbedder())
+    assert "blank.png" in opened
+    opened.clear()
+
+    second = build_index(library, CountingEmbedder(), existing=first)
+    assert opened == []  # ни один файл не открывался: строки и «пропущенные» взяты из кэша
+
+    os.utime(library / "blank.png", ns=(2_000_000_000, 2_000_000_000))
+    build_index(library, CountingEmbedder(), existing=second)
+    assert opened == ["blank.png"]  # изменившийся пропущенный файл пробуем снова
+
+
+def test_permission_and_program_errors_are_not_swallowed(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    def failing(error):
+        def loader(path):
+            raise error
+
+        return loader
+
+    monkeypatch.setattr(index_module, "load_library_gray", failing(PermissionError("locked")))
+    with pytest.raises(PermissionError):
+        build_index(library, CountingEmbedder())
+
+    monkeypatch.setattr(index_module, "load_library_gray", failing(TypeError("bug")))
+    with pytest.raises(TypeError):
+        build_index(library, CountingEmbedder())
+
+
+def test_corrupt_image_is_skipped_with_a_warning(library, caplog):
+    (library / "vendor_a" / "broken.png").write_bytes(b"not a png")
+    with caplog.at_level("WARNING"):
+        index = build_index(library, CountingEmbedder())
+    assert "vendor_a/broken.png" in [f.rel_path for f in index.skipped]
+    assert "broken.png" in caplog.text
+
+
+def test_missing_library_root_raises_library_not_found_with_the_path(tmp_path):
+    with pytest.raises(LibraryNotFound, match="library folder not found") as caught:
+        build_index(tmp_path / "unplugged", CountingEmbedder())
+    assert isinstance(caught.value, FileNotFoundError) and "unplugged" in str(caught.value)
+
+
+def test_unlistable_directory_aborts_instead_of_building_a_partial_index(library, monkeypatch):
+    make_folder_unlistable(monkeypatch, "vendor_b")
+    embedder = CountingEmbedder()
+
+    with pytest.raises(LibraryScanError, match="refusing to build a partial index") as caught:
+        build_index(library, embedder)
+
+    assert "cannot list directory" in str(caught.value) and "vendor_b" in str(caught.value)
+    assert "1 problem" in str(caught.value)
+    assert embedder.count == 0  # ничего не встраивалось: индекс не строился
+
+
+def test_empty_library_folder_raises_instead_of_returning_an_empty_index(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("not an image", encoding="utf-8")
+    with pytest.raises(LibraryScanError, match="no PNG/BMP files found"):
+        build_index(empty, CountingEmbedder())
+
+
+def test_library_of_only_unreadable_files_raises(tmp_path):
+    root = tmp_path / "lib"
+    root.mkdir()
+    (root / "broken.png").write_bytes(b"not a png")
+    (root / "also_broken.bmp").write_bytes(b"not a bmp")
+    with pytest.raises(LibraryScanError, match=r"none of the 2 library files could be read"):
+        build_index(root, CountingEmbedder())
+
+
+def test_file_vanishing_between_walk_and_stat_is_skipped_by_the_build(library, monkeypatch):
+    make_file_vanish_during_walk(monkeypatch, "vendor_a/ring.png")
+
+    index = build_index(library, CountingEmbedder())
+
+    paths = [f.rel_path for f in index.files]
+    assert "vendor_a/ring.png" not in paths and "vendor_a/dots.png" in paths
+    assert len(index) == 5 and [f.rel_path for f in index.skipped] == ["blank.png"]
+
+
+def _fail_on(monkeypatch, name, error_factory):
+    """Подменяет загрузчик: файл с именем name падает с error_factory() (пока флаг не сброшен)."""
+    from gmagc_desktop.library import index as index_module
+
+    real = index_module.load_library_gray
+    state = {"failing": True, "opened": []}
+
+    def loader(path):
+        state["opened"].append(Path(path).name)
+        if state["failing"] and Path(path).name == name:
+            raise error_factory()
+        return real(path)
+
+    monkeypatch.setattr(index_module, "load_library_gray", loader)
+    return state
+
+
+def test_transient_read_failure_is_retried_and_never_persisted(library, tmp_path, monkeypatch, caplog):
+    state = _fail_on(monkeypatch, "ring.png", lambda: OSError("device not ready"))
+
+    with caplog.at_level("WARNING"):
+        first = build_index(library, CountingEmbedder())
+
+    assert [f.rel_path for f in first.transient] == ["vendor_a/ring.png"]
+    assert "vendor_a/ring.png" not in [f.rel_path for f in first.skipped]
+    assert "vendor_a/ring.png" not in [f.rel_path for f in first.files]
+    assert "ring.png" in caplog.text and "device not ready" in caplog.text
+
+    target = tmp_path / "cache" / "index.npz"
+    save_index(first, target)
+    with np.load(target) as data:
+        persisted = set(data["rel_paths"].tolist()) | set(data["skipped_paths"].tolist())
+    assert "vendor_a/ring.png" not in persisted
+    loaded = load_index(target)
+    assert loaded.transient == []
+
+    state["failing"] = False
+    embedder = CountingEmbedder()
+    second = build_index(library, embedder, existing=loaded)
+
+    assert embedder.count == 1  # пересчитан только файл, который раньше не удалось прочитать
+    assert "vendor_a/ring.png" in [f.rel_path for f in second.files]
+    assert second.transient == [] and [f.rel_path for f in second.skipped] == ["blank.png"]
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: UnidentifiedImageError("cannot identify image file"),
+        lambda: ValueError("bad value"),
+        lambda: SyntaxError("broken PNG file"),
+        lambda: cv2.error("bad image"),
+        lambda: Image.DecompressionBombError("too large"),
+    ],
+    ids=["unidentified", "value", "syntax", "cv2", "bomb"],
+)
+def test_definitive_decode_failures_are_skipped_and_persisted(library, tmp_path, monkeypatch, make_error):
+    _fail_on(monkeypatch, "ring.png", make_error)
+
+    index = build_index(library, CountingEmbedder())
+
+    assert "vendor_a/ring.png" in [f.rel_path for f in index.skipped]
+    assert index.transient == []
+    target = tmp_path / "index.npz"
+    save_index(index, target)
+    assert "vendor_a/ring.png" in [f.rel_path for f in load_index(target).skipped]
+
+
+def test_corrupt_png_stays_skipped_and_is_not_reopened(library, monkeypatch):
+    (library / "vendor_a" / "broken.png").write_bytes(b"not a png")
+    first = build_index(library, CountingEmbedder())
+    assert "vendor_a/broken.png" in [f.rel_path for f in first.skipped] and first.transient == []
+
+    state = _fail_on(monkeypatch, "nothing.png", RuntimeError)  # только для учёта открытых файлов
+    second = build_index(library, CountingEmbedder(), existing=first)
+
+    assert state["opened"] == []
+    assert "vendor_a/broken.png" in [f.rel_path for f in second.skipped]
+
+
+def test_library_where_every_read_is_transient_raises_none_could_be_read(library, monkeypatch):
+    from gmagc_desktop.library import index as index_module
+
+    def unplugged(path):
+        raise OSError("device not ready")
+
+    monkeypatch.setattr(index_module, "load_library_gray", unplugged)
+    with pytest.raises(LibraryScanError, match=r"none of the 7 library files could be read"):
+        build_index(library, CountingEmbedder())
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1731,21 +2143,28 @@ Expected: FAIL (`ModuleNotFoundError: gmagc_desktop.library.index`).
 
 from __future__ import annotations
 
+import logging
 import os
+import tokenize
 import zipfile
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
+from PIL import Image, UnidentifiedImageError
 
 from gmagc_desktop.library.grouping import group_duplicates
-from gmagc_desktop.library.scan import LibraryFile, scan_library
+from gmagc_desktop.library.scan import LibraryFile, scan_library_checked
 from gmagc_desktop.matcher.embedder import Embedder
 from gmagc_desktop.matcher.imageio import load_library_gray
 from gmagc_desktop.matcher.normalize import normalize_gray
 from gmagc_desktop.matcher.search import SearchData
-from gmagc_desktop.matcher.shape import MASK_SIZE, soft_mask
+from gmagc_desktop.matcher.shape import soft_mask
+
+logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = 1
 ProgressCallback = Callable[[int, int], None]
@@ -1753,6 +2172,14 @@ ProgressCallback = Callable[[int, int], None]
 
 class IndexCancelled(Exception):
     """Индексация прервана по запросу пользователя."""
+
+
+class LibraryNotFound(FileNotFoundError):
+    """Папка библиотеки не существует (например, отключён диск)."""
+
+
+class LibraryScanError(RuntimeError):
+    """Библиотеку нельзя надёжно проиндексировать: частичный или пустой результат не сохраняем."""
 
 
 @dataclass
@@ -1763,6 +2190,8 @@ class LibraryIndex:
     masks: np.ndarray  # (N, 64, 64) uint8
     group_ids: np.ndarray  # (N,) int32
     skipped: list[LibraryFile] = field(default_factory=list)
+    # Не удалось прочитать сейчас (временный сбой). В кэш не сохраняется: следующая сборка попробует снова.
+    transient: list[LibraryFile] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.files)
@@ -1771,11 +2200,31 @@ class LibraryIndex:
         return SearchData(self.embeddings, self.masks, self.group_ids)
 
 
+# Окончательные сбои декодирования: файл испорчен, повторное открытие ничего не изменит.
+# UnidentifiedImageError — подкласс OSError, поэтому перехватывается раньше общего OSError.
+_DEFINITIVE = (UnidentifiedImageError, ValueError, SyntaxError, cv2.error, Image.DecompressionBombError)
+
+
+class _TransientReadError(Exception):
+    """Временный сбой чтения (устройство не готово, сетевой сбой, блокировка): файл повторят при следующей сборке."""
+
+
 def _load_normalized(path: Path) -> np.ndarray | None:
+    """Нормализованное изображение или None, если файл окончательно нечитаем (испорчен или пустой).
+
+    Прочие OSError — временный сбой: _TransientReadError. PermissionError и ошибки программы не глотаются.
+    """
     try:
-        return normalize_gray(load_library_gray(path))
-    except Exception:  # битый файл не должен ломать индексацию
+        normalized = normalize_gray(load_library_gray(path))
+    except PermissionError:
+        raise
+    except _DEFINITIVE as error:
+        logger.warning("skipping unreadable library file %s: %s", path, error)
         return None
+    except OSError as error:
+        logger.warning("library file %s cannot be read right now, will retry next time: %s", path, error)
+        raise _TransientReadError(str(error)) from error
+    return normalized
 
 
 def build_index(
@@ -1787,7 +2236,16 @@ def build_index(
     cancel: Callable[[], bool] | None = None,
 ) -> LibraryIndex:
     root = Path(root)
-    scanned = scan_library(root)
+    if not root.is_dir():
+        raise LibraryNotFound(f"library folder not found: {root}")
+    scanned, problems = scan_library_checked(root)
+    if problems:
+        raise LibraryScanError(
+            f"{len(problems)} problem(s) while scanning {root}: {'; '.join(problems[:3])}; "
+            "refusing to build a partial index"
+        )
+    if not scanned:
+        raise LibraryScanError(f"no PNG/BMP files found in {root}")
 
     reusable: dict[LibraryFile, int] = {}
     known_skipped: set[LibraryFile] = set()
@@ -1797,6 +2255,7 @@ def build_index(
 
     todo = [f for f in scanned if f not in reusable and f not in known_skipped]
     skipped = [f for f in scanned if f in known_skipped]
+    transient: list[LibraryFile] = []
     fresh: dict[LibraryFile, tuple[np.ndarray, np.ndarray]] = {}
 
     for start in range(0, len(todo), batch_size):
@@ -1804,7 +2263,11 @@ def build_index(
             raise IndexCancelled()
         loaded: list[tuple[LibraryFile, np.ndarray]] = []
         for file in todo[start : start + batch_size]:
-            normalized = _load_normalized(root / file.rel_path)
+            try:
+                normalized = _load_normalized(root / file.rel_path)
+            except _TransientReadError:
+                transient.append(file)
+                continue
             if normalized is None:
                 skipped.append(file)
             else:
@@ -1819,21 +2282,14 @@ def build_index(
     skipped.sort(key=lambda f: f.rel_path)
     files = [f for f in scanned if f in reusable or f in fresh]
     if not files:
-        return LibraryIndex(
-            embedder.model_id,
-            [],
-            np.zeros((0, 0), np.float32),
-            np.zeros((0, MASK_SIZE, MASK_SIZE), np.uint8),
-            np.zeros(0, np.int32),
-            skipped,
-        )
+        raise LibraryScanError(f"none of the {len(scanned)} library files could be read")
 
     embeddings = np.stack(
         [existing.embeddings[reusable[f]] if f in reusable else fresh[f][1] for f in files]
     ).astype(np.float32)
     masks = np.stack([existing.masks[reusable[f]] if f in reusable else fresh[f][0] for f in files])
     return LibraryIndex(
-        embedder.model_id, files, embeddings, masks, group_duplicates(embeddings, masks), skipped
+        embedder.model_id, files, embeddings, masks, group_duplicates(embeddings, masks), skipped, transient
     )
 
 
@@ -1881,14 +2337,23 @@ def load_index(path: str | Path) -> LibraryIndex | None:
                 group_ids=data["group_ids"],
                 skipped=_files(data["skipped_paths"], data["skipped_sizes"], data["skipped_mtimes"]),
             )
-    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+    except (
+        OSError,
+        KeyError,
+        ValueError,
+        EOFError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        zlib.error,
+        tokenize.TokenError,  # numpy разбирает заголовок .npy токенайзером
+    ):
         return None
 ```
 
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/library/test_index.py -v`
-Expected: 8 passed. Если `test_build_indexes_valid_files...` падает на числе семейств (две разные фикстурные фигуры склеились), подправить фигуру в `tests/fixtures.py`, а не порог группировки.
+Expected: 27 passed. Если `test_build_indexes_valid_files...` падает на числе семейств (две разные фикстурные фигуры склеились), подправить фигуру в `tests/fixtures.py`, а не порог группировки.
 
 ```bash
 git add apps tests
@@ -1908,7 +2373,7 @@ git commit -m "feat: add library index with incremental build and disk cache" -m
 - Produces:
   - `normalize_photo(bgr: np.ndarray) -> np.ndarray | None`: `extract_projection` + `normalize_gray`; `None`, если проекция не найдена.
   - `make_embedder(model: str | None) -> Embedder` (`OnnxEmbedder`, если задан путь, иначе `PixelEmbedder`), `main(argv: list[str] | None = None) -> int`.
-  - Команды: `index LIBRARY --index FILE [--model ONNX]` печатает `N files indexed (K unique), S skipped`, код 0; `search PHOTO --index FILE [--model ONNX] [--library DIR] [--top 10] [--w-embed 0.5]` печатает строки `" 1.  87.3%  vendor_b/ell.png  (+1 copies)"`; коды выхода: 0 успех, 1 нет/несовместимый индекс, 2 проекция не найдена.
+  - Команды: `index LIBRARY --index FILE [--model ONNX]` печатает `N files indexed (K unique), S skipped`, код 0; `search PHOTO --index FILE [--model ONNX] [--library DIR] [--top 10] [--w-embed 0.5]` печатает строки `" 1.  87.3%  vendor_b/ell.png  (+1 copies)"`; коды выхода: 0 успех, 1 нет/несовместимый индекс или нет папки библиотеки, 2 проекция не найдена, 3 нечитаемый входной файл (фото или модель; одна строка в stderr, без traceback). Порядок в `search`: индекс → фото → эмбеддер → совпадение `model_id` → проекция.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1938,9 +2403,10 @@ import numpy as np
 import pytest
 
 from gmagc_desktop import cli
+from gmagc_desktop.library.index import LibraryIndex, save_index
 from gmagc_desktop.matcher.embedder import PixelEmbedder
 from gmagc_desktop.matcher.synthetic import simulate_photo
-from tests.fixtures import shape_images, write_library
+from tests.fixtures import make_folder_unlistable, shape_images, write_library
 
 
 @pytest.fixture()
@@ -1966,6 +2432,37 @@ def test_index_reports_counts(tmp_path, capsys):
     write_library(library)
     assert cli.main(["index", str(library), "--index", str(tmp_path / "i.npz")]) == 0
     assert "6 files indexed (5 unique), 1 skipped" in capsys.readouterr().out
+
+
+def test_index_reports_files_that_are_unreadable_right_now_and_writes_no_trace_of_them(tmp_path, monkeypatch, capsys):
+    from gmagc_desktop.library import index as index_module
+
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    real = index_module.load_library_gray
+
+    def loader(path):
+        if path.name == "ring.png":
+            raise OSError("device not ready")
+        return real(path)
+
+    monkeypatch.setattr(index_module, "load_library_gray", loader)
+    target = tmp_path / "i.npz"
+
+    assert cli.main(["index", str(library), "--index", str(target)]) == 0
+
+    out = capsys.readouterr().out
+    assert "5 files indexed (4 unique), 1 skipped, 1 unreadable now (will be retried)" in out
+    with np.load(target) as data:
+        assert "vendor_a/ring.png" not in data["rel_paths"].tolist() + data["skipped_paths"].tolist()
+
+
+def test_index_of_missing_library_returns_3_and_writes_nothing(tmp_path, capsys):
+    target = tmp_path / "i.npz"
+    assert cli.main(["index", str(tmp_path / "nope"), "--index", str(target)]) == 3
+    assert "library folder not found" in capsys.readouterr().err
+    assert not target.exists()
 
 
 def test_search_finds_the_right_gobo(indexed, capsys):
@@ -1995,6 +2492,7 @@ def test_search_without_projection_returns_2(indexed, capsys):
 def test_search_without_index_returns_1(tmp_path, capsys):
     photo = save_photo(tmp_path, "p.png", np.full((32, 32, 3), 90, np.uint8))
     assert cli.main(["search", str(photo), "--index", str(tmp_path / "nope.npz")]) == 1
+    assert "index not found" in capsys.readouterr().err
 
 
 def test_search_with_other_model_than_index_returns_1(indexed, monkeypatch, capsys):
@@ -2003,6 +2501,168 @@ def test_search_with_other_model_than_index_returns_1(indexed, monkeypatch, caps
     monkeypatch.setattr(cli, "make_embedder", lambda model: PixelEmbedder(side=8))
     assert cli.main(["search", str(photo), "--index", str(index_path)]) == 1
     assert "index was built with" in capsys.readouterr().err
+
+
+def test_search_with_embedder_of_other_dimensions_returns_1_and_asks_to_rebuild(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    other = PixelEmbedder(side=8)
+    other.model_id = "pixels-16"  # тот же model_id, что в индексе, но другая размерность векторов
+    monkeypatch.setattr(cli, "make_embedder", lambda model: other)
+
+    code = cli.main(["search", str(photo), "--index", str(index_path)])
+
+    out, err = capsys.readouterr()
+    assert code == 1 and "rebuild the index" in err and "Traceback" not in err
+    assert out == ""
+
+
+def test_search_with_missing_photo_returns_3(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    msg = "model must not be built before photo is read"
+    monkeypatch.setattr(cli, "make_embedder", lambda model: (_ for _ in ()).throw(AssertionError(msg)))
+    code = cli.main(["search", str(tmp / "nope.png"), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+    assert "Traceback" not in err
+
+
+def test_search_with_zero_byte_photo_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    path = tmp / "empty.jpg"
+    path.write_bytes(b"")
+    code = cli.main(["search", str(path), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+
+
+def test_search_with_non_image_photo_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    path = tmp / "text.png"
+    path.write_bytes(b"not an image")
+    code = cli.main(["search", str(path), "--index", str(index_path)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot read photo" in err
+
+
+def test_search_with_missing_model_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    code = cli.main(["search", str(photo), "--index", str(index_path), "--model", str(tmp / "nope.onnx")])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+
+
+def test_index_with_missing_model_returns_3(tmp_path, capsys):
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    target = tmp_path / "x.npz"
+    code = cli.main(["index", str(library), "--index", str(target), "--model", str(tmp_path / "nope.onnx")])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert not target.exists()
+
+
+def test_search_with_corrupt_model_returns_3(indexed, capsys):
+    library, index_path, tmp = indexed
+    garbage = tmp / "garbage.onnx"
+    garbage.write_bytes(b"not an onnx model")
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    code = cli.main(["search", str(photo), "--index", str(index_path), "--model", str(garbage)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+    assert "Traceback" not in err
+
+
+def test_index_with_corrupt_model_returns_3(tmp_path, capsys):
+    library = tmp_path / "lib"
+    library.mkdir()
+    write_library(library)
+    garbage = tmp_path / "garbage.onnx"
+    garbage.write_bytes(b"not an onnx model")
+    target = tmp_path / "y.npz"
+    code = cli.main(["index", str(library), "--index", str(target), "--model", str(garbage)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "cannot load model" in err
+    assert not target.exists()
+
+
+def test_index_with_an_unlistable_folder_returns_3_and_keeps_the_existing_index(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    before = index_path.read_bytes()
+    make_folder_unlistable(monkeypatch, "vendor_b")
+
+    code = cli.main(["index", str(library), "--index", str(index_path)])
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "cannot list directory" in err and "refusing to build a partial index" in err
+    assert index_path.read_bytes() == before
+
+
+def test_index_of_an_empty_library_returns_3_and_keeps_the_existing_index(indexed, capsys):
+    library, index_path, tmp = indexed
+    before = index_path.read_bytes()
+    empty = tmp / "empty_lib"
+    empty.mkdir()
+
+    code = cli.main(["index", str(empty), "--index", str(index_path)])
+
+    assert code == 3 and "no PNG/BMP files found" in capsys.readouterr().err
+    assert index_path.read_bytes() == before
+
+
+def test_index_of_an_empty_library_writes_no_index_file(tmp_path, capsys):
+    empty = tmp_path / "empty_lib"
+    empty.mkdir()
+    target = tmp_path / "fresh.npz"
+
+    assert cli.main(["index", str(empty), "--index", str(target)]) == 3
+    assert not target.exists()
+
+
+def test_search_on_an_empty_index_returns_1_with_a_hint(tmp_path, capsys):
+    empty_index = LibraryIndex(
+        "pixels-16",
+        [],
+        np.zeros((0, 0), np.float32),
+        np.zeros((0, 64, 64), np.uint8),
+        np.zeros(0, np.int32),
+    )
+    index_path = tmp_path / "empty.npz"
+    save_index(empty_index, index_path)
+    photo = save_photo(tmp_path, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+
+    code = cli.main(["search", str(photo), "--index", str(index_path)])
+
+    assert code == 1
+    assert "index is empty; rebuild it with the 'index' command" in capsys.readouterr().err
+
+
+def test_read_photo_and_build_embedder_are_public_and_report_to_stderr(tmp_path, capsys):
+    assert cli.read_photo(tmp_path / "nope.png") is None
+    assert "cannot read photo" in capsys.readouterr().err
+    assert cli.build_embedder(str(tmp_path / "nope.onnx")) is None
+    assert "cannot load model" in capsys.readouterr().err
+    assert isinstance(cli.build_embedder(None), PixelEmbedder)
+
+
+def test_w_embed_default_is_defined_once(tmp_path):
+    import inspect
+
+    from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher
+
+    assert DEFAULT_W_EMBED == 0.5
+    assert inspect.signature(Searcher).parameters["w_embed"].default == DEFAULT_W_EMBED
+    args = cli.build_parser().parse_args(["search", "p.png", "--index", "i.npz"])
+    assert args.w_embed == DEFAULT_W_EMBED
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -2032,7 +2692,14 @@ def normalize_photo(bgr: np.ndarray) -> np.ndarray | None:
 
 ```python
 # path: apps/desktop/gmagc_desktop/cli.py
-"""Командная строка ядра: index и search."""
+"""Командная строка ядра: index и search.
+
+Коды возврата:
+0 - успех;
+1 - индекс отсутствует, несовместим (другая модель или размерность) или пуст;
+2 - проекция на фото не найдена;
+3 - вход нечитаем (фото, модель, папка библиотеки).
+"""
 
 from __future__ import annotations
 
@@ -2040,15 +2707,35 @@ import argparse
 import sys
 from pathlib import Path
 
-from gmagc_desktop.library.index import build_index, load_index, save_index
+import numpy as np
+
+from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError, build_index, load_index, save_index
 from gmagc_desktop.matcher.embedder import Embedder, OnnxEmbedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
-from gmagc_desktop.matcher.search import Searcher
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, IndexMismatchError, Searcher
 
 
 def make_embedder(model: str | None) -> Embedder:
     return OnnxEmbedder(model) if model else PixelEmbedder()
+
+
+def read_photo(path: str | Path) -> np.ndarray | None:
+    """Load photo from path; return None after printing error message to stderr."""
+    try:
+        return load_photo_bgr(path)
+    except (OSError, ValueError) as error:
+        print(f"cannot read photo {path}: {error}", file=sys.stderr)
+        return None
+
+
+def build_embedder(model: str | None) -> Embedder | None:
+    """Build embedder; return None after printing error message to stderr."""
+    try:
+        return make_embedder(model)
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f"cannot load model {model}: {error}", file=sys.stderr)
+        return None
 
 
 def _progress(done: int, total: int) -> None:
@@ -2056,14 +2743,22 @@ def _progress(done: int, total: int) -> None:
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    embedder = make_embedder(args.model)
-    index = build_index(
-        args.library, embedder, existing=load_index(args.index), progress=_progress
-    )
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
+    try:
+        index = build_index(
+            args.library, embedder, existing=load_index(args.index), progress=_progress
+        )
+    except (LibraryNotFound, LibraryScanError) as error:
+        print(file=sys.stderr)
+        print(error, file=sys.stderr)
+        return 3
     print(file=sys.stderr)
     save_index(index, args.index)
     unique = len(set(index.group_ids.tolist()))
-    print(f"{len(index)} files indexed ({unique} unique), {len(index.skipped)} skipped")
+    retry = f", {len(index.transient)} unreadable now (will be retried)" if index.transient else ""
+    print(f"{len(index)} files indexed ({unique} unique), {len(index.skipped)} skipped{retry}")
     return 0
 
 
@@ -2072,20 +2767,33 @@ def _cmd_search(args: argparse.Namespace) -> int:
     if index is None:
         print("index not found or unreadable; run 'index' first", file=sys.stderr)
         return 1
-    embedder = make_embedder(args.model)
+    if len(index) == 0:
+        print("index is empty; rebuild it with the 'index' command", file=sys.stderr)
+        return 1
+    photo = read_photo(args.photo)
+    if photo is None:
+        return 3
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
     if index.model_id != embedder.model_id:
         print(
             f"index was built with '{index.model_id}', search uses '{embedder.model_id}'",
             file=sys.stderr,
         )
         return 1
-    normalized = normalize_photo(load_photo_bgr(args.photo))
+    normalized = normalize_photo(photo)
     if normalized is None:
         print("projection not found on the photo", file=sys.stderr)
         return 2
     searcher = Searcher(index.search_data(), embedder, w_embed=args.w_embed)
     root = Path(args.library) if args.library else None
-    for rank, match in enumerate(searcher.search(normalized, top_n=args.top), start=1):
+    try:
+        matches = searcher.search(normalized, top_n=args.top)
+    except IndexMismatchError as error:
+        print(error, file=sys.stderr)
+        return 1
+    for rank, match in enumerate(matches, start=1):
         rel = index.files[match.index].rel_path
         shown = str(root / rel) if root else rel
         extra = f"  (+{len(match.members) - 1} copies)" if len(match.members) > 1 else ""
@@ -2109,7 +2817,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--model", default=None)
     search.add_argument("--library", type=Path, default=None, help="печатать полные пути")
     search.add_argument("--top", type=int, default=10)
-    search.add_argument("--w-embed", type=float, default=0.5)
+    search.add_argument("--w-embed", type=float, default=DEFAULT_W_EMBED)
     search.set_defaults(handler=_cmd_search)
     return parser
 
@@ -2126,7 +2834,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run tests to verify they pass, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/matcher/test_pipeline.py tests/test_cli.py -v`
-Expected: 8 passed (2 пайплайна + 6 CLI). Если `test_search_finds_the_right_gobo` даёт не тот файл, выяснить причину (сегментация симулятора или baseline); тест не ослаблять, а подобрать другой фиксированный seed только если проблема в конкретной случайной перспективе.
+Expected: 24 passed. Если `test_search_finds_the_right_gobo` даёт не тот файл, выяснить причину (сегментация симулятора или baseline); тест не ослаблять, а подобрать другой фиксированный seed только если проблема в конкретной случайной перспективе.
 
 ```bash
 git add apps tests
@@ -2143,13 +2851,14 @@ git commit -m "feat: add photo pipeline and index/search CLI" -m "Co-Authored-By
 - Test: `tests/test_fetch_model.py`
 
 **Interfaces:**
-- Produces: `scripts/fetch_model.py --variant {fp32,int8,fp16} [--out models]` скачивает `onnx-community/dinov2-small` (`onnx/model.onnx`, `onnx/model_int8.onnx`, `onnx/model_fp16.onnx`) в `models/dinov2-small-<variant>.onnx`, печатает и сохраняет SHA-256 рядом (`*.onnx.sha256`). Единственное место, которому нужен интернет. Функция `variant_url(variant: str) -> str`.
+- Produces: `scripts/fetch_model.py --variant {fp32,int8,fp16} [--out models]` скачивает `onnx-community/dinov2-small` (`onnx/model.onnx`, `onnx/model_int8.onnx`, `onnx/model_fp16.onnx`) в `models/dinov2-small-<variant>.onnx`, печатает и сохраняет SHA-256 рядом (`*.onnx.sha256`). Единственное место, которому нужен интернет. Функция `variant_url(variant: str) -> str`. Скачивание идёт через `download(url, target, timeout=60.0) -> str`: временный файл `*.part`, сверка с `Content-Length`, `os.replace` только после полной загрузки, `.sha256` пишется последним; существующий файл пропускается без `--force`.
 - На карточке Hugging Face у `onnx-community/dinov2-small` лицензия не указана. Перед включением модели в сборку проверить лицензию исходной модели `facebook/dinov2-small` и записать вывод в `docs/benchmarks/` (Task 15).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # path: tests/test_fetch_model.py
+import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -2176,6 +2885,134 @@ def test_variant_urls():
 def test_unknown_variant_is_rejected():
     with pytest.raises(KeyError):
         load_script().variant_url("q4")
+
+
+class FakeResponse:
+    def __init__(self, chunks, content_length=None, fail_after=None):
+        self._chunks = list(chunks)
+        self._sent = 0
+        self._fail_after = fail_after
+        self.headers = {} if content_length is None else {"Content-Length": str(content_length)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size):
+        if self._fail_after is not None and self._sent >= self._fail_after:
+            raise ConnectionResetError("boom")
+        if not self._chunks:
+            return b""
+        self._sent += 1
+        return self._chunks.pop(0)
+
+
+def fake_urlopen(response):
+    return lambda url, timeout=None: response
+
+
+def test_download_writes_target_returns_sha256_and_leaves_no_part(tmp_path, monkeypatch):
+    module = load_script()
+    chunks = [b"a" * 1000, b"b" * 500]
+    content_length = 1500
+    response = FakeResponse(chunks, content_length=content_length)
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen(response))
+
+    target = tmp_path / "dinov2.onnx"
+    checksum = module.download("http://example.com/model.onnx", target)
+
+    # Verify target content
+    expected_content = b"a" * 1000 + b"b" * 500
+    assert target.read_bytes() == expected_content
+
+    # Verify checksum
+    expected_hash = hashlib.sha256(expected_content).hexdigest()
+    assert checksum == expected_hash
+
+    # Verify .part file does not exist
+    part = target.with_name(target.name + ".part")
+    assert not part.exists()
+
+
+def test_short_download_keeps_the_existing_model(tmp_path, monkeypatch):
+    module = load_script()
+    target = tmp_path / "dinov2.onnx"
+    target.write_bytes(b"good")
+
+    chunks = [b"x" * 10]
+    response = FakeResponse(chunks, content_length=100)
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen(response))
+
+    with pytest.raises(OSError, match="incomplete"):
+        module.download("http://example.com/model.onnx", target)
+
+    # Verify target still has original content
+    assert target.read_bytes() == b"good"
+
+    # Verify .part file does not exist
+    part = target.with_name(target.name + ".part")
+    assert not part.exists()
+
+
+def test_interrupted_download_leaves_neither_target_nor_part(tmp_path, monkeypatch):
+    module = load_script()
+    chunks = [b"x" * 10, b"y" * 10]
+    response = FakeResponse(chunks, fail_after=1)
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen(response))
+
+    target = tmp_path / "dinov2.onnx"
+
+    with pytest.raises(ConnectionResetError):
+        module.download("http://example.com/model.onnx", target)
+
+    # Verify target does not exist
+    assert not target.exists()
+
+    # Verify .part file does not exist
+    part = target.with_name(target.name + ".part")
+    assert not part.exists()
+
+
+def test_main_skips_an_existing_model_without_force(tmp_path, monkeypatch):
+    module = load_script()
+    target = tmp_path / "dinov2-small-fp32.onnx"
+    target.write_bytes(b"existing")
+
+    # Monkeypatch download to raise if called
+    def mock_download(*args, **kwargs):
+        raise AssertionError("must not download")
+
+    monkeypatch.setattr(module, "download", mock_download)
+
+    result = module.main(["--out", str(tmp_path)])
+
+    assert result == 0
+    # File should be unchanged
+    assert target.read_bytes() == b"existing"
+
+
+def test_main_force_redownloads_and_writes_checksum_last(tmp_path, monkeypatch):
+    module = load_script()
+    target = tmp_path / "dinov2-small-fp32.onnx"
+    target.write_bytes(b"old")
+
+    # Monkeypatch download to write new content and return checksum
+    def mock_download(url, target_path, timeout=60.0):
+        target_path.write_bytes(b"new")
+        return "abc123"
+
+    monkeypatch.setattr(module, "download", mock_download)
+
+    result = module.main(["--out", str(tmp_path), "--force"])
+
+    assert result == 0
+    # Target should have new content
+    assert target.read_bytes() == b"new"
+    # Checksum file should exist and have correct format
+    sha_file = tmp_path / "dinov2-small-fp32.onnx.sha256"
+    assert sha_file.read_text(encoding="utf-8") == "abc123  dinov2-small-fp32.onnx\n"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2193,6 +3030,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import urllib.request
 from pathlib import Path
 
@@ -2204,22 +3042,43 @@ def variant_url(variant: str) -> str:
     return BASE_URL + VARIANTS[variant]
 
 
+def download(url: str, target: Path, timeout: float = 60.0) -> str:
+    """Скачивает url через временный файл и возвращает SHA-256. target появляется только после полной загрузки."""
+    part = target.with_name(target.name + ".part")
+    digest = hashlib.sha256()
+    written = 0
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response, open(part, "wb") as handle:
+            expected = response.headers.get("Content-Length")
+            while chunk := response.read(1 << 20):
+                handle.write(chunk)
+                digest.update(chunk)
+                written += len(chunk)
+        if expected is not None and written != int(expected):
+            raise OSError(f"incomplete download: got {written} of {expected} bytes")
+        os.replace(part, target)
+    finally:
+        part.unlink(missing_ok=True)
+    return digest.hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--variant", choices=sorted(VARIANTS), default="fp32")
     parser.add_argument("--out", type=Path, default=Path("models"))
+    parser.add_argument("--force", action="store_true", help="скачать заново, даже если файл уже есть")
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
     target = args.out / f"dinov2-small-{args.variant}.onnx"
+
+    if target.exists() and not args.force:
+        print(f"{target} already exists; use --force to download it again")
+        return 0
+
     url = variant_url(args.variant)
     print(f"downloading {url}")
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(url) as response, open(target, "wb") as handle:
-        while chunk := response.read(1 << 20):
-            handle.write(chunk)
-            digest.update(chunk)
-    checksum = digest.hexdigest()
+    checksum = download(url, target)
     (args.out / f"{target.name}.sha256").write_text(f"{checksum}  {target.name}\n", encoding="utf-8")
     print(f"saved {target} sha256={checksum}")
     return 0
@@ -2239,7 +3098,7 @@ models/*.onnx
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_fetch_model.py -v`
-Expected: 2 passed.
+Expected: 7 passed.
 
 ```bash
 git add scripts tests .gitignore
@@ -2260,18 +3119,21 @@ git commit -m "feat: add ONNX model fetch script" -m "Co-Authored-By: Claude Son
   - `PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}`
   - `load_or_build(root: Path, embedder, index_path: Path) -> LibraryIndex`: кэш индекса на диске, дозапись при повторном запуске.
   - `synthetic_eval(index, root, searcher, samples, seed) -> dict` с ключами `samples, top1, top5, segmentation_failed, median_ms`. Берётся по одному представителю каждого семейства, из него `simulate_photo`, затем полный пайплайн; попадание считается по семейству.
-  - `real_eval(index, searcher, photos_dir, labels_path) -> dict | None`: ключи `rows, labeled, top1, top5`; `None`, если папки нет. Формат `labels.json`: `{"<имя фото>": ["<rel_path файла>", ...] | null}` (`null` значит «этого гобо нет в библиотеке»).
+  - `real_eval(index, searcher, photos_dir, labels_path) -> dict | None`: ключи `rows, labeled, top1, top5`; `None`, если папки нет. Формат `labels.json`: `{"<имя фото>": ["<rel_path файла>", ...] | null}` (`null` значит «этого гобо нет в библиотеке»). Семантика: сбой сегментации на размеченном фото это промах (остаётся в знаменателе); нечитаемое фото и ошибка разметки (пустой список, неизвестный путь, неверный тип) не входят в метрики и считаются в `unreadable` / `label_errors`; слэши в путях разметки нормализуются; битый `labels.json` даёт `LabelsError` (в `main` код выхода 3); печатаемые проценты не превышают 100.
   - `main(argv) -> int`: `--library DIR` (обязателен), `--model ONNX`, `--index FILE` (по умолчанию `.gmagc-cache/index-<model_id>.npz`), `--samples 300`, `--seed 0`, `--w-embed 0.5`, `--photos DIR` (по умолчанию `photo/`), `--labels FILE` (по умолчанию `<photos>/labels.json`).
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # path: tests/test_scripts.py
+import json
+import re
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -2279,6 +3141,7 @@ sys.path.insert(0, str(SCRIPTS))
 import benchmark  # noqa: E402
 
 from gmagc_desktop import cli  # noqa: E402
+from gmagc_desktop.matcher.search import Searcher  # noqa: E402
 from gmagc_desktop.matcher.synthetic import simulate_photo  # noqa: E402
 from tests.fixtures import shape_images, write_library  # noqa: E402
 
@@ -2297,6 +3160,18 @@ def save_photo(directory, name, gobo, seed):
     return path
 
 
+def build_searcher(tmp_path):
+    library = make_library(tmp_path)
+    embedder = cli.make_embedder(None)
+    index = benchmark.load_or_build(library, embedder, tmp_path / "idx.npz")
+    return index, Searcher(index.search_data(), embedder)
+
+
+def write_labels(photos, mapping):
+    photos.mkdir(parents=True, exist_ok=True)
+    (photos / "labels.json").write_text(json.dumps(mapping), encoding="utf-8")
+
+
 def test_benchmark_synthetic_smoke(tmp_path, capsys):
     library = make_library(tmp_path)
     code = benchmark.main(
@@ -2311,6 +3186,12 @@ def test_benchmark_synthetic_smoke(tmp_path, capsys):
     assert code == 0
     assert "synthetic (n=4)" in out and "top-1" in out and "top-5" in out
     assert "no real photos" in out
+    # With 5 families, samples=4, all segmentable -> top-5 should be 100%
+    match = re.search(r"top-1 ([\d.]+)%.*top-5 ([\d.]+)%", out)
+    assert match, "synthetic line missing top-1/top-5 percentages"
+    top1, top5 = float(match.group(1)), float(match.group(2))
+    assert 0 <= top1 <= top5 <= 100, f"top-1={top1}% should be <= top-5={top5}%"
+    assert top5 == 100.0, f"top-5 should be 100.0% with 5 families and 4 samples, got {top5}%"
 
 
 def test_benchmark_real_photos_with_labels(tmp_path, capsys):
@@ -2333,15 +3214,259 @@ def test_benchmark_real_photos_with_labels(tmp_path, capsys):
     assert code == 0
     assert "real photos: labeled=1" in out
     assert "a.png:" in out and "b.png:" in out and "(not in library)" in out
+    assert "OK top-1" in out
+    assert "top-1 100.0%" in out
 
 
 def test_load_or_build_reuses_cache(tmp_path):
+    from PIL import Image
+    from gmagc_desktop.matcher.embedder import PixelEmbedder
+
+    class CountingEmbedder(PixelEmbedder):
+        """PixelEmbedder, который считает, сколько СТРОК (изображений) он получил."""
+
+        def __init__(self):
+            super().__init__()
+            self.rows_embedded = 0
+
+        def embed(self, images):
+            self.rows_embedded += len(images)
+            return super().embed(images)
+
     library = make_library(tmp_path)
-    embedder = cli.make_embedder(None)
+    embedder = CountingEmbedder()
     path = tmp_path / "cache" / "idx.npz"
+
+    # First call: builds index, embeds 6 valid library files
     first = benchmark.load_or_build(library, embedder, path)
+    assert embedder.rows_embedded == 6, f"first call should embed 6 files, got {embedder.rows_embedded}"
+    assert len(first) == 6, "index should have 6 files"
+
+    # Second call: reuses cache, should not embed anything new
     second = benchmark.load_or_build(library, embedder, path)
-    assert path.exists() and len(first) == len(second) == 6
+    assert embedder.rows_embedded == 6, (
+        f"second call should reuse cache, rows should still be 6, got {embedder.rows_embedded}"
+    )
+    assert len(second) == 6, "cached index should still have 6 files"
+
+    # Add ONE new image to library (create a real image so it can be embedded)
+    new_photo = library / "vendor_c"
+    Image.fromarray(np.eye(64, dtype=np.uint8) * 255, "L").save(new_photo / "diag.png")
+
+    # Third call: incremental build, should embed the new file
+    third = benchmark.load_or_build(library, embedder, path)
+    assert embedder.rows_embedded == 7, f"third call should embed 1 new file, rows should be 7, got {embedder.rows_embedded}"
+    assert len(third) == 7, "index should now have 7 files"
+
+
+def test_real_eval_counts_a_family_hit(tmp_path):
+    """Photo labeled with a family member -> top1==1.0, labeled==1."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": ["vendor_c/ell_small.png"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["labeled"] == 1
+    assert result["top1"] == 1.0, f"expected 100% top1 for family hit, got {result['top1'] * 100}%"
+    assert "OK top-1" in result["rows"][0]
+
+
+def test_real_eval_distinguishes_top1_from_top5(tmp_path):
+    """Photo labeled with a different family (in top-5) -> top1==0.0, top5==1.0."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": ["vendor_b/star.bmp"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["labeled"] == 1
+    assert result["top1"] == 0.0, "should not match top-1 for different family"
+    assert result["top5"] == 1.0, "should match in top-5 (only 5 families)"
+    assert "OK top-5" in result["rows"][0]
+
+
+def test_real_eval_counts_a_missing_projection_as_a_miss(tmp_path):
+    """Labeled flat photo with no projection -> labeled==1, top1==0.0, row contains MISS."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    # Create a flat photo (no gobo, will fail to project)
+    flat = np.full((480, 640, 3), 90, dtype=np.uint8)
+    photos.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(photos / "flat.png"), flat)
+    write_labels(photos, {"flat.png": ["vendor_c/ell_small.png"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["labeled"] == 1, "missing projection should count as labeled (it's a miss, not an omission)"
+    assert result["top1"] == 0.0
+    assert "projection not found  MISS" in result["rows"][0]
+
+
+def test_real_eval_reports_unreadable_photos_without_aborting(tmp_path):
+    """Unreadable photo + good labeled photo -> unreadable==1, labeled==1, run continues."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    photos.mkdir(parents=True, exist_ok=True)
+    # Create an unreadable file
+    (photos / "bad.png").write_bytes(b"junk")
+    # Create a good labeled photo
+    save_photo(photos, "good.png", shape_images()["ell"], 5)
+    write_labels(photos, {"bad.png": None, "good.png": ["vendor_c/ell_small.png"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["unreadable"] == 1, "should report unreadable file"
+    assert result["labeled"] == 1, "good photo should be labeled"
+    assert result["top1"] == 1.0, "good photo should hit"
+    assert any("bad.png" in row and "cannot read photo" in row for row in result["rows"])
+    assert any("good.png" in row and "OK top-1" in row for row in result["rows"])
+
+
+def test_real_eval_flags_label_errors_and_normalises_backslashes(tmp_path):
+    """Labels with backslashes, missing paths, empty lists, wrong types -> flagged as errors."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    save_photo(photos, "b.png", shape_images()["ring"], 6)
+    save_photo(photos, "c.png", shape_images()["ell"], 7)
+    save_photo(photos, "d.png", shape_images()["ring"], 8)
+
+    # a.png: backslash in path (should be normalized and hit)
+    # b.png: non-existent path (should error)
+    # c.png: empty list (should error)
+    # d.png: string instead of list (should error)
+    write_labels(
+        photos,
+        {
+            "a.png": ["vendor_c\\ell_small.png"],
+            "b.png": ["vendor_x/none.png"],
+            "c.png": [],
+            "d.png": "vendor_a/ring.bmp",
+        },
+    )
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["label_errors"] == 3, f"expected 3 label errors, got {result['label_errors']}"
+    assert result["labeled"] == 1, "only a.png should be labeled"
+    assert result["top1"] == 1.0, "a.png (ell) should hit vendor_c/ell_small.png"
+    assert any("LABEL ERROR" in row for row in result["rows"])
+
+
+def test_real_eval_null_label_is_not_measured(tmp_path):
+    """Photo labeled null (not in library) -> labeled==0, row has (not in library)."""
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": None})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+    assert result is not None
+    assert result["labeled"] == 0, "null label should not count as labeled"
+    assert "(not in library)" in result["rows"][0]
+
+
+def test_real_eval_raises_labels_error_for_malformed_json_and_main_returns_3(tmp_path, capsys):
+    """Malformed JSON or missing --labels file -> LabelsError or exit code 3."""
+    # Test 1: invalid JSON
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "test1_photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    (photos / "labels.json").write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(benchmark.LabelsError):
+        benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    # Test 2: JSON list instead of object
+    (photos / "labels.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(benchmark.LabelsError):
+        benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    # Test 3: main returns 3 for cannot read labels
+    lib_path = tmp_path / "lib3"
+    lib_path.mkdir()
+    write_library(lib_path)
+    photos3 = tmp_path / "test3_photos"
+    save_photo(photos3, "a.png", shape_images()["ell"], 5)
+    (photos3 / "labels.json").write_text("{not json", encoding="utf-8")
+    code = benchmark.main(
+        [
+            "--library", str(lib_path),
+            "--samples", "2",
+            "--index", str(tmp_path / "idx3.npz"),
+            "--photos", str(photos3),
+        ]
+    )
+    err = capsys.readouterr().err
+    assert code == 3, "should return exit code 3 for malformed labels"
+    assert "cannot read labels file" in err
+
+    # Test 4: main returns 3 for missing --labels file
+    lib_path4 = tmp_path / "lib4"
+    lib_path4.mkdir()
+    write_library(lib_path4)
+    photos4 = tmp_path / "test4_photos"
+    save_photo(photos4, "a.png", shape_images()["ell"], 5)
+    capsys.readouterr()  # clear
+    missing_labels = tmp_path / "missing_labels.json"
+    code = benchmark.main(
+        [
+            "--library", str(lib_path4),
+            "--samples", "2",
+            "--index", str(tmp_path / "idx4.npz"),
+            "--photos", str(photos4),
+            "--labels", str(missing_labels),
+        ]
+    )
+    err = capsys.readouterr().err
+    assert code == 3, "should return exit code 3 for missing labels file"
+    assert "labels file not found" in err
+
+
+def test_synthetic_eval_is_deterministic_and_sane(tmp_path):
+    """Synthetic eval with same seed produces same metrics; 5 families guarantee top-5 hit."""
+    index, searcher = build_searcher(tmp_path)
+    library = tmp_path / "lib"  # Already created by build_searcher via make_library
+
+    # With samples=3, seed=3
+    result1 = benchmark.synthetic_eval(index, library, searcher, samples=3, seed=3)
+    result2 = benchmark.synthetic_eval(index, library, searcher, samples=3, seed=3)
+
+    # Should have same metrics (ignore median_ms, which may differ slightly)
+    assert result1["samples"] == result2["samples"] == 3
+    assert result1["top1"] == result2["top1"], "same seed should produce same top1"
+    assert result1["top5"] == result2["top5"], "same seed should produce same top5"
+    seg_fail1, seg_fail2 = result1["segmentation_failed"], result2["segmentation_failed"]
+    assert seg_fail1 == seg_fail2, "same seed should produce same segmentation_failed"
+
+    # With 5 families, all fit in top-5, so real searcher should guarantee top5==1.0
+    assert result1["top5"] == 1.0, f"with 5 families and pixel embedder, top5 should be 1.0, got {result1['top5']}"
+    assert result1["segmentation_failed"] == 0.0, f"shapes should always segment, got {result1['segmentation_failed']}"
+
+    # Sanity checks
+    assert 0.0 <= result1["top1"] <= result1["top5"] <= 1.0
+    assert 0.0 <= result1["segmentation_failed"] <= 1.0
+
+
+def test_synthetic_eval_counts_misses_when_the_search_is_wrong(tmp_path):
+    """Synthetic eval with an empty-result searcher should give top1==0.0, top5==0.0."""
+    index, _ = build_searcher(tmp_path)
+    library = tmp_path / "lib"
+
+    class StubSearcher:
+        def search(self, normalized, top_n=10):
+            return []
+
+    stub_searcher = StubSearcher()
+    result = benchmark.synthetic_eval(index, library, stub_searcher, samples=3, seed=5)
+
+    # Stub searcher returns no matches, so all should be misses
+    assert result["top1"] == 0.0, f"no matches should give top1==0.0, got {result['top1']}"
+    assert result["top5"] == 0.0, f"no matches should give top5==0.0, got {result['top5']}"
+    assert result["samples"] == 3
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2369,14 +3494,38 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "desktop"))
 
-from gmagc_desktop.library.index import LibraryIndex, build_index, load_index, save_index  # noqa: E402
-from gmagc_desktop.matcher.embedder import OnnxEmbedder, PixelEmbedder  # noqa: E402
+from gmagc_desktop.cli import build_embedder  # noqa: E402
+from gmagc_desktop.library.index import (  # noqa: E402
+    LibraryIndex,
+    LibraryNotFound,
+    LibraryScanError,
+    build_index,
+    load_index,
+    save_index,
+)
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr  # noqa: E402
 from gmagc_desktop.matcher.pipeline import normalize_photo  # noqa: E402
-from gmagc_desktop.matcher.search import Searcher  # noqa: E402
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher  # noqa: E402
 from gmagc_desktop.matcher.synthetic import simulate_photo  # noqa: E402
 
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_MISSING = object()  # у фото нет записи в labels.json (настоящее значение метки с ним не совпадёт)
+
+
+class LabelsError(ValueError):
+    """labels.json нельзя прочитать или у него неверный формат."""
+
+
+def load_labels(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    try:
+        labels = json.loads(path.read_text(encoding="utf-8-sig"))  # BOM: так пишет Windows PowerShell
+    except (OSError, ValueError) as error:
+        raise LabelsError(f"cannot read labels file {path}: {error}") from error
+    if not isinstance(labels, dict):
+        raise LabelsError(f"labels file {path} must contain a JSON object")
+    return labels
 
 
 def _progress(done: int, total: int) -> None:
@@ -2426,40 +3575,75 @@ def synthetic_eval(index: LibraryIndex, root: Path, searcher: Searcher, samples:
     }
 
 
-def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_path: Path):
+def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_path: Path) -> dict | None:
     if not photos_dir.is_dir():
         return None
-    labels = json.loads(labels_path.read_text(encoding="utf-8")) if labels_path.is_file() else {}
+    labels = load_labels(labels_path)
     by_path = {file.rel_path: i for i, file in enumerate(index.files)}
     rows: list[str] = []
-    labeled = hits1 = hits5 = 0
-    for photo_path in sorted(p for p in photos_dir.iterdir() if p.suffix.lower() in PHOTO_SUFFIXES):
-        normalized = normalize_photo(load_photo_bgr(photo_path))
-        if normalized is None:
-            rows.append(f"{photo_path.name}: projection not found")
+    labeled = hits1 = hits5 = unreadable = label_errors = 0
+    hit_scores: list[float] = []  # оценка top-1 у фото, найденного верно
+    null_scores: list[float] = []  # оценка top-1 у фото с меткой null (в библиотеке его нет)
+    photo_paths = sorted(p for p in photos_dir.iterdir() if p.is_file() and p.suffix.lower() in PHOTO_SUFFIXES)
+    for photo_path in photo_paths:
+        name = photo_path.name
+        try:
+            photo = load_photo_bgr(photo_path)
+        except (OSError, ValueError) as error:
+            unreadable += 1
+            rows.append(f"{name}: cannot read photo ({error})")
             continue
+
+        expected = labels.get(name, _MISSING)
+        wanted: set[int] | None = None
+        if isinstance(expected, list):
+            paths = [p.replace("\\", "/") for p in expected if isinstance(p, str)]
+            unknown = [p for p in paths if p not in by_path]
+            if not paths or len(paths) != len(expected) or unknown:
+                label_errors += 1
+                rows.append(f"{name}: LABEL ERROR (empty list or unknown path: {unknown or expected})")
+                continue
+            wanted = {int(index.group_ids[by_path[p]]) for p in paths}
+        elif expected is not None and expected is not _MISSING:
+            label_errors += 1
+            rows.append(f"{name}: LABEL ERROR (expected a list of paths or null)")
+            continue
+
+        normalized = normalize_photo(photo)
+        if normalized is None:
+            if wanted is not None:
+                labeled += 1  # проекция не найдена: это промах, а не выпадение из статистики
+            rows.append(f"{name}: projection not found" + ("  MISS" if wanted is not None else ""))
+            continue
+
         matches = searcher.search(normalized, top_n=5)
         top = matches[0]
-        note = ""
-        expected = labels.get(photo_path.name, "unlabeled")
-        if isinstance(expected, list):
-            wanted = {int(index.group_ids[by_path[p]]) for p in expected if p in by_path}
-            found = [int(index.group_ids[m.index]) for m in matches]
+        found = [int(index.group_ids[m.index]) for m in matches]
+        note = "  (not in library)" if expected is None else ""
+        if wanted is not None:
             labeled += 1
-            first_ok = found[0] in wanted
-            hits1 += first_ok
-            hits5 += any(group in wanted for group in found)
-            note = "  OK top-1" if first_ok else ("  OK top-5" if any(g in wanted for g in found) else "  MISS")
+            in_top1 = found[0] in wanted
+            in_top5 = any(group in wanted for group in found)
+            hits1 += in_top1
+            hits5 += in_top5
+            note = "  OK top-1" if in_top1 else ("  OK top-5" if in_top5 else "  MISS")
+            if in_top1:
+                hit_scores.append(min(top.score, 1.0))
         elif expected is None:
-            note = "  (not in library)"
-        rows.append(
-            f"{photo_path.name}: {index.files[top.index].rel_path}  {top.score * 100:.1f}%{note}"
-        )
+            null_scores.append(min(top.score, 1.0))
+        rows.append(f"{name}: {index.files[top.index].rel_path}  {min(top.score, 1.0) * 100:.1f}%{note}")
+    for name in sorted(set(labels) - {p.name for p in photo_paths}):
+        label_errors += 1
+        rows.append(f"LABEL ERROR: label for unknown photo {name}")
     return {
         "rows": rows,
         "labeled": labeled,
         "top1": hits1 / labeled if labeled else None,
         "top5": hits5 / labeled if labeled else None,
+        "unreadable": unreadable,
+        "label_errors": label_errors,
+        "hit_scores": hit_scores,
+        "null_scores": null_scores,
     }
 
 
@@ -2470,14 +3654,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--index", type=Path, default=None)
     parser.add_argument("--samples", type=int, default=300)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--w-embed", type=float, default=0.5)
+    parser.add_argument("--w-embed", type=float, default=DEFAULT_W_EMBED)
     parser.add_argument("--photos", type=Path, default=ROOT / "photo")
     parser.add_argument("--labels", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    embedder = OnnxEmbedder(args.model) if args.model else PixelEmbedder()
+    labels_path = args.labels or args.photos / "labels.json"
+    if args.labels is not None and not args.labels.is_file():
+        print(f"labels file not found: {args.labels}", file=sys.stderr)
+        return 3
+
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
     index_path = args.index or ROOT / ".gmagc-cache" / f"index-{embedder.model_id}.npz"
-    index = load_or_build(args.library, embedder, index_path)
+    try:
+        index = load_or_build(args.library, embedder, index_path)
+    except (LibraryNotFound, LibraryScanError) as error:
+        print(error, file=sys.stderr)
+        return 3
     searcher = Searcher(index.search_data(), embedder, w_embed=args.w_embed)
 
     families = len(set(index.group_ids.tolist()))
@@ -2491,17 +3686,31 @@ def main(argv: list[str] | None = None) -> int:
         f"median {stats['median_ms']:.0f} ms"
     )
 
-    real = real_eval(index, searcher, args.photos, args.labels or args.photos / "labels.json")
+    try:
+        real = real_eval(index, searcher, args.photos, labels_path)
+    except LabelsError as error:
+        print(error, file=sys.stderr)
+        return 3
+
     if real is None:
         print("no real photos folder, skipped")
         return 0
     if real["labeled"]:
         print(
             f"real photos: labeled={real['labeled']}  top-1 {real['top1'] * 100:.1f}%  "
-            f"top-5 {real['top5'] * 100:.1f}%"
+            f"top-5 {real['top5'] * 100:.1f}%  (unreadable={real['unreadable']}, label errors={real['label_errors']})"
         )
     else:
-        print("real photos: no labels yet (fill labels.json)")
+        print(
+            f"real photos: no labels yet (fill labels.json)  "
+            f"(unreadable={real['unreadable']}, label errors={real['label_errors']})"
+        )
+    if real["hit_scores"] and real["null_scores"]:
+        print(
+            f"top-1 score: correct min {min(real['hit_scores']) * 100:.1f}% "
+            f"median {statistics.median(real['hit_scores']) * 100:.1f}% | "
+            f"not in library max {max(real['null_scores']) * 100:.1f}%"
+        )
     print("\n".join(real["rows"]))
     return 0
 
@@ -2515,7 +3724,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_scripts.py -v`
-Expected: 3 passed.
+Expected: 12 passed.
 
 ```bash
 git add scripts tests
@@ -2527,20 +3736,54 @@ git commit -m "feat: add quality benchmark script" -m "Co-Authored-By: Claude So
 ### Task 14: Отчёт по реальным фото и просмотр семейств дублей
 
 **Files:**
-- Create: `scripts/report_photos.py`, `scripts/inspect_groups.py`
-- Modify: `tests/test_scripts.py` (дописать в конец, импорты вверху файла уже есть)
+- Create: `scripts/_thumbs.py`, `scripts/report_photos.py`, `scripts/inspect_groups.py`, `tests/test_thumbs.py`
+- Modify: `tests/test_scripts.py` (дописать в конец; при выполнении импорты `inspect_groups` и `report_photos` перенесены наверх файла, `import json` там уже есть), `pyproject.toml` (добавить `"tests/test_thumbs.py"` в per-file-ignores)
 
 **Interfaces:**
 - Consumes: `load_or_build`, `PHOTO_SUFFIXES` (Task 13), `make_embedder` (Task 11), `normalize_photo`, `Searcher`, `load_index`.
 - Produces:
   - `scripts/report_photos.py --library DIR [--model ONNX] [--index FILE] [--photos DIR] [--out FILE] [--top 5]`: HTML с миниатюрой вырезки проекции и top-N (превью, оценка, путь, число копий) для каждого фото; рядом `labels.template.json` со всеми фото и значениями `null`. По умолчанию `--out` это `.gmagc-cache/photo_report.html`. `main(argv) -> int`.
   - `scripts/inspect_groups.py --library DIR --index FILE [--count 12] [--seed 0] [--out FILE]`: печатает статистику семейств и пути участников случайных семейств с дублями; сохраняет контактный лист (по умолчанию `.gmagc-cache/groups_sheet.png`). `main(argv) -> int`.
+  - `scripts/_thumbs.py::square_pad(gray: np.ndarray) -> np.ndarray`: дополняет изображение чёрным до квадрата, оригинал по центру (общий помощник обоих скриптов вместо дублирования кода).
+  - Ошибки `report_photos` (решения ревью): нет папки `--photos` или библиотеки -> сообщение в stderr и код выхода 3; нечитаемое фото не прерывает прогон (карточка `cannot read photo: ...`, фото остаётся в шаблоне разметки); недоступный файл библиотеки при рисовании превью заменяется чёрным изображением 1×1. В `inspect_groups` недоступный файл даёт чёрную ячейку.
 
-- [ ] **Step 1: Write the failing tests** (дописать в конец `tests/test_scripts.py`)
+- [ ] **Step 1: Write the failing tests** (`tests/test_thumbs.py` создаётся целиком, остальное дописывается в конец `tests/test_scripts.py`)
 
 ```python
-import json  # noqa: E402
+# path: tests/test_thumbs.py
+import sys
+from pathlib import Path
 
+import numpy as np
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+import _thumbs  # noqa: E402
+
+
+def test_square_pad_rectangular_image():
+    """A 10x20 image becomes 20x20 with the original centered."""
+    gray = np.ones((10, 20), np.uint8) * 100
+    result = _thumbs.square_pad(gray)
+
+    assert result.shape == (20, 20), f"expected shape (20, 20), got {result.shape}"
+    # Original should be centered: rows 5..15 hold the data
+    assert np.all(result[0:5, :] == 0), "top padding should be zero"
+    assert np.all(result[15:20, :] == 0), "bottom padding should be zero"
+    assert np.all(result[5:15, :] == 100), "center rows should contain original data"
+
+
+def test_square_pad_square_image():
+    """A square image is returned equal to the input."""
+    gray = np.ones((20, 20), np.uint8) * 50
+    result = _thumbs.square_pad(gray)
+
+    assert result.shape == (20, 20)
+    assert np.array_equal(result, gray)
+```
+
+```python
 import inspect_groups  # noqa: E402
 import report_photos  # noqa: E402
 
@@ -2583,6 +3826,307 @@ def test_inspect_groups_lists_duplicate_families(tmp_path, capsys):
     assert code == 0 and "5 families, 1 with duplicates, 2 files in them" in out
     assert "vendor_b/ell.png" in out and "vendor_c/ell_small.png" in out
     assert sheet.exists()
+
+
+def test_report_photos_survives_an_unreadable_photo(tmp_path):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "good.png", shape_images()["ell"], 5)
+    # Create an unreadable file
+    (photos / "bad.png").write_bytes(b"junk")
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(out),
+        ]
+    )
+
+    html_text = out.read_text(encoding="utf-8")
+    template = json.loads((out.parent / "labels.template.json").read_text(encoding="utf-8"))
+    assert code == 0
+    assert "cannot read photo" in html_text
+    assert "good.png" in html_text
+    assert "bad.png" in html_text
+    assert template == {"bad.png": None, "good.png": None}
+
+
+def test_report_photos_missing_photos_folder_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(tmp_path / "nonexistent"),
+            "--out", str(out),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "photos folder not found" in err
+
+
+def test_report_photos_missing_library_returns_3(tmp_path, capsys):
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    out = tmp_path / "report" / "photo_report.html"
+
+    code = report_photos.main(
+        [
+            "--library", str(tmp_path / "nonexistent_lib"),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(out),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "cannot read library" in err or "cannot read" in err or "FileNotFoundError" in err
+
+
+def test_benchmark_missing_library_returns_3(tmp_path, capsys):
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(tmp_path / "unplugged"), "--index", str(index_path)])
+
+    assert code == 3
+    assert "library folder not found" in capsys.readouterr().err
+    assert not index_path.exists()
+
+
+def test_benchmark_empty_library_returns_3_without_writing_an_index(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(empty), "--index", str(index_path)])
+
+    assert code == 3
+    assert "no PNG/BMP files found" in capsys.readouterr().err
+    assert not index_path.exists()
+
+
+@pytest.mark.parametrize("problem", ["missing", "garbage"])
+def test_benchmark_bad_model_returns_3(tmp_path, capsys, problem):
+    library = make_library(tmp_path)
+    model = tmp_path / "model.onnx"
+    if problem == "garbage":
+        model.write_bytes(b"not an onnx model")
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(library), "--model", str(model), "--index", str(index_path)])
+
+    err = capsys.readouterr().err
+    assert code == 3 and "cannot load model" in err and "Traceback" not in err
+    assert not index_path.exists()
+
+
+def test_benchmark_missing_labels_file_returns_3_before_any_index_is_built(tmp_path, capsys):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(
+        [
+            "--library", str(library),
+            "--index", str(index_path),
+            "--photos", str(photos),
+            "--labels", str(tmp_path / "missing_labels.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 3 and "labels file not found" in captured.err
+    assert not index_path.exists()
+    assert "synthetic" not in captured.out
+
+
+def test_report_photos_bad_model_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    index_path = tmp_path / "idx.npz"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--model", str(tmp_path / "nope.onnx"),
+            "--index", str(index_path),
+            "--photos", str(photos),
+            "--out", str(tmp_path / "report" / "r.html"),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3 and "cannot load model" in err and "Traceback" not in err
+    assert not index_path.exists()
+
+
+def test_report_photos_empty_library_returns_3(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+
+    code = report_photos.main(
+        [
+            "--library", str(empty),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(tmp_path / "report" / "r.html"),
+        ]
+    )
+
+    assert code == 3 and "no PNG/BMP files found" in capsys.readouterr().err
+
+
+def test_inspect_groups_missing_library_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    index_path = tmp_path / "idx.npz"
+    cli.main(["index", str(library), "--index", str(index_path)])
+    capsys.readouterr()
+
+    code = inspect_groups.main(
+        ["--library", str(tmp_path / "unplugged"), "--index", str(index_path), "--out", str(tmp_path / "s.png")]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3 and f"library folder not found: {tmp_path / 'unplugged'}" in err
+    assert not (tmp_path / "s.png").exists()
+
+
+def test_load_labels_accepts_a_utf8_bom_from_windows_powershell(tmp_path):
+    path = tmp_path / "labels.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"a.png": None, "b.png": ["x/y.png"]}).encode("utf-8"))
+
+    assert benchmark.load_labels(path) == {"a.png": None, "b.png": ["x/y.png"]}
+
+
+def test_real_eval_works_with_a_bom_labels_file(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    (photos / "labels.json").write_bytes(b"\xef\xbb\xbf" + b'{"a.png": ["vendor_c/ell_small.png"]}')
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["labeled"] == 1 and result["top1"] == 1.0 and result["label_errors"] == 0
+
+
+def test_real_eval_reports_a_label_for_a_photo_that_does_not_exist(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": ["vendor_c/ell_small.png"], "ghost.png": None, "typo.png": ["vendor_a/ring.png"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["label_errors"] == 2
+    assert "LABEL ERROR: label for unknown photo ghost.png" in result["rows"]
+    assert "LABEL ERROR: label for unknown photo typo.png" in result["rows"]
+    assert result["labeled"] == 1 and result["top1"] == 1.0
+
+
+def test_real_eval_a_label_value_of_unlabeled_is_an_error_not_a_missing_label(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": "unlabeled"})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["label_errors"] == 1 and result["labeled"] == 0
+    assert any("a.png: LABEL ERROR" in row for row in result["rows"])
+
+
+def test_real_eval_collects_top1_scores_for_hits_and_for_not_in_library_photos(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "hit.png", shape_images()["ell"], 5)
+    save_photo(photos, "top5only.png", shape_images()["ell"], 7)
+    save_photo(photos, "null.png", shape_images()["ring"], 6)
+    save_photo(photos, "unlabeled.png", shape_images()["star"], 8)
+    write_labels(
+        photos,
+        {"hit.png": ["vendor_c/ell_small.png"], "top5only.png": ["vendor_b/star.bmp"], "null.png": None},
+    )
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["labeled"] == 2 and result["top1"] == 0.5
+    assert len(result["hit_scores"]) == 1  # только фото с верным top-1
+    assert len(result["null_scores"]) == 1  # только фото с меткой null
+    assert all(0.0 <= score <= 1.0 for score in result["hit_scores"] + result["null_scores"])
+    hit_row = next(row for row in result["rows"] if row.startswith("hit.png"))
+    null_row = next(row for row in result["rows"] if row.startswith("null.png"))
+    assert f"{result['hit_scores'][0] * 100:.1f}%" in hit_row
+    assert f"{result['null_scores'][0] * 100:.1f}%" in null_row
+
+
+def test_real_eval_clamps_collected_scores_to_one(tmp_path):
+    from gmagc_desktop.matcher.search import Match
+
+    index, _ = build_searcher(tmp_path)
+    position = [f.rel_path for f in index.files].index("vendor_c/ell_small.png")
+
+    class Overconfident:
+        def search(self, normalized, top_n=10):
+            return [Match(position, 1.3, 0.9, 1.0, 0.0, False, (position,))]
+
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    save_photo(photos, "b.png", shape_images()["ring"], 6)
+    write_labels(photos, {"a.png": ["vendor_c/ell_small.png"], "b.png": None})
+
+    result = benchmark.real_eval(index, Overconfident(), photos, photos / "labels.json")
+
+    assert result["hit_scores"] == [1.0] and result["null_scores"] == [1.0]
+
+
+def _run_benchmark_on_photos(tmp_path, capsys, labels):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    save_photo(photos, "b.png", shape_images()["ring"], 6)
+    write_labels(photos, labels)
+    code = benchmark.main(
+        ["--library", str(library), "--samples", "2", "--index", str(tmp_path / "idx.npz"), "--photos", str(photos)]
+    )
+    assert code == 0
+    return capsys.readouterr().out
+
+
+def test_benchmark_prints_the_no_match_calibration_line(tmp_path, capsys):
+    out = _run_benchmark_on_photos(tmp_path, capsys, {"a.png": ["vendor_c/ell_small.png"], "b.png": None})
+
+    line = next(line for line in out.splitlines() if line.startswith("top-1 score:"))
+    match = re.fullmatch(r"top-1 score: correct min ([\d.]+)% median ([\d.]+)% \| not in library max ([\d.]+)%", line)
+    assert match, line
+    hit_row = next(row for row in out.splitlines() if row.startswith("a.png:"))
+    null_row = next(row for row in out.splitlines() if row.startswith("b.png:"))
+    hit_percent, null_percent = match.group(1), match.group(3)
+    assert f"  {hit_percent}%" in hit_row and f"  {null_percent}%" in null_row
+    assert match.group(1) == match.group(2)  # одно попадание: минимум == медиана
+
+
+def test_benchmark_omits_the_calibration_line_when_there_are_no_null_photos(tmp_path, capsys):
+    out = _run_benchmark_on_photos(
+        tmp_path, capsys, {"a.png": ["vendor_c/ell_small.png"], "b.png": ["vendor_a/ring.png"]}
+    )
+    assert "top-1 score:" not in out
+
+
+def test_benchmark_omits_the_calibration_line_when_there_are_no_correct_hits(tmp_path, capsys):
+    out = _run_benchmark_on_photos(tmp_path, capsys, {"a.png": None, "b.png": None})
+    assert "top-1 score:" not in out
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -2591,6 +4135,24 @@ Run: `.venv\Scripts\python.exe -m pytest tests/test_scripts.py -v`
 Expected: FAIL (`ModuleNotFoundError: report_photos`).
 
 - [ ] **Step 3: Write minimal implementation**
+
+```python
+# path: scripts/_thumbs.py
+"""Shared thumbnail utilities."""
+
+import numpy as np
+
+
+def square_pad(gray: np.ndarray) -> np.ndarray:
+    """Дополняет изображение чёрным до квадрата, оригинал по центру."""
+    side = max(gray.shape)
+    square = np.zeros((side, side), np.uint8)
+    y, x = (side - gray.shape[0]) // 2, (side - gray.shape[1]) // 2
+    square[y : y + gray.shape[0], x : x + gray.shape[1]] = gray
+    return square
+```
+
+В `pyproject.toml` добавить в `[tool.ruff.lint.per-file-ignores]` строку `"tests/test_thumbs.py" = ["E402", "I001"]`.
 
 ```python
 # path: scripts/report_photos.py
@@ -2613,21 +4175,19 @@ sys.path.insert(0, str(ROOT / "apps" / "desktop"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from benchmark import PHOTO_SUFFIXES, load_or_build  # noqa: E402
+from _thumbs import square_pad  # noqa: E402
 
-from gmagc_desktop.cli import make_embedder  # noqa: E402
+from gmagc_desktop.cli import build_embedder  # noqa: E402
+from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError  # noqa: E402
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr  # noqa: E402
 from gmagc_desktop.matcher.pipeline import normalize_photo  # noqa: E402
-from gmagc_desktop.matcher.search import Searcher  # noqa: E402
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher  # noqa: E402
 
 THUMB = 128
 
 
 def data_uri(gray: np.ndarray) -> str:
-    side = max(gray.shape)
-    square = np.zeros((side, side), np.uint8)
-    y, x = (side - gray.shape[0]) // 2, (side - gray.shape[1]) // 2
-    square[y : y + gray.shape[0], x : x + gray.shape[1]] = gray
-    small = cv2.resize(square, (THUMB, THUMB), interpolation=cv2.INTER_AREA)
+    small = cv2.resize(square_pad(gray), (THUMB, THUMB), interpolation=cv2.INTER_AREA)
     ok, buffer = cv2.imencode(".png", small)
     return "data:image/png;base64," + base64.b64encode(buffer.tobytes()).decode("ascii")
 
@@ -2642,17 +4202,37 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top", type=int, default=5)
     args = parser.parse_args(argv)
 
-    embedder = make_embedder(args.model)
+    # Check if photos directory exists
+    if not args.photos.is_dir():
+        print(f"photos folder not found: {args.photos}", file=sys.stderr)
+        return 3
+
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
     index_path = args.index or ROOT / ".gmagc-cache" / f"index-{embedder.model_id}.npz"
-    index = load_or_build(args.library, embedder, index_path)
-    searcher = Searcher(index.search_data(), embedder)
+    try:
+        index = load_or_build(args.library, embedder, index_path)
+    except (LibraryNotFound, LibraryScanError) as error:
+        print(f"cannot read library: {error}", file=sys.stderr)
+        return 3
+    searcher = Searcher(index.search_data(), embedder, w_embed=DEFAULT_W_EMBED)
 
     sections = []
     template: dict[str, None] = {}
-    for photo_path in sorted(p for p in args.photos.iterdir() if p.suffix.lower() in PHOTO_SUFFIXES):
+    for photo_path in sorted(p for p in args.photos.iterdir() if p.is_file() and p.suffix.lower() in PHOTO_SUFFIXES):
         template[photo_path.name] = None
-        normalized = normalize_photo(load_photo_bgr(photo_path))
         cards = []
+
+        # Try to read the photo
+        try:
+            photo = load_photo_bgr(photo_path)
+        except (OSError, ValueError) as error:
+            cards.append(f"<p>cannot read photo: {html.escape(str(error))}</p>")
+            sections.append(f"<h2>{html.escape(photo_path.name)}</h2><div class=\"row\">{''.join(cards)}</div>")
+            continue
+
+        normalized = normalize_photo(photo)
         if normalized is None:
             cards.append("<p>projection not found</p>")
         else:
@@ -2660,7 +4240,16 @@ def main(argv: list[str] | None = None) -> int:
             for rank, match in enumerate(searcher.search(normalized, top_n=args.top), start=1):
                 file = index.files[match.index]
                 copies = "; ".join(index.files[i].rel_path for i in match.members)
-                thumb = data_uri(load_library_gray(args.library / file.rel_path))
+
+                # Try to load the thumbnail, use blank image if it fails
+                try:
+                    thumb_gray = load_library_gray(args.library / file.rel_path)
+                    thumb = data_uri(thumb_gray)
+                except (OSError, ValueError):
+                    # Use blank 1x1 black image
+                    blank = np.zeros((1, 1), np.uint8)
+                    thumb = data_uri(blank)
+
                 cards.append(
                     f'<div class="card"><img src="{thumb}">'
                     f"<b>#{rank} {match.score * 100:.1f}%</b>"
@@ -2704,6 +4293,10 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _thumbs import square_pad  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "desktop"))
 
@@ -2723,6 +4316,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=ROOT / ".gmagc-cache" / "groups_sheet.png")
     args = parser.parse_args(argv)
 
+    if not args.library.is_dir():
+        print(f"library folder not found: {args.library}", file=sys.stderr)
+        return 3
     index = load_index(args.index)
     if index is None:
         print("index not found", file=sys.stderr)
@@ -2748,11 +4344,12 @@ def main(argv: list[str] | None = None) -> int:
             rel = index.files[position].rel_path
             print(f"  {rel}")
             if column < COLUMNS:
-                gray = load_library_gray(args.library / rel)
-                side = max(gray.shape)
-                square = np.zeros((side, side), np.uint8)
-                y, x = (side - gray.shape[0]) // 2, (side - gray.shape[1]) // 2
-                square[y : y + gray.shape[0], x : x + gray.shape[1]] = gray
+                try:
+                    gray = load_library_gray(args.library / rel)
+                except (OSError, ValueError):
+                    # Use blank 1x1 black image if file cannot be read
+                    gray = np.zeros((1, 1), np.uint8)
+                square = square_pad(gray)
                 sheet[row * CELL : (row + 1) * CELL, column * CELL : (column + 1) * CELL] = cv2.resize(
                     square, (CELL, CELL), interpolation=cv2.INTER_AREA
                 )
@@ -2769,7 +4366,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run tests to verify they pass, commit**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_scripts.py -v`
-Expected: 5 passed.
+Expected: 24 passed.
 
 ```bash
 git add scripts tests
@@ -2862,3 +4459,31 @@ git commit -m "docs: record core matcher benchmark and choose defaults" -m "Co-A
 ## Что дальше
 
 После Task 15 и решения по качеству пишутся отдельные планы: (2) сервер и ПК-интерфейс, (3) мобильный клиент, (4) CI и сборки под Windows/macOS/Android. Тогда же закрываются риски 3–6 из спецификации (QR, cleartext на Android, брандмауэр, общий пакет в `flet build`).
+
+
+---
+
+## Итоги выполнения (дописано после реализации)
+
+План выполнен на ветке `feat/core-matcher`: 15 задач, 149 тестов, `ruff check .` чист. Код в блоках выше синхронизирован с тем, что реально лежит в репозитории после ревью (расхождение только в месте импортов `tests/test_scripts.py`: в репозитории они наверху файла).
+
+**Что изменило ревью относительно первоначального текста плана** (все изменения уже внесены в блоки кода и «Interfaces»):
+- Задача 3: тест слияния пятен заменён парой «близкие / далёкие пятна» (прежний проходил и без слияния).
+- Задача 5: ошибки onnxruntime переводятся в `ValueError`; тест с реальными разными строками в батчах.
+- Задача 8: проверка пар порциями по бюджету в байтах (100 000 пар занимали бы ~1,6 ГБ).
+- Задача 10: `LibraryNotFound` / `LibraryScanError`, отказ строить частичный или пустой индекс, «временные» сбои чтения не сохраняются как пропуск, `zlib.error` / `TokenError` при чтении кэша.
+- Задача 11: контракт кодов выхода 0 / 1 / 2 / 3, публичные `read_photo` и `build_embedder`, проверка размерности индекса и эмбеддера, единый `DEFAULT_W_EMBED`.
+- Задача 12: атомарная загрузка (`.part`, `Content-Length`, `--force`).
+- Задача 13: честные метрики бенчмарка (промах сегментации остаётся в знаменателе, ошибки разметки и нечитаемые фото отдельно, `utf-8-sig`, калибровочная строка порога «нет совпадения»).
+- Задача 14: общий помощник `scripts/_thumbs.py`, понятные ошибки вместо traceback.
+
+**Результат замеров** (Задача 15): `docs/benchmarks/2026-09-19-core-matcher.md`. Готовая нейросеть DINOv2-small проиграла пиксельному вектору 16×16; на реальных фото пиксельный движок даёт top-5 ≈ 91%.
+
+**Отложено в следующие планы** (зафиксировано при ревью, не блокирует объединение ветки):
+- Обрезанные PNG/BMP сейчас считаются «временно нечитаемыми» и перечитываются при каждой сборке: в ветке `OSError` с `errno is None` и текстом `truncated` / `broken data stream` / `decoder error` нужно считать окончательным пропуском (около 5 строк и тест на настоящий обрезанный PNG).
+- Проверка `rel_path` из индекса на абсолютные пути и `..` до того, как индекс будет приходить не только с локального диска (сервер).
+- Уникальное имя временного файла при сохранении индекса и сериализация пересборок (сервер).
+- Проход `stat()` при сканировании библиотеки, отличный от `FileNotFoundError`, пока даёт traceback; кэши, построенные до финальной волны, сохраняют ошибочно пропущенные файлы (версия формата не менялась).
+- Перенос логики «загрузить или построить индекс» из `scripts/benchmark.py` в пакет, чтобы её могли использовать сервер и интерфейс.
+- Проброс порогов группировки (`cosine_threshold`, `iou_threshold`) через `build_index`, CLI и бенчмарк: нужен, только если вернёмся к нейросетевому вектору.
+- Пересчёт индекса после обновления кода: кэш из-за смены правил пропуска стоит пересобрать.
