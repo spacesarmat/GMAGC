@@ -939,6 +939,7 @@ git commit -m "feat: add the search service (index, search, results)" -m "Co-Aut
 # path: tests/desktop/test_reveal.py
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -965,7 +966,7 @@ def test_macos_reveals_the_file_in_finder(monkeypatch, launched):
 
     assert reveal_in_file_manager("/lib/ell.png") is True
 
-    assert launched == [["open", "-R", "/lib/ell.png"]]
+    assert launched == [["open", "-R", str(Path("/lib/ell.png"))]]
 
 
 def test_other_systems_open_the_containing_folder(monkeypatch, launched):
@@ -973,7 +974,7 @@ def test_other_systems_open_the_containing_folder(monkeypatch, launched):
 
     assert reveal_in_file_manager("/lib/sub/ell.png") is True
 
-    assert launched == [["xdg-open", "/lib/sub"]]
+    assert launched == [["xdg-open", str(Path("/lib/sub/ell.png").parent)]]
 
 
 def test_launch_failure_returns_false(monkeypatch):
