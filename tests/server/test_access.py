@@ -63,3 +63,20 @@ def test_success_resets_the_failure_counter():
 def test_rate_limiter_rejects_a_non_positive_limit(bad):
     with pytest.raises(ValueError):
         RateLimiter(max_failures=bad)
+
+
+def test_the_reported_wait_never_exceeds_the_block_time_even_if_the_clock_reads_earlier():
+    class Wobbly:
+        def __init__(self):
+            self.now = 1000.0
+
+        def __call__(self):
+            return self.now
+
+    clock = Wobbly()
+    limiter = RateLimiter(max_failures=1, block_seconds=30.0, clock=clock)
+    limiter.failure("a")
+
+    clock.now = 999.4  # часы другого потока прочитаны чуть раньше момента блокировки
+
+    assert limiter.retry_after("a") == 30

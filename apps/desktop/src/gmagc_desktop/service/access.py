@@ -48,7 +48,8 @@ class RateLimiter:
             if left <= 0:
                 del self._blocked_until[client]
                 return 0
-            return math.ceil(left)
+            # не больше настроенной паузы, даже если часы в другом потоке отстали на доли секунды (плавающий тест на Windows)
+            return min(math.ceil(left), math.ceil(self._block_seconds))
 
     def failure(self, client: str) -> None:
         with self._lock:
