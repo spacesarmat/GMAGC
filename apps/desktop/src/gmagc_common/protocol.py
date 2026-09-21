@@ -20,6 +20,9 @@ CODE_LENGTH = 8
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # без похожих 0/O и 1/I/L
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 LINK_SCHEME = "gmagc"
+OUTCOME_FOUND = "found"
+OUTCOME_LOW_CONFIDENCE = "low_confidence"
+OUTCOME_NO_PROJECTION = "no_projection"
 
 ERROR_STATUS = {
     "unauthorized": 401,
