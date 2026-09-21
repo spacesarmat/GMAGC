@@ -2,6 +2,6 @@
 
 import flet as ft
 
-from gmagc_desktop.app import build_page
+from gmagc_desktop.ui.app import build_page
 
 ft.run(build_page)

@@ -1175,7 +1175,8 @@ def ell_photo():
 
 
 def indexed_app(tmp_path, library, **services):
-    app, page = make_app(tmp_path, picker=FakePicker(folder=str(library)), **services)
+    services.setdefault("picker", FakePicker(folder=str(library)))
+    app, page = make_app(tmp_path, **services)
     asyncio.run(app.on_choose_folder(None))
     return app, page
 
@@ -1240,7 +1241,7 @@ def test_indexing_errors_and_cancel_are_shown_not_raised(tmp_path, library, monk
 
 def test_picked_photo_shows_the_photo_the_projection_and_result_cards(tmp_path, library):
     photo = save_photo(tmp_path / "p.png", ell_photo())
-    app, _ = indexed_app(tmp_path, library, picker=None)
+    app, _ = indexed_app(tmp_path, library)
     app.picker.files = [str(photo)]
 
     asyncio.run(app.on_pick_photo(None))
@@ -1440,7 +1441,11 @@ class DesktopApp:
             [
                 ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
                 self.banner,
-                ft.Row([self.photo_holder, self.projection_holder], spacing=16, vertical_alignment=ft.CrossAxisAlignment.START),
+                ft.Row(
+                    [self.photo_holder, self.projection_holder],
+                    spacing=16,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
                 ft.Text("Результаты", size=18, weight=ft.FontWeight.BOLD),
                 self.results_column,
             ],
@@ -1460,7 +1465,11 @@ class DesktopApp:
             ft.SafeArea(
                 ft.Column(
                     [
-                        ft.Row([left, ft.VerticalDivider(), right], expand=True, vertical_alignment=ft.CrossAxisAlignment.START),
+                        ft.Row(
+                            [left, ft.VerticalDivider(), right],
+                            expand=True,
+                            vertical_alignment=ft.CrossAxisAlignment.START,
+                        ),
                         footer,
                     ],
                     expand=True,
