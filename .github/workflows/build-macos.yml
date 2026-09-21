@@ -1,0 +1,48 @@
+name: Build macOS
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths: ["apps/**", ".github/workflows/build-macos.yml"]
+
+env:
+  # держать в синхронизации с apps/*/pyproject.toml и requirements-dev.txt
+  FLET_VERSION: "1.0.0"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Версия из тега
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="0.0.0"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - run: python -m pip install "flet==$FLET_VERSION"
+      - name: Сборка (универсальный пакет)
+        run: flet build macos apps/desktop --yes --no-rich-output -v --build-version "$VERSION" --build-number "$GITHUB_RUN_NUMBER"
+      - name: Упаковка
+        run: |
+          mkdir -p dist
+          NAME="GMAGC-desktop-macos-${VERSION}.zip"
+          APP=$(find apps/desktop/build/macos -maxdepth 1 -name "*.app" | head -1)
+          ditto -c -k --keepParent "$APP" "dist/$NAME"
+          (cd dist && shasum -a 256 "$NAME" > "$NAME.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GMAGC-desktop-macos
+          path: dist/*
+      - name: Публикация в релиз
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "GMAGC $GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
