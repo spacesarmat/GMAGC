@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import tokenize
 import zipfile
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import cv2
 import numpy as np
@@ -68,6 +69,14 @@ class _TransientReadError(Exception):
     """Временный сбой чтения (устройство не готово, сетевой сбой, блокировка): файл повторят при следующей сборке."""
 
 
+# Сообщения PIL об окончательно повреждённых (обрезанных) файлах: у них errno нет, а у сбоев ОС он есть.
+_CORRUPT_MARKERS = ("truncated", "broken data stream", "decoder error")
+
+
+def _is_corrupt_file_error(error: OSError) -> bool:
+    return error.errno is None and any(marker in str(error).lower() for marker in _CORRUPT_MARKERS)
+
+
 def _load_normalized(path: Path) -> np.ndarray | None:
     """Нормализованное изображение или None, если файл окончательно нечитаем (испорчен или пустой).
 
@@ -81,6 +90,9 @@ def _load_normalized(path: Path) -> np.ndarray | None:
         logger.warning("skipping unreadable library file %s: %s", path, error)
         return None
     except OSError as error:
+        if _is_corrupt_file_error(error):
+            logger.warning("skipping corrupt library file %s: %s", path, error)
+            return None
         logger.warning("library file %s cannot be read right now, will retry next time: %s", path, error)
         raise _TransientReadError(str(error)) from error
     return normalized
@@ -155,29 +167,40 @@ def build_index(
 def save_index(index: LibraryIndex, path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    with open(temporary, "wb") as handle:
-        np.savez_compressed(
-            handle,
-            format_version=np.array(FORMAT_VERSION),
-            model_id=np.array(index.model_id),
-            rel_paths=np.array([f.rel_path for f in index.files], dtype=str),
-            sizes=np.array([f.size for f in index.files], dtype=np.int64),
-            mtimes=np.array([f.mtime_ns for f in index.files], dtype=np.int64),
-            embeddings=index.embeddings.astype(np.float16),
-            masks=index.masks,
-            group_ids=index.group_ids.astype(np.int32),
-            skipped_paths=np.array([f.rel_path for f in index.skipped], dtype=str),
-            skipped_sizes=np.array([f.size for f in index.skipped], dtype=np.int64),
-            skipped_mtimes=np.array([f.mtime_ns for f in index.skipped], dtype=np.int64),
-        )
-    os.replace(temporary, path)
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            np.savez_compressed(
+                handle,
+                format_version=np.array(FORMAT_VERSION),
+                model_id=np.array(index.model_id),
+                rel_paths=np.array([f.rel_path for f in index.files], dtype=str),
+                sizes=np.array([f.size for f in index.files], dtype=np.int64),
+                mtimes=np.array([f.mtime_ns for f in index.files], dtype=np.int64),
+                embeddings=index.embeddings.astype(np.float16),
+                masks=index.masks,
+                group_ids=index.group_ids.astype(np.int32),
+                skipped_paths=np.array([f.rel_path for f in index.skipped], dtype=str),
+                skipped_sizes=np.array([f.size for f in index.skipped], dtype=np.int64),
+                skipped_mtimes=np.array([f.mtime_ns for f in index.skipped], dtype=np.int64),
+            )
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _files(paths: np.ndarray, sizes: np.ndarray, mtimes: np.ndarray) -> list[LibraryFile]:
     return [
         LibraryFile(str(p), int(s), int(m)) for p, s, m in zip(paths, sizes, mtimes, strict=True)
     ]
+
+
+def _is_safe_rel_path(rel_path: str) -> bool:
+    """Относительный путь внутри библиотеки: без диска, абсолютного начала и `..`."""
+    normalized = rel_path.replace("\\", "/")
+    posix = PurePosixPath(normalized)
+    return bool(normalized) and not posix.is_absolute() and not PureWindowsPath(normalized).drive and ".." not in posix.parts
 
 
 def load_index(path: str | Path) -> LibraryIndex | None:
@@ -188,13 +211,17 @@ def load_index(path: str | Path) -> LibraryIndex | None:
         with np.load(path, allow_pickle=False) as data:
             if int(data["format_version"]) != FORMAT_VERSION:
                 return None
+            files = _files(data["rel_paths"], data["sizes"], data["mtimes"])
+            skipped = _files(data["skipped_paths"], data["skipped_sizes"], data["skipped_mtimes"])
+            if not all(_is_safe_rel_path(f.rel_path) for f in files + skipped):
+                return None  # кэш с путями за пределами библиотеки не используем: индекс построится заново
             return LibraryIndex(
                 model_id=str(data["model_id"]),
-                files=_files(data["rel_paths"], data["sizes"], data["mtimes"]),
+                files=files,
                 embeddings=data["embeddings"].astype(np.float32),
                 masks=data["masks"],
                 group_ids=data["group_ids"],
-                skipped=_files(data["skipped_paths"], data["skipped_sizes"], data["skipped_mtimes"]),
+                skipped=skipped,
             )
     except (
         OSError,
