@@ -29,6 +29,7 @@ from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher  # noqa: E402
 from gmagc_desktop.matcher.synthetic import simulate_photo  # noqa: E402
 
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
+_MISSING = object()  # у фото нет записи в labels.json (настоящее значение метки с ним не совпадёт)
 
 
 class LabelsError(ValueError):
@@ -39,7 +40,7 @@ def load_labels(path: Path) -> dict:
     if not path.is_file():
         return {}
     try:
-        labels = json.loads(path.read_text(encoding="utf-8"))
+        labels = json.loads(path.read_text(encoding="utf-8-sig"))  # BOM: так пишет Windows PowerShell
     except (OSError, ValueError) as error:
         raise LabelsError(f"cannot read labels file {path}: {error}") from error
     if not isinstance(labels, dict):
@@ -101,7 +102,10 @@ def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_
     by_path = {file.rel_path: i for i, file in enumerate(index.files)}
     rows: list[str] = []
     labeled = hits1 = hits5 = unreadable = label_errors = 0
-    for photo_path in sorted(p for p in photos_dir.iterdir() if p.is_file() and p.suffix.lower() in PHOTO_SUFFIXES):
+    hit_scores: list[float] = []  # оценка top-1 у фото, найденного верно
+    null_scores: list[float] = []  # оценка top-1 у фото с меткой null (в библиотеке его нет)
+    photo_paths = sorted(p for p in photos_dir.iterdir() if p.is_file() and p.suffix.lower() in PHOTO_SUFFIXES)
+    for photo_path in photo_paths:
         name = photo_path.name
         try:
             photo = load_photo_bgr(photo_path)
@@ -110,7 +114,7 @@ def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_
             rows.append(f"{name}: cannot read photo ({error})")
             continue
 
-        expected = labels.get(name, "unlabeled")
+        expected = labels.get(name, _MISSING)
         wanted: set[int] | None = None
         if isinstance(expected, list):
             paths = [p.replace("\\", "/") for p in expected if isinstance(p, str)]
@@ -120,7 +124,7 @@ def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_
                 rows.append(f"{name}: LABEL ERROR (empty list or unknown path: {unknown or expected})")
                 continue
             wanted = {int(index.group_ids[by_path[p]]) for p in paths}
-        elif expected is not None and expected != "unlabeled":
+        elif expected is not None and expected is not _MISSING:
             label_errors += 1
             rows.append(f"{name}: LABEL ERROR (expected a list of paths or null)")
             continue
@@ -143,7 +147,14 @@ def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_
             hits1 += in_top1
             hits5 += in_top5
             note = "  OK top-1" if in_top1 else ("  OK top-5" if in_top5 else "  MISS")
+            if in_top1:
+                hit_scores.append(min(top.score, 1.0))
+        elif expected is None:
+            null_scores.append(min(top.score, 1.0))
         rows.append(f"{name}: {index.files[top.index].rel_path}  {min(top.score, 1.0) * 100:.1f}%{note}")
+    for name in sorted(set(labels) - {p.name for p in photo_paths}):
+        label_errors += 1
+        rows.append(f"LABEL ERROR: label for unknown photo {name}")
     return {
         "rows": rows,
         "labeled": labeled,
@@ -151,6 +162,8 @@ def real_eval(index: LibraryIndex, searcher: Searcher, photos_dir: Path, labels_
         "top5": hits5 / labeled if labeled else None,
         "unreadable": unreadable,
         "label_errors": label_errors,
+        "hit_scores": hit_scores,
+        "null_scores": null_scores,
     }
 
 
@@ -211,6 +224,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"real photos: no labels yet (fill labels.json)  "
             f"(unreadable={real['unreadable']}, label errors={real['label_errors']})"
+        )
+    if real["hit_scores"] and real["null_scores"]:
+        print(
+            f"top-1 score: correct min {min(real['hit_scores']) * 100:.1f}% "
+            f"median {statistics.median(real['hit_scores']) * 100:.1f}% | "
+            f"not in library max {max(real['null_scores']) * 100:.1f}%"
         )
     print("\n".join(real["rows"]))
     return 0

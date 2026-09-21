@@ -556,3 +556,129 @@ def test_inspect_groups_missing_library_returns_3(tmp_path, capsys):
     err = capsys.readouterr().err
     assert code == 3 and f"library folder not found: {tmp_path / 'unplugged'}" in err
     assert not (tmp_path / "s.png").exists()
+
+
+def test_load_labels_accepts_a_utf8_bom_from_windows_powershell(tmp_path):
+    path = tmp_path / "labels.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"a.png": None, "b.png": ["x/y.png"]}).encode("utf-8"))
+
+    assert benchmark.load_labels(path) == {"a.png": None, "b.png": ["x/y.png"]}
+
+
+def test_real_eval_works_with_a_bom_labels_file(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    (photos / "labels.json").write_bytes(b"\xef\xbb\xbf" + b'{"a.png": ["vendor_c/ell_small.png"]}')
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["labeled"] == 1 and result["top1"] == 1.0 and result["label_errors"] == 0
+
+
+def test_real_eval_reports_a_label_for_a_photo_that_does_not_exist(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": ["vendor_c/ell_small.png"], "ghost.png": None, "typo.png": ["vendor_a/ring.png"]})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["label_errors"] == 2
+    assert "LABEL ERROR: label for unknown photo ghost.png" in result["rows"]
+    assert "LABEL ERROR: label for unknown photo typo.png" in result["rows"]
+    assert result["labeled"] == 1 and result["top1"] == 1.0
+
+
+def test_real_eval_a_label_value_of_unlabeled_is_an_error_not_a_missing_label(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    write_labels(photos, {"a.png": "unlabeled"})
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["label_errors"] == 1 and result["labeled"] == 0
+    assert any("a.png: LABEL ERROR" in row for row in result["rows"])
+
+
+def test_real_eval_collects_top1_scores_for_hits_and_for_not_in_library_photos(tmp_path):
+    index, searcher = build_searcher(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "hit.png", shape_images()["ell"], 5)
+    save_photo(photos, "top5only.png", shape_images()["ell"], 7)
+    save_photo(photos, "null.png", shape_images()["ring"], 6)
+    save_photo(photos, "unlabeled.png", shape_images()["star"], 8)
+    write_labels(
+        photos,
+        {"hit.png": ["vendor_c/ell_small.png"], "top5only.png": ["vendor_b/star.bmp"], "null.png": None},
+    )
+
+    result = benchmark.real_eval(index, searcher, photos, photos / "labels.json")
+
+    assert result["labeled"] == 2 and result["top1"] == 0.5
+    assert len(result["hit_scores"]) == 1  # только фото с верным top-1
+    assert len(result["null_scores"]) == 1  # только фото с меткой null
+    assert all(0.0 <= score <= 1.0 for score in result["hit_scores"] + result["null_scores"])
+    hit_row = next(row for row in result["rows"] if row.startswith("hit.png"))
+    null_row = next(row for row in result["rows"] if row.startswith("null.png"))
+    assert f"{result['hit_scores'][0] * 100:.1f}%" in hit_row
+    assert f"{result['null_scores'][0] * 100:.1f}%" in null_row
+
+
+def test_real_eval_clamps_collected_scores_to_one(tmp_path):
+    from gmagc_desktop.matcher.search import Match
+
+    index, _ = build_searcher(tmp_path)
+    position = [f.rel_path for f in index.files].index("vendor_c/ell_small.png")
+
+    class Overconfident:
+        def search(self, normalized, top_n=10):
+            return [Match(position, 1.3, 0.9, 1.0, 0.0, False, (position,))]
+
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    save_photo(photos, "b.png", shape_images()["ring"], 6)
+    write_labels(photos, {"a.png": ["vendor_c/ell_small.png"], "b.png": None})
+
+    result = benchmark.real_eval(index, Overconfident(), photos, photos / "labels.json")
+
+    assert result["hit_scores"] == [1.0] and result["null_scores"] == [1.0]
+
+
+def _run_benchmark_on_photos(tmp_path, capsys, labels):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    save_photo(photos, "b.png", shape_images()["ring"], 6)
+    write_labels(photos, labels)
+    code = benchmark.main(
+        ["--library", str(library), "--samples", "2", "--index", str(tmp_path / "idx.npz"), "--photos", str(photos)]
+    )
+    assert code == 0
+    return capsys.readouterr().out
+
+
+def test_benchmark_prints_the_no_match_calibration_line(tmp_path, capsys):
+    out = _run_benchmark_on_photos(tmp_path, capsys, {"a.png": ["vendor_c/ell_small.png"], "b.png": None})
+
+    line = next(line for line in out.splitlines() if line.startswith("top-1 score:"))
+    match = re.fullmatch(r"top-1 score: correct min ([\d.]+)% median ([\d.]+)% \| not in library max ([\d.]+)%", line)
+    assert match, line
+    hit_row = next(row for row in out.splitlines() if row.startswith("a.png:"))
+    null_row = next(row for row in out.splitlines() if row.startswith("b.png:"))
+    hit_percent, null_percent = match.group(1), match.group(3)
+    assert f"  {hit_percent}%" in hit_row and f"  {null_percent}%" in null_row
+    assert match.group(1) == match.group(2)  # одно попадание: минимум == медиана
+
+
+def test_benchmark_omits_the_calibration_line_when_there_are_no_null_photos(tmp_path, capsys):
+    out = _run_benchmark_on_photos(
+        tmp_path, capsys, {"a.png": ["vendor_c/ell_small.png"], "b.png": ["vendor_a/ring.png"]}
+    )
+    assert "top-1 score:" not in out
+
+
+def test_benchmark_omits_the_calibration_line_when_there_are_no_correct_hits(tmp_path, capsys):
+    out = _run_benchmark_on_photos(tmp_path, capsys, {"a.png": None, "b.png": None})
+    assert "top-1 score:" not in out
