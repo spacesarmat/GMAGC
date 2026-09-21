@@ -8,8 +8,11 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from gmagc_common.protocol import DEFAULT_PORT, is_valid_code, normalize_code
+
 APP_FOLDER = "GMAGC"
 MAX_TOP_N = 50
+MAX_PORT = 65525  # запас под перебор соседних портов при занятом
 
 
 def data_dir() -> Path:
@@ -29,6 +32,13 @@ def data_dir() -> Path:
 class Settings:
     library_dir: str = ""
     top_n: int = 10
+    server_enabled: bool = True
+    port: int = DEFAULT_PORT
+    access_code: str = ""
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -41,9 +51,15 @@ def load_settings(path: str | Path) -> Settings:
         return Settings()
     library_dir = raw.get("library_dir", "")
     top_n = raw.get("top_n", 10)
+    server_enabled = raw.get("server_enabled", True)
+    port = raw.get("port", DEFAULT_PORT)
+    access_code = raw.get("access_code", "")
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
-        top_n=top_n if isinstance(top_n, int) and not isinstance(top_n, bool) and 1 <= top_n <= MAX_TOP_N else 10,
+        top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
+        server_enabled=server_enabled if isinstance(server_enabled, bool) else True,
+        port=port if _is_int(port) and 1024 <= port <= MAX_PORT else DEFAULT_PORT,
+        access_code=normalize_code(access_code) if isinstance(access_code, str) and is_valid_code(access_code) else "",
     )
 
 

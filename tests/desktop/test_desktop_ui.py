@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 
 import cv2
 import flet as ft
@@ -11,63 +10,8 @@ from gmagc_desktop.library.index import IndexCancelled
 from gmagc_desktop.matcher.synthetic import simulate_photo
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_desktop.ui.app import build_page
+from tests.fakes import FakeClipboard, FakePicker, FakeServer, StubPage, texts, walk
 from tests.fixtures import shape_images, write_library
-
-
-class StubPage:
-    """Минимальная замена ft.Page: запоминает добавленное, поток выполняет сразу."""
-
-    def __init__(self):
-        self.title = ""
-        self.added = []
-        self.services = []
-        self.updates = 0
-
-    def add(self, *controls):
-        self.added.extend(controls)
-
-    def update(self):
-        self.updates += 1
-
-    def run_thread(self, handler, *args, **kwargs):
-        handler(*args, **kwargs)
-
-
-class FakePicker:
-    def __init__(self, folder=None, files=()):
-        self.folder = folder
-        self.files = list(files)
-
-    async def get_directory_path(self, dialog_title=None, initial_directory=None):
-        return self.folder
-
-    async def pick_files(self, **kwargs):
-        return [SimpleNamespace(path=path) for path in self.files]
-
-
-class FakeClipboard:
-    def __init__(self, image=None, files=()):
-        self.image = image
-        self.files = list(files)
-
-    async def get_image(self):
-        return self.image
-
-    async def get_files(self):
-        return list(self.files)
-
-
-def walk(control):
-    yield control
-    for attribute in ("content", "controls"):
-        value = getattr(control, attribute, None)
-        for child in value if isinstance(value, list) else [value] if value is not None else []:
-            if isinstance(child, ft.Control):
-                yield from walk(child)
-
-
-def texts(control):
-    return [c.value for c in walk(control) if isinstance(c, ft.Text)]
 
 
 @pytest.fixture()
@@ -79,6 +23,7 @@ def library(tmp_path):
 
 
 def make_app(tmp_path, **services):
+    services.setdefault("server", FakeServer())  # настоящий сервер в тестах экрана не запускаем
     page = StubPage()
     app = build_page(page, service=SearchService(tmp_path / "data"), **services)
     return app, page
@@ -183,14 +128,14 @@ def test_flat_photo_shows_the_no_projection_message(tmp_path, library):
     assert "Проекция на фото не найдена" in app.banner_text.value and app.results_column.controls == []
 
 
-def test_clicking_a_result_path_reveals_the_file(tmp_path, library):
+def test_the_folder_button_of_a_result_reveals_the_file(tmp_path, library):
     revealed = []
     photo = save_photo(tmp_path / "p.png", ell_photo())
     app, _ = indexed_app(tmp_path, library, reveal=revealed.append)
     app.picker.files = [str(photo)]
     asyncio.run(app.on_pick_photo(None))
 
-    button = next(c for c in walk(app.results_column.controls[0]) if isinstance(c, ft.TextButton))
+    button = next(c for c in walk(app.results_column.controls[0]) if isinstance(c, ft.IconButton))
     button.on_click(None)
 
     assert len(revealed) == 1 and revealed[0].startswith(str(library)) and revealed[0].endswith(".png")

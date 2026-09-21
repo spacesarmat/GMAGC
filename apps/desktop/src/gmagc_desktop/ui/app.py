@@ -1,4 +1,4 @@
-"""Экран ПК-приложения: библиотека, индекс, поиск по фото."""
+"""Экран ПК-приложения: библиотека, индекс, поиск по фото, сервер для телефона."""
 
 from __future__ import annotations
 
@@ -8,17 +8,24 @@ from pathlib import Path
 
 import flet as ft
 
+from gmagc_common.protocol import build_link, format_code
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.selfcheck import run_core_check
+from gmagc_desktop.server.api import RequestRecord
+from gmagc_desktop.server.network import lan_addresses
+from gmagc_desktop.server.qr import qr_png
+from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import data_dir
-from gmagc_desktop.ui.texts import outcome_message, score_text, status_text
+from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
+PHONE_HINT = "Телефон и ПК должны быть в одной сети Wi-Fi. При первом запуске разрешите доступ в брандмауэре Windows."
+HISTORY_LIMIT = 10
 
 
 class DesktopApp:
@@ -30,6 +37,9 @@ class DesktopApp:
         clipboard=None,
         reveal: Callable[[str], bool] = reveal_in_file_manager,
         check: Callable[[], dict] = run_core_check,
+        server=None,
+        addresses: Callable[[], list[str]] = lan_addresses,
+        qr: Callable[[str], bytes] = qr_png,
     ):
         self.page = page
         self.service = service
@@ -37,6 +47,11 @@ class DesktopApp:
         self.clipboard = clipboard or ft.Clipboard()
         self.reveal = reveal
         self.check = check
+        self.server = server or PhoneServer(service)
+        self.server.on_request = self.on_phone_request
+        self.addresses = addresses
+        self.qr = qr
+        self.history: list[RequestRecord] = []
         self._busy = False
         self._cancel = False
 
@@ -51,10 +66,29 @@ class DesktopApp:
         self.paste_button = ft.Button("Вставить из буфера", on_click=self.on_paste)
         self.banner_text = ft.Text(color=ft.Colors.BLACK)
         self.banner = ft.Container(self.banner_text, padding=10, border_radius=6, visible=False)
+        self.source_label = ft.Text("", visible=False)
         self.photo_holder = ft.Column(visible=False, spacing=4)
         self.projection_holder = ft.Column(visible=False, spacing=4)
         self.results_column = ft.Column(spacing=8)
+        self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
         self.check_label = ft.Text("")
+
+        self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
+        self.server_status = ft.Text("Выключен")
+        self.qr_holder = ft.Column(visible=False)
+        self.code_text = ft.Text("", size=16, weight=ft.FontWeight.BOLD, selectable=True, visible=False)
+        self.code_row = ft.Row(
+            [
+                ft.TextButton(content=ft.Text("Копировать код"), on_click=self.on_copy_code),
+                ft.TextButton(content=ft.Text("Новый код"), on_click=self.on_new_code),
+            ],
+            spacing=4,
+            visible=False,
+        )
+        self.phone_note = ft.Text("", size=12, visible=False)
+        self.addresses_text = ft.Text("", size=12, visible=False, selectable=True)
+        self.history_title = ft.Text("Запросы с телефона", size=14, weight=ft.FontWeight.BOLD, visible=False)
+        self.history_column = ft.Column(spacing=0)
 
     # ---- построение экрана -------------------------------------------------
     def build(self) -> None:
@@ -62,6 +96,9 @@ class DesktopApp:
         self.library_text.value = self.service.settings.library_dir or "не выбрана"
         self.status_label.value = status_text(status)
         self.page.services.extend([self.picker, self.clipboard])
+        if self.service.settings.server_enabled:
+            self.server_switch.value = True
+            self._start_server()
 
         left = ft.Column(
             [
@@ -73,13 +110,27 @@ class DesktopApp:
                 self.progress,
                 self.progress_label,
                 self.cancel_button,
+                ft.Divider(),
+                ft.Text("Телефон", size=18, weight=ft.FontWeight.BOLD),
+                self.server_switch,
+                self.server_status,
+                self.qr_holder,
+                self.code_text,
+                self.code_row,
+                self.phone_note,
+                self.addresses_text,
+                ft.Text(PHONE_HINT, size=12),
+                self.history_title,
+                self.history_column,
             ],
             spacing=8,
             width=320,
+            scroll=ft.ScrollMode.AUTO,
         )
         right = ft.Column(
             [
                 ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
+                self.source_label,
                 self.banner,
                 ft.Row(
                     [self.photo_holder, self.projection_holder],
@@ -87,6 +138,7 @@ class DesktopApp:
                     vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
                 ft.Text("Результаты", size=18, weight=ft.FontWeight.BOLD),
+                self.copy_label,
                 self.results_column,
             ],
             spacing=10,
@@ -141,6 +193,87 @@ class DesktopApp:
 
     def _hide_banner(self) -> None:
         self.banner.visible = False
+
+    # ---- сервер для телефона -----------------------------------------------
+    def _start_server(self) -> None:
+        try:
+            self.server.start(self.service.settings.port)
+        except ServerStartError as error:
+            self._show_server(error=str(error))
+        else:
+            self._show_server()
+
+    def _show_server(self, error: str | None = None) -> None:
+        """Отражает состояние сервера в блоке «Телефон» (экран обновляет вызывающий)."""
+        running = self.server.running and error is None
+        addresses = self.addresses() if running else []
+        for control in (self.qr_holder, self.code_text, self.code_row, self.addresses_text, self.phone_note):
+            control.visible = False
+        if error:
+            self.server_status.value = f"Не удалось запустить: {error}"
+        elif not running:
+            self.server_status.value = "Выключен"
+        elif not addresses:
+            self.server_status.value = (
+                f"Работает на порту {self.server.port}, но адрес ПК в сети не найден: подключите ПК к Wi-Fi"
+            )
+        else:
+            host, port = addresses[0], self.server.port
+            code = self.service.ensure_access_code()
+            self.server_status.value = f"Работает: {host}:{port}"
+            self.qr_holder.controls = [
+                ft.Image(src=self.qr(build_link(host, port, code)), width=180, height=180, fit=ft.BoxFit.CONTAIN)
+            ]
+            self.code_text.value = f"Код: {format_code(code)}"
+            self.addresses_text.value = "Другие адреса ПК: " + ", ".join(addresses[1:])
+            self.qr_holder.visible = self.code_text.visible = self.code_row.visible = True
+            self.addresses_text.visible = len(addresses) > 1
+
+    def on_toggle_server(self, _event) -> None:
+        enabled = bool(self.server_switch.value)
+        self.service.set_server_enabled(enabled)
+        if enabled:
+            self._start_server()
+        else:
+            self.server.stop()
+            self._show_server()
+        self.page.update()
+
+    async def on_copy_code(self, _event) -> None:
+        await self.clipboard.set(format_code(self.service.ensure_access_code()))
+        self.phone_note.value = "Код скопирован"
+        self.phone_note.visible = True
+        self.page.update()
+
+    def on_new_code(self, _event) -> None:
+        self.service.reset_access_code()
+        self._show_server()
+        self.page.update()
+
+    def on_phone_request(self, record: RequestRecord) -> None:
+        """Вызывается из потока сервера: запись в историю и показ результата в основном окне."""
+        self.history.insert(0, record)
+        del self.history[HISTORY_LIMIT:]
+        self.history_column.controls = [self._history_row(item) for item in self.history]
+        self.history_title.visible = True
+        self._show_record(record)
+
+    def _history_row(self, record: RequestRecord) -> ft.TextButton:
+        return ft.TextButton(
+            content=ft.Text(history_text(record.time, record.client, record.outcome), size=12),
+            data=record,
+            on_click=self.on_history_click,
+        )
+
+    def on_history_click(self, event) -> None:
+        self._show_record(event.control.data)
+
+    def _show_record(self, record: RequestRecord) -> None:
+        self._hide_banner()
+        self.source_label.value = source_text(record.time, record.client)
+        self.source_label.visible = True
+        self._show_photo(record.photo)
+        self._show_outcome(record.outcome)
 
     # ---- индексация --------------------------------------------------------
     async def on_choose_folder(self, _event) -> None:
@@ -219,6 +352,7 @@ class DesktopApp:
             self._show_banner(NO_LIBRARY_HINT, error=True)
             return
         self._hide_banner()
+        self.source_label.visible = False
         self._show_photo(data)
         self._set_busy(True)
         self.page.run_thread(lambda: self._search_worker(data))
@@ -245,6 +379,7 @@ class DesktopApp:
         self.photo_holder.visible = True
         self.projection_holder.visible = False
         self.results_column.controls = []
+        self.copy_label.visible = False
         self.page.update()
 
     def _show_outcome(self, outcome: SearchOutcome) -> None:
@@ -263,11 +398,7 @@ class DesktopApp:
     def _result_card(self, result: Result) -> ft.Card:
         details: list[ft.Control] = [
             ft.Text(result.name, weight=ft.FontWeight.BOLD),
-            ft.TextButton(
-                content=ft.Text(result.full_path, size=12),
-                tooltip="Показать в папке",
-                on_click=lambda _event, path=result.full_path: self.reveal(path),
-            ),
+            ft.Text(result.full_path, size=12),
             ft.Text(score_text(result.score)),
         ]
         if result.copies:
@@ -278,12 +409,32 @@ class DesktopApp:
                     [
                         ft.Image(src=result.thumbnail_png, width=96, height=96, fit=ft.BoxFit.CONTAIN),
                         ft.Column(details, spacing=2, expand=True),
+                        ft.IconButton(
+                            icon=ft.Icons.FOLDER_OPEN,
+                            tooltip="Показать в папке",
+                            on_click=lambda _event, path=result.full_path: self.reveal(path),
+                        ),
                     ],
                     spacing=12,
                 ),
                 padding=10,
+                ink=True,
+                data=result.full_path,
+                tooltip="Нажмите, чтобы скопировать путь к файлу",
+                on_click=self.on_card_click,
             )
         )
+
+    async def on_card_click(self, event) -> None:
+        await self.copy_path(event.control.data)
+
+    async def copy_path(self, path: str) -> None:
+        """Копирует абсолютный путь файла (вместе с именем) в буфер обмена."""
+        absolute = os.path.abspath(path)
+        await self.clipboard.set(absolute)
+        self.copy_label.value = f"Путь скопирован: {absolute}"
+        self.copy_label.visible = True
+        self.page.update()
 
     # ---- прочее ------------------------------------------------------------
     def on_check(self, _event) -> None:
