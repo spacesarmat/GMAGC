@@ -444,3 +444,115 @@ def test_report_photos_missing_library_returns_3(tmp_path, capsys):
     err = capsys.readouterr().err
     assert code == 3
     assert "cannot read library" in err or "cannot read" in err or "FileNotFoundError" in err
+
+
+def test_benchmark_missing_library_returns_3(tmp_path, capsys):
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(tmp_path / "unplugged"), "--index", str(index_path)])
+
+    assert code == 3
+    assert "library folder not found" in capsys.readouterr().err
+    assert not index_path.exists()
+
+
+def test_benchmark_empty_library_returns_3_without_writing_an_index(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(empty), "--index", str(index_path)])
+
+    assert code == 3
+    assert "no PNG/BMP files found" in capsys.readouterr().err
+    assert not index_path.exists()
+
+
+@pytest.mark.parametrize("problem", ["missing", "garbage"])
+def test_benchmark_bad_model_returns_3(tmp_path, capsys, problem):
+    library = make_library(tmp_path)
+    model = tmp_path / "model.onnx"
+    if problem == "garbage":
+        model.write_bytes(b"not an onnx model")
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(["--library", str(library), "--model", str(model), "--index", str(index_path)])
+
+    err = capsys.readouterr().err
+    assert code == 3 and "cannot load model" in err and "Traceback" not in err
+    assert not index_path.exists()
+
+
+def test_benchmark_missing_labels_file_returns_3_before_any_index_is_built(tmp_path, capsys):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    index_path = tmp_path / "idx.npz"
+
+    code = benchmark.main(
+        [
+            "--library", str(library),
+            "--index", str(index_path),
+            "--photos", str(photos),
+            "--labels", str(tmp_path / "missing_labels.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 3 and "labels file not found" in captured.err
+    assert not index_path.exists()
+    assert "synthetic" not in captured.out
+
+
+def test_report_photos_bad_model_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+    index_path = tmp_path / "idx.npz"
+
+    code = report_photos.main(
+        [
+            "--library", str(library),
+            "--model", str(tmp_path / "nope.onnx"),
+            "--index", str(index_path),
+            "--photos", str(photos),
+            "--out", str(tmp_path / "report" / "r.html"),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3 and "cannot load model" in err and "Traceback" not in err
+    assert not index_path.exists()
+
+
+def test_report_photos_empty_library_returns_3(tmp_path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    photos = tmp_path / "photos"
+    save_photo(photos, "a.png", shape_images()["ell"], 5)
+
+    code = report_photos.main(
+        [
+            "--library", str(empty),
+            "--index", str(tmp_path / "idx.npz"),
+            "--photos", str(photos),
+            "--out", str(tmp_path / "report" / "r.html"),
+        ]
+    )
+
+    assert code == 3 and "no PNG/BMP files found" in capsys.readouterr().err
+
+
+def test_inspect_groups_missing_library_returns_3(tmp_path, capsys):
+    library = make_library(tmp_path)
+    index_path = tmp_path / "idx.npz"
+    cli.main(["index", str(library), "--index", str(index_path)])
+    capsys.readouterr()
+
+    code = inspect_groups.main(
+        ["--library", str(tmp_path / "unplugged"), "--index", str(index_path), "--out", str(tmp_path / "s.png")]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 3 and f"library folder not found: {tmp_path / 'unplugged'}" in err
+    assert not (tmp_path / "s.png").exists()

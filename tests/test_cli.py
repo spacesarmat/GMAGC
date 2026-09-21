@@ -244,3 +244,22 @@ def test_search_on_an_empty_index_returns_1_with_a_hint(tmp_path, capsys):
 
     assert code == 1
     assert "index is empty; rebuild it with the 'index' command" in capsys.readouterr().err
+
+
+def test_read_photo_and_build_embedder_are_public_and_report_to_stderr(tmp_path, capsys):
+    assert cli.read_photo(tmp_path / "nope.png") is None
+    assert "cannot read photo" in capsys.readouterr().err
+    assert cli.build_embedder(str(tmp_path / "nope.onnx")) is None
+    assert "cannot load model" in capsys.readouterr().err
+    assert isinstance(cli.build_embedder(None), PixelEmbedder)
+
+
+def test_w_embed_default_is_defined_once(tmp_path):
+    import inspect
+
+    from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher
+
+    assert DEFAULT_W_EMBED == 0.5
+    assert inspect.signature(Searcher).parameters["w_embed"].default == DEFAULT_W_EMBED
+    args = cli.build_parser().parse_args(["search", "p.png", "--index", "i.npz"])
+    assert args.w_embed == DEFAULT_W_EMBED

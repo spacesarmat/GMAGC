@@ -1,4 +1,11 @@
-"""Командная строка ядра: index и search."""
+"""Командная строка ядра: index и search.
+
+Коды возврата:
+0 - успех;
+1 - индекс отсутствует, несовместим (другая модель или размерность) или пуст;
+2 - проекция на фото не найдена;
+3 - вход нечитаем (фото, модель, папка библиотеки).
+"""
 
 from __future__ import annotations
 
@@ -12,14 +19,14 @@ from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError, build
 from gmagc_desktop.matcher.embedder import Embedder, OnnxEmbedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
-from gmagc_desktop.matcher.search import IndexMismatchError, Searcher
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, IndexMismatchError, Searcher
 
 
 def make_embedder(model: str | None) -> Embedder:
     return OnnxEmbedder(model) if model else PixelEmbedder()
 
 
-def _read_photo(path: str | Path) -> np.ndarray | None:
+def read_photo(path: str | Path) -> np.ndarray | None:
     """Load photo from path; return None after printing error message to stderr."""
     try:
         return load_photo_bgr(path)
@@ -28,7 +35,7 @@ def _read_photo(path: str | Path) -> np.ndarray | None:
         return None
 
 
-def _build_embedder(model: str | None) -> Embedder | None:
+def build_embedder(model: str | None) -> Embedder | None:
     """Build embedder; return None after printing error message to stderr."""
     try:
         return make_embedder(model)
@@ -42,7 +49,7 @@ def _progress(done: int, total: int) -> None:
 
 
 def _cmd_index(args: argparse.Namespace) -> int:
-    embedder = _build_embedder(args.model)
+    embedder = build_embedder(args.model)
     if embedder is None:
         return 3
     try:
@@ -69,10 +76,10 @@ def _cmd_search(args: argparse.Namespace) -> int:
     if len(index) == 0:
         print("index is empty; rebuild it with the 'index' command", file=sys.stderr)
         return 1
-    photo = _read_photo(args.photo)
+    photo = read_photo(args.photo)
     if photo is None:
         return 3
-    embedder = _build_embedder(args.model)
+    embedder = build_embedder(args.model)
     if embedder is None:
         return 3
     if index.model_id != embedder.model_id:
@@ -116,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--model", default=None)
     search.add_argument("--library", type=Path, default=None, help="печатать полные пути")
     search.add_argument("--top", type=int, default=10)
-    search.add_argument("--w-embed", type=float, default=0.5)
+    search.add_argument("--w-embed", type=float, default=DEFAULT_W_EMBED)
     search.set_defaults(handler=_cmd_search)
     return parser
 

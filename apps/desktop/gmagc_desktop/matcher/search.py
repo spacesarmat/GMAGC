@@ -11,6 +11,8 @@ from gmagc_desktop.matcher.embedder import Embedder
 from gmagc_desktop.matcher.shape import ShapeMatcher, soft_mask
 from gmagc_desktop.matcher.variants import DEFAULT_ROTATIONS, query_variants
 
+DEFAULT_W_EMBED = 0.5  # вес эмбеддинга в итоговой оценке (остальное — форма); единый по умолчанию для всех входов
+
 
 class IndexMismatchError(ValueError):
     """Размерность векторов индекса не совпадает с размерностью эмбеддера: индекс построен другой моделью."""
@@ -41,7 +43,7 @@ class Searcher:
         embedder: Embedder,
         n_rotations: int = DEFAULT_ROTATIONS,
         shortlist: int = 20,
-        w_embed: float = 0.5,
+        w_embed: float = DEFAULT_W_EMBED,
     ):
         self._data = data
         self._embedder = embedder

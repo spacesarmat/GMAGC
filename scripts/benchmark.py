@@ -14,11 +14,18 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "desktop"))
 
-from gmagc_desktop.library.index import LibraryIndex, build_index, load_index, save_index  # noqa: E402
-from gmagc_desktop.matcher.embedder import OnnxEmbedder, PixelEmbedder  # noqa: E402
+from gmagc_desktop.cli import build_embedder  # noqa: E402
+from gmagc_desktop.library.index import (  # noqa: E402
+    LibraryIndex,
+    LibraryNotFound,
+    LibraryScanError,
+    build_index,
+    load_index,
+    save_index,
+)
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr  # noqa: E402
 from gmagc_desktop.matcher.pipeline import normalize_photo  # noqa: E402
-from gmagc_desktop.matcher.search import Searcher  # noqa: E402
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher  # noqa: E402
 from gmagc_desktop.matcher.synthetic import simulate_photo  # noqa: E402
 
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -154,14 +161,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--index", type=Path, default=None)
     parser.add_argument("--samples", type=int, default=300)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--w-embed", type=float, default=0.5)
+    parser.add_argument("--w-embed", type=float, default=DEFAULT_W_EMBED)
     parser.add_argument("--photos", type=Path, default=ROOT / "photo")
     parser.add_argument("--labels", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    embedder = OnnxEmbedder(args.model) if args.model else PixelEmbedder()
+    labels_path = args.labels or args.photos / "labels.json"
+    if args.labels is not None and not args.labels.is_file():
+        print(f"labels file not found: {args.labels}", file=sys.stderr)
+        return 3
+
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
     index_path = args.index or ROOT / ".gmagc-cache" / f"index-{embedder.model_id}.npz"
-    index = load_or_build(args.library, embedder, index_path)
+    try:
+        index = load_or_build(args.library, embedder, index_path)
+    except (LibraryNotFound, LibraryScanError) as error:
+        print(error, file=sys.stderr)
+        return 3
     searcher = Searcher(index.search_data(), embedder, w_embed=args.w_embed)
 
     families = len(set(index.group_ids.tolist()))
@@ -174,11 +192,6 @@ def main(argv: list[str] | None = None) -> int:
         f"segmentation failed {stats['segmentation_failed'] * 100:.1f}%  "
         f"median {stats['median_ms']:.0f} ms"
     )
-
-    labels_path = args.labels or args.photos / "labels.json"
-    if args.labels is not None and not args.labels.is_file():
-        print(f"labels file not found: {args.labels}", file=sys.stderr)
-        return 3
 
     try:
         real = real_eval(index, searcher, args.photos, labels_path)

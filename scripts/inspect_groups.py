@@ -33,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=ROOT / ".gmagc-cache" / "groups_sheet.png")
     args = parser.parse_args(argv)
 
+    if not args.library.is_dir():
+        print(f"library folder not found: {args.library}", file=sys.stderr)
+        return 3
     index = load_index(args.index)
     if index is None:
         print("index not found", file=sys.stderr)

@@ -19,10 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from benchmark import PHOTO_SUFFIXES, load_or_build  # noqa: E402
 from _thumbs import square_pad  # noqa: E402
 
-from gmagc_desktop.cli import make_embedder  # noqa: E402
+from gmagc_desktop.cli import build_embedder  # noqa: E402
+from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError  # noqa: E402
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr  # noqa: E402
 from gmagc_desktop.matcher.pipeline import normalize_photo  # noqa: E402
-from gmagc_desktop.matcher.search import Searcher  # noqa: E402
+from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Searcher  # noqa: E402
 
 THUMB = 128
 
@@ -48,15 +49,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"photos folder not found: {args.photos}", file=sys.stderr)
         return 3
 
-    # Build index (will raise FileNotFoundError if library doesn't exist)
+    embedder = build_embedder(args.model)
+    if embedder is None:
+        return 3
+    index_path = args.index or ROOT / ".gmagc-cache" / f"index-{embedder.model_id}.npz"
     try:
-        embedder = make_embedder(args.model)
-        index_path = args.index or ROOT / ".gmagc-cache" / f"index-{embedder.model_id}.npz"
         index = load_or_build(args.library, embedder, index_path)
-        searcher = Searcher(index.search_data(), embedder)
-    except FileNotFoundError as error:
+    except (LibraryNotFound, LibraryScanError) as error:
         print(f"cannot read library: {error}", file=sys.stderr)
         return 3
+    searcher = Searcher(index.search_data(), embedder, w_embed=DEFAULT_W_EMBED)
 
     sections = []
     template: dict[str, None] = {}
