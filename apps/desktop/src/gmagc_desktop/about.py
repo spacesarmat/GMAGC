@@ -1,5 +1,5 @@
 """Название, версия и автор приложения."""
 
 NAME = "GMAGC"
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 AUTHOR = "@ANDY_BUM"

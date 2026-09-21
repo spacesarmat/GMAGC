@@ -15,13 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "desktop" / "src"))
 
 from gmagc_desktop.cli import build_embedder  # noqa: E402
+from gmagc_desktop.library.cache import update_index  # noqa: E402
 from gmagc_desktop.library.index import (  # noqa: E402
     LibraryIndex,
     LibraryNotFound,
     LibraryScanError,
-    build_index,
-    load_index,
-    save_index,
 )
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr  # noqa: E402
 from gmagc_desktop.matcher.pipeline import normalize_photo  # noqa: E402
@@ -53,9 +51,8 @@ def _progress(done: int, total: int) -> None:
 
 
 def load_or_build(root: Path, embedder, index_path: Path) -> LibraryIndex:
-    index = build_index(root, embedder, existing=load_index(index_path), progress=_progress)
+    index = update_index(root, embedder, index_path, progress=_progress)
     print(file=sys.stderr)
-    save_index(index, index_path)
     return index
 
 
