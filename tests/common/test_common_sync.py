@@ -2,7 +2,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "packages" / "common" / "gmagc_common"
-TARGETS = [ROOT / "apps" / "desktop" / "src" / "gmagc_common"]
+TARGETS = [
+    ROOT / "apps" / "desktop" / "src" / "gmagc_common",
+    ROOT / "apps" / "mobile" / "src" / "gmagc_common",
+]
 
 
 def test_app_copies_match_the_canonical_package():

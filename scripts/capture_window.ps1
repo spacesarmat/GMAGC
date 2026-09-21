@@ -1,5 +1,5 @@
-﻿# Снимок окна процесса (только область его окна): .\scripts\capture_window.ps1 -Process gmagc-desktop -Out window.png
-param([string]$Process = "gmagc-desktop", [string]$Out = "window.png")
+﻿# Снимок окна процесса (только область его окна): .\scripts\capture_window.ps1 -Process gmagc-desktop -Out window.png (или -Id <PID>, если у процесса несколько окон)
+param([string]$Process = "gmagc-desktop", [string]$Out = "window.png", [int]$Id = 0)
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @"
@@ -15,7 +15,7 @@ public static class GmagcWin32 {
 "@
 
 [GmagcWin32]::SetProcessDPIAware() | Out-Null
-$p = Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if ($Id -ne 0) { $p = Get-Process -Id $Id -ErrorAction Stop } else { $p = Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 }
 if (-not $p) { throw "Окно процесса $Process не найдено" }
 [GmagcWin32]::ShowWindow($p.MainWindowHandle, 9) | Out-Null
 [GmagcWin32]::SetForegroundWindow($p.MainWindowHandle) | Out-Null

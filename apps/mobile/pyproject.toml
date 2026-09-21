@@ -1,13 +1,15 @@
 [project]
 name = "gmagc-mobile"
-version = "0.4.0"
-description = "GMAGC: поиск гобо по фото (Android-клиент, камера)"
+version = "0.5.0"
+description = "GMAGC: поиск гобо по фото (Android-клиент)"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "@ANDY_BUM" }]
 dependencies = [
   "flet==1.0.0",
   "flet-camera==1.0.0",
   "flet-permission-handler==1.0.0",
+  "pyzbar",
+  "Pillow",
 ]
 
 [tool.flet]
@@ -15,6 +17,10 @@ product = "GMAGC"
 company = "@ANDY_BUM"
 copyright = "Copyright (C) 2026 @ANDY_BUM"
 org = "com.spacesarmat"
+permissions = ["camera"]  # android.permission.CAMERA в манифесте: без него запрос разрешения всегда отказывает
 
 [tool.flet.app]
 path = "src"  # main.py лежит в src/
+
+[tool.flet.android.manifest_application]
+usesCleartextTraffic = "true"  # телефон общается с ПК по HTTP в локальной сети

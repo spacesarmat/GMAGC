@@ -20,6 +20,12 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements-dev.txt
+      - name: Библиотека zbar для тестов чтения QR
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libzbar0
+      - name: Библиотека zbar для тестов чтения QR (macOS)
+        if: runner.os == 'macOS'
+        run: brew install zbar
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
       - run: python -m ruff check .

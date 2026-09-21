@@ -1,0 +1,181 @@
+import json
+import threading
+import time
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+from gmagc_common.protocol import MAX_IMAGE_BYTES, Connection, MatchResponse
+from gmagc_desktop.server.runner import PhoneServer
+from gmagc_desktop.service.search_service import SearchService
+from gmagc_mobile.client import (
+    BAD_IMAGE,
+    NO_INDEX,
+    PROTOCOL,
+    RATE_LIMITED,
+    SERVER,
+    TOO_LARGE,
+    UNAUTHORIZED,
+    UNREACHABLE,
+    ClientError,
+    GmagcClient,
+)
+
+
+def make_client(running, code=None, **options):
+    return GmagcClient(Connection("127.0.0.1", running.port, code or running.code), **options)
+
+
+@contextmanager
+def stub_server(status=200, body=b"{}", content_type="application/json", delay=0.0):
+    """Поддельный сервер: на любой запрос отвечает заданным телом."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            time.sleep(delay)
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_POST = do_GET
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield Connection("127.0.0.1", server.server_address[1], "ABCD2345")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_verify_returns_the_health_and_the_status(running):
+    health, status = make_client(running).verify()
+
+    assert health.app == "GMAGC" and health.indexed and health.files == 6
+    assert status.indexed and status.families == 5 and status.indexing is False
+
+
+def test_a_wrong_code_is_unauthorized(running):
+    with pytest.raises(ClientError) as error:
+        make_client(running, "ABCD2346").verify()
+
+    assert error.value.kind == UNAUTHORIZED
+
+
+def test_five_wrong_codes_lead_to_the_rate_limit_with_a_wait_time(running):
+    client = make_client(running, "ABCD2346")
+    for _ in range(5):
+        with pytest.raises(ClientError) as error:
+            client.status()
+        assert error.value.kind == UNAUTHORIZED
+
+    with pytest.raises(ClientError) as error:
+        client.status()
+
+    assert error.value.kind == RATE_LIMITED and 1 <= error.value.retry_after <= 30
+
+
+def test_match_returns_the_parsed_response(running, photo_jpeg):
+    response = make_client(running).match(photo_jpeg)
+
+    assert isinstance(response, MatchResponse) and response.outcome in {"found", "low_confidence"}
+    assert len(response.results) == 5 and response.results[0].path.endswith(".png")
+    assert response.results[0].thumbnail_png.startswith(b"\x89PNG")
+
+
+def test_match_honors_top(running, photo_jpeg):
+    assert len(make_client(running).match(photo_jpeg, top=2).results) == 2
+
+
+def test_a_closed_port_is_unreachable(running):
+    running.server.stop()
+
+    with pytest.raises(ClientError) as error:
+        make_client(running).verify()
+
+    assert error.value.kind == UNREACHABLE
+
+
+def test_a_slow_server_times_out_as_unreachable():
+    with stub_server(delay=1.5) as connection, pytest.raises(ClientError) as error:
+        GmagcClient(connection, timeout=0.3).health()
+
+    assert error.value.kind == UNREACHABLE
+
+
+def test_junk_and_empty_images_are_bad_image(running):
+    with pytest.raises(ClientError) as error:
+        make_client(running).match(b"not an image")
+    assert error.value.kind == BAD_IMAGE
+
+    with pytest.raises(ClientError) as error:
+        make_client(running).match(b"")
+    assert error.value.kind == BAD_IMAGE
+
+
+def test_an_oversized_image_is_too_large(running):
+    with pytest.raises(ClientError) as error:
+        make_client(running).match(b"\0" * (MAX_IMAGE_BYTES + 1))
+
+    assert error.value.kind == TOO_LARGE
+
+
+def test_a_pc_without_an_index_is_no_index(tmp_path, photo_jpeg):
+    empty = SearchService(tmp_path / "empty")
+    empty.load()
+    code = empty.ensure_access_code()
+    server = PhoneServer(empty, host="127.0.0.1")
+    port = server.start(0)
+    try:
+        with pytest.raises(ClientError) as error:
+            GmagcClient(Connection("127.0.0.1", port, code)).match(photo_jpeg)
+        assert error.value.kind == NO_INDEX
+        health, status = GmagcClient(Connection("127.0.0.1", port, code)).verify()
+        assert health.indexed is False and status.indexed is False
+    finally:
+        server.stop()
+
+
+def test_a_foreign_json_server_is_a_protocol_error():
+    with stub_server(body=b'{"hello": "world"}') as connection, pytest.raises(ClientError) as error:
+        GmagcClient(connection).health()
+
+    assert error.value.kind == PROTOCOL and "не сервер GMAGC" in error.value.message
+
+
+def test_a_non_json_server_is_a_protocol_error():
+    with stub_server(body=b"<html>router</html>", content_type="text/html") as connection:
+        with pytest.raises(ClientError) as error:
+            GmagcClient(connection).health()
+
+    assert error.value.kind == PROTOCOL
+
+
+def test_an_incompatible_api_version_is_reported():
+    body = json.dumps({"app": "GMAGC", "api": 99, "version": "9.0.0", "indexed": True, "files": 1}).encode()
+    with stub_server(body=body) as connection, pytest.raises(ClientError) as error:
+        GmagcClient(connection).health()
+
+    assert error.value.kind == PROTOCOL and "API 99" in error.value.message
+
+
+def test_an_unknown_error_reply_is_a_server_error():
+    with stub_server(status=503, body=b'{"oops": 1}') as connection, pytest.raises(ClientError) as error:
+        GmagcClient(connection).health()
+
+    assert error.value.kind == SERVER and "503" in error.value.message
+
+
+def test_a_known_error_code_keeps_the_server_message():
+    body = json.dumps({"error": "server_error", "message": "ошибка поиска на ПК"}).encode()
+    with stub_server(status=500, body=body) as connection, pytest.raises(ClientError) as error:
+        GmagcClient(connection).match(b"x")
+
+    assert error.value.kind == SERVER and error.value.message == "ошибка поиска на ПК"
