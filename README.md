@@ -1,8 +1,10 @@
 # GMAGC: поиск гобо по фото
 
+Автор: @ANDY_BUM
+
 Находит в библиотеке гобо (папка в структуре grandMA) файл, который лучше всего совпадает с **фотографией проекции** на стене или экране. Выдаёт несколько лучших вариантов: название, путь, оценку совпадения; одинаковые гобо из разных папок производителей собираются в одну карточку.
 
-**Статус: v0.1.0, ядро распознавания.** Индексация библиотеки, поиск по фото, командная строка, бенчмарк и вспомогательные скрипты готовы и покрыты тестами. Сервер на ПК, интерфейс Flet, Android-клиент (телефон как камера) и сборки под Windows / macOS / Android запланированы отдельными этапами (см. `docs/superpowers/specs`).
+**Статус: ядро распознавания (v0.1.0) и каркасы приложений со сборками под Windows, macOS и Android.** Индексация библиотеки, поиск по фото, командная строка, бенчмарк и вспомогательные скрипты готовы и покрыты тестами. Сервер на ПК, интерфейс Flet, Android-клиент (телефон как камера) и сборки под Windows / macOS / Android запланированы отдельными этапами (см. `docs/superpowers/specs`).
 
 ## Как это работает
 
@@ -17,7 +19,7 @@
 ```powershell
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-$env:PYTHONPATH = "apps\desktop"        # bash: export PYTHONPATH=apps/desktop
+$env:PYTHONPATH = "apps\desktop\src"    # bash: export PYTHONPATH=apps/desktop/src
 
 # один раз (и после изменений в библиотеке; при повторном запуске дозаписываются только новые файлы)
 .venv\Scripts\python.exe -m gmagc_desktop.cli index D:\путь\к\gobos --index .gmagc-cache\index.npz
@@ -32,6 +34,17 @@ $env:PYTHONPATH = "apps\desktop"        # bash: export PYTHONPATH=apps/desktop
 
 На 17 реальных фото (11 размечены, у 6 нужного гобо в библиотеке нет): верный ответ в первой пятёрке у **91%** (10 из 11), на первом месте у 64%. Поиск ~80 мс, индексация 11 тыс. файлов около минуты. Выборка небольшая (одна стена, одна камера), цифры показывают порядок величин.
 
+## Сборки (Windows, macOS, Android)
+
+Сборки делает GitHub Actions: по тегу `v*` (например `v0.2.0`) в релиз попадают `GMAGC-desktop-windows-<версия>.zip`, `GMAGC-desktop-macos-<версия>.zip`, `GMAGC-android-<версия>.apk` и файлы `.sha256`. Те же сборки запускаются на Pull Request и вручную (Actions → нужный workflow → Run workflow), артефакты лежат в запуске.
+
+Пока это **каркасы**: ПК-приложение показывает версию и кнопку «Проверить ядро», Android-приложение показывает превью камеры. Поиск в интерфейсе, сервер и подключение телефона придут следующими этапами. Приложения без подписей:
+- macOS: правый клик по приложению → «Открыть»;
+- Windows: SmartScreen → «Подробнее» → «Выполнить в любом случае»;
+- Android: разрешить установку из неизвестных источников.
+
+Версия Flet записана в четырёх местах и меняется вместе: `FLET_VERSION` в трёх `build-*.yml`, `dependencies` в `apps/*/pyproject.toml` и `requirements-dev.txt`. Версия приложения (`VERSION` в `about.py` обоих приложений, `version` в их `pyproject.toml`) меняется вместе с тегом.
+
 ## Разработка
 
 ```powershell
@@ -44,7 +57,10 @@ $env:PYTHONPATH = "apps\desktop"        # bash: export PYTHONPATH=apps/desktop
 Папки `gobos/` (библиотека), `photo/` (реальные фото) и `models/` (скачанные модели, `scripts/fetch_model.py`) в репозиторий **не входят**.
 
 ```
-apps/desktop/gmagc_desktop/   matcher/ (изображение, эмбеддинги, поиск), library/ (обход, индекс, дубли), cli.py
+apps/desktop/src/gmagc_desktop/   ядро: matcher/ (изображение, эмбеддинги, поиск), library/ (обход, индекс, дубли), cli.py
+apps/desktop/src/main.py          ПК-приложение Flet (каркас)
+apps/mobile/src/                  Android-приложение Flet (каркас: камера)
+.github/workflows/                тесты и сборки Windows / macOS / Android
 scripts/                      бенчмарк, отчёт по фото, просмотр групп дублей, загрузка модели
 tests/                        тесты (синтетическая библиотека в tests/fixtures.py)
 docs/                         спецификация, план реализации, замеры
