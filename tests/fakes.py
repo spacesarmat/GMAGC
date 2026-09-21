@@ -35,7 +35,7 @@ class FakePicker:
         return self.folder
 
     async def pick_files(self, **kwargs):
-        return [SimpleNamespace(path=path) for path in self.files]
+        return [SimpleNamespace(path=path, bytes=None) for path in self.files]
 
 
 class FakeClipboard:
