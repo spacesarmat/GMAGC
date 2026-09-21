@@ -1,11 +1,14 @@
 """Маленькая синтетическая библиотека гобо для тестов индекса, поиска и CLI."""
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 from PIL import Image
 
+from gmagc_desktop.library import scan
 from tests.helpers import l_shape, sample_gobo
 
 
@@ -62,3 +65,32 @@ def write_library(root: Path) -> None:
     Image.fromarray(np.zeros((64, 64), np.uint8), "L").save(root / "blank.png")
     Image.fromarray(images["ring"]).convert("RGB").save(root / "question.bmp")
     (root / "notes.txt").write_text("not an image", encoding="utf-8")
+
+
+def make_folder_unlistable(monkeypatch, folder_name: str) -> None:
+    """Подменяет os.walk в scan: папку folder_name «нельзя прочитать» (вызывается onerror), остальные обходятся как есть."""
+    real_walk = os.walk
+
+    def fake_walk(top, topdown=True, onerror=None, followlinks=False):
+        for dirpath, dirnames, filenames in real_walk(top, topdown, None, followlinks):
+            if Path(dirpath).name == folder_name:
+                if onerror is not None:
+                    onerror(PermissionError(13, "Access is denied", dirpath))
+                continue
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(scan, "os", SimpleNamespace(walk=fake_walk))
+
+
+def make_file_vanish_during_walk(monkeypatch, rel_path: str) -> None:
+    """Подменяет os.walk в scan: файл rel_path удаляется уже после того, как обход его перечислил (до stat())."""
+    real_walk = os.walk
+
+    def fake_walk(top, topdown=True, onerror=None, followlinks=False):
+        target = Path(top) / rel_path
+        for dirpath, dirnames, filenames in real_walk(top, topdown, onerror, followlinks):
+            if Path(dirpath) == target.parent and target.exists():
+                target.unlink()
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(scan, "os", SimpleNamespace(walk=fake_walk))

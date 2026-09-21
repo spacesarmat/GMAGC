@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from gmagc_desktop.library.index import build_index, load_index, save_index
+from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError, build_index, load_index, save_index
 from gmagc_desktop.matcher.embedder import Embedder, OnnxEmbedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
@@ -49,9 +49,10 @@ def _cmd_index(args: argparse.Namespace) -> int:
         index = build_index(
             args.library, embedder, existing=load_index(args.index), progress=_progress
         )
-    except FileNotFoundError as error:
+    except (LibraryNotFound, LibraryScanError) as error:
+        print(file=sys.stderr)
         print(error, file=sys.stderr)
-        return 1
+        return 3
     print(file=sys.stderr)
     save_index(index, args.index)
     unique = len(set(index.group_ids.tolist()))
@@ -63,6 +64,9 @@ def _cmd_search(args: argparse.Namespace) -> int:
     index = load_index(args.index)
     if index is None:
         print("index not found or unreadable; run 'index' first", file=sys.stderr)
+        return 1
+    if len(index) == 0:
+        print("index is empty; rebuild it with the 'index' command", file=sys.stderr)
         return 1
     photo = _read_photo(args.photo)
     if photo is None:

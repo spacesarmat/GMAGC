@@ -3,9 +3,10 @@ import numpy as np
 import pytest
 
 from gmagc_desktop import cli
+from gmagc_desktop.library.index import LibraryIndex, save_index
 from gmagc_desktop.matcher.embedder import PixelEmbedder
 from gmagc_desktop.matcher.synthetic import simulate_photo
-from tests.fixtures import shape_images, write_library
+from tests.fixtures import make_folder_unlistable, shape_images, write_library
 
 
 @pytest.fixture()
@@ -33,9 +34,9 @@ def test_index_reports_counts(tmp_path, capsys):
     assert "6 files indexed (5 unique), 1 skipped" in capsys.readouterr().out
 
 
-def test_index_of_missing_library_returns_1_and_writes_nothing(tmp_path, capsys):
+def test_index_of_missing_library_returns_3_and_writes_nothing(tmp_path, capsys):
     target = tmp_path / "i.npz"
-    assert cli.main(["index", str(tmp_path / "nope"), "--index", str(target)]) == 1
+    assert cli.main(["index", str(tmp_path / "nope"), "--index", str(target)]) == 3
     assert "library folder not found" in capsys.readouterr().err
     assert not target.exists()
 
@@ -153,3 +154,55 @@ def test_index_with_corrupt_model_returns_3(tmp_path, capsys):
     assert code == 3
     assert "cannot load model" in err
     assert not target.exists()
+
+
+def test_index_with_an_unlistable_folder_returns_3_and_keeps_the_existing_index(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    before = index_path.read_bytes()
+    make_folder_unlistable(monkeypatch, "vendor_b")
+
+    code = cli.main(["index", str(library), "--index", str(index_path)])
+
+    err = capsys.readouterr().err
+    assert code == 3
+    assert "cannot list directory" in err and "refusing to build a partial index" in err
+    assert index_path.read_bytes() == before
+
+
+def test_index_of_an_empty_library_returns_3_and_keeps_the_existing_index(indexed, capsys):
+    library, index_path, tmp = indexed
+    before = index_path.read_bytes()
+    empty = tmp / "empty_lib"
+    empty.mkdir()
+
+    code = cli.main(["index", str(empty), "--index", str(index_path)])
+
+    assert code == 3 and "no PNG/BMP files found" in capsys.readouterr().err
+    assert index_path.read_bytes() == before
+
+
+def test_index_of_an_empty_library_writes_no_index_file(tmp_path, capsys):
+    empty = tmp_path / "empty_lib"
+    empty.mkdir()
+    target = tmp_path / "fresh.npz"
+
+    assert cli.main(["index", str(empty), "--index", str(target)]) == 3
+    assert not target.exists()
+
+
+def test_search_on_an_empty_index_returns_1_with_a_hint(tmp_path, capsys):
+    empty_index = LibraryIndex(
+        "pixels-16",
+        [],
+        np.zeros((0, 0), np.float32),
+        np.zeros((0, 64, 64), np.uint8),
+        np.zeros(0, np.int32),
+    )
+    index_path = tmp_path / "empty.npz"
+    save_index(empty_index, index_path)
+    photo = save_photo(tmp_path, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+
+    code = cli.main(["search", str(photo), "--index", str(index_path)])
+
+    assert code == 1
+    assert "index is empty; rebuild it with the 'index' command" in capsys.readouterr().err

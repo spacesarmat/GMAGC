@@ -6,12 +6,14 @@ import pytest
 
 from gmagc_desktop.library.index import (
     IndexCancelled,
+    LibraryNotFound,
+    LibraryScanError,
     build_index,
     load_index,
     save_index,
 )
 from gmagc_desktop.matcher.embedder import PixelEmbedder
-from tests.fixtures import write_library
+from tests.fixtures import make_file_vanish_during_walk, make_folder_unlistable, write_library
 
 
 class CountingEmbedder(PixelEmbedder):
@@ -185,3 +187,48 @@ def test_corrupt_image_is_skipped_with_a_warning(library, caplog):
         index = build_index(library, CountingEmbedder())
     assert "vendor_a/broken.png" in [f.rel_path for f in index.skipped]
     assert "broken.png" in caplog.text
+
+
+def test_missing_library_root_raises_library_not_found_with_the_path(tmp_path):
+    with pytest.raises(LibraryNotFound, match="library folder not found") as caught:
+        build_index(tmp_path / "unplugged", CountingEmbedder())
+    assert isinstance(caught.value, FileNotFoundError) and "unplugged" in str(caught.value)
+
+
+def test_unlistable_directory_aborts_instead_of_building_a_partial_index(library, monkeypatch):
+    make_folder_unlistable(monkeypatch, "vendor_b")
+    embedder = CountingEmbedder()
+
+    with pytest.raises(LibraryScanError, match="refusing to build a partial index") as caught:
+        build_index(library, embedder)
+
+    assert "cannot list directory" in str(caught.value) and "vendor_b" in str(caught.value)
+    assert "1 problem" in str(caught.value)
+    assert embedder.count == 0  # ничего не встраивалось: индекс не строился
+
+
+def test_empty_library_folder_raises_instead_of_returning_an_empty_index(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("not an image", encoding="utf-8")
+    with pytest.raises(LibraryScanError, match="no PNG/BMP files found"):
+        build_index(empty, CountingEmbedder())
+
+
+def test_library_of_only_unreadable_files_raises(tmp_path):
+    root = tmp_path / "lib"
+    root.mkdir()
+    (root / "broken.png").write_bytes(b"not a png")
+    (root / "also_broken.bmp").write_bytes(b"not a bmp")
+    with pytest.raises(LibraryScanError, match=r"none of the 2 library files could be read"):
+        build_index(root, CountingEmbedder())
+
+
+def test_file_vanishing_between_walk_and_stat_is_skipped_by_the_build(library, monkeypatch):
+    make_file_vanish_during_walk(monkeypatch, "vendor_a/ring.png")
+
+    index = build_index(library, CountingEmbedder())
+
+    paths = [f.rel_path for f in index.files]
+    assert "vendor_a/ring.png" not in paths and "vendor_a/dots.png" in paths
+    assert len(index) == 5 and [f.rel_path for f in index.skipped] == ["blank.png"]

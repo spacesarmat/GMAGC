@@ -15,12 +15,12 @@ import numpy as np
 from PIL import Image
 
 from gmagc_desktop.library.grouping import group_duplicates
-from gmagc_desktop.library.scan import LibraryFile, scan_library
+from gmagc_desktop.library.scan import LibraryFile, scan_library_checked
 from gmagc_desktop.matcher.embedder import Embedder
 from gmagc_desktop.matcher.imageio import load_library_gray
 from gmagc_desktop.matcher.normalize import normalize_gray
 from gmagc_desktop.matcher.search import SearchData
-from gmagc_desktop.matcher.shape import MASK_SIZE, soft_mask
+from gmagc_desktop.matcher.shape import soft_mask
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,14 @@ ProgressCallback = Callable[[int, int], None]
 
 class IndexCancelled(Exception):
     """Индексация прервана по запросу пользователя."""
+
+
+class LibraryNotFound(FileNotFoundError):
+    """Папка библиотеки не существует (например, отключён диск)."""
+
+
+class LibraryScanError(RuntimeError):
+    """Библиотеку нельзя надёжно проиндексировать: частичный или пустой результат не сохраняем."""
 
 
 @dataclass
@@ -72,8 +80,15 @@ def build_index(
 ) -> LibraryIndex:
     root = Path(root)
     if not root.is_dir():
-        raise FileNotFoundError(f"library folder not found: {root}")
-    scanned = scan_library(root)
+        raise LibraryNotFound(f"library folder not found: {root}")
+    scanned, problems = scan_library_checked(root)
+    if problems:
+        raise LibraryScanError(
+            f"{len(problems)} problem(s) while scanning {root}: {'; '.join(problems[:3])}; "
+            "refusing to build a partial index"
+        )
+    if not scanned:
+        raise LibraryScanError(f"no PNG/BMP files found in {root}")
 
     reusable: dict[LibraryFile, int] = {}
     known_skipped: set[LibraryFile] = set()
@@ -105,14 +120,7 @@ def build_index(
     skipped.sort(key=lambda f: f.rel_path)
     files = [f for f in scanned if f in reusable or f in fresh]
     if not files:
-        return LibraryIndex(
-            embedder.model_id,
-            [],
-            np.zeros((0, 0), np.float32),
-            np.zeros((0, MASK_SIZE, MASK_SIZE), np.uint8),
-            np.zeros(0, np.int32),
-            skipped,
-        )
+        raise LibraryScanError(f"none of the {len(scanned)} library files could be read")
 
     embeddings = np.stack(
         [existing.embeddings[reusable[f]] if f in reusable else fresh[f][1] for f in files]
