@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tokenize
 import zipfile
 import zlib
 from collections.abc import Callable
@@ -195,5 +196,14 @@ def load_index(path: str | Path) -> LibraryIndex | None:
                 group_ids=data["group_ids"],
                 skipped=_files(data["skipped_paths"], data["skipped_sizes"], data["skipped_mtimes"]),
             )
-    except (OSError, KeyError, ValueError, EOFError, NotImplementedError, zipfile.BadZipFile, zlib.error):
+    except (
+        OSError,
+        KeyError,
+        ValueError,
+        EOFError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        zlib.error,
+        tokenize.TokenError,  # numpy разбирает заголовок .npy токенайзером
+    ):
         return None

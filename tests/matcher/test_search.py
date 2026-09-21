@@ -39,6 +39,18 @@ def test_rotated_query_finds_its_family_and_reports_members(library, w_embed):
         assert angle_error(top.angle, 223.0) < 3.0 and not top.mirrored
 
 
+@pytest.mark.parametrize("w", [0.0, 0.3, 0.5, 1.0])
+def test_score_is_the_weighted_sum_of_embed_and_shape_scores(library, w):
+    names, normalized, embedder, data = library
+    query = rotate_image(normalized[names.index("gobo")], 40.0)
+
+    matches = Searcher(data, embedder, w_embed=w).search(query, top_n=10)
+
+    assert len(matches) > 1
+    for match in matches:
+        assert match.score == pytest.approx(w * max(match.embed_score, 0.0) + (1 - w) * match.shape_score)
+
+
 def test_mirrored_query_is_flagged_mirrored(library):
     names, normalized, embedder, data = library
     query = rotate_image(np.ascontiguousarray(normalized[names.index("ell")][:, ::-1]), 60.0)

@@ -52,11 +52,24 @@ def test_onnx_embedder_preprocess_and_output(tmp_path):
     assert embedder.model_id.startswith("onnx-tiny-")
 
 
-def test_onnx_embedder_handles_many_batches(tmp_path):
+def test_onnx_embedder_handles_many_batches_and_keeps_order(tmp_path):
     model_path = tmp_path / "tiny.onnx"
     make_mean_model(model_path)
-    out = OnnxEmbedder(model_path, batch_size=32).embed(np.zeros((70, 224, 224), np.uint8))
+    embedder = OnnxEmbedder(model_path, batch_size=32)
+    # Каждое изображение — своя константа, поэтому перепутанный порядок батчей заметен
+    images = np.stack([np.full((224, 224), 10 + 3 * i, np.uint8) for i in range(70)])
+
+    out = embedder.embed(images)
+
     assert out.shape == (70, 3)
+    assert len({tuple(np.round(row, 5)) for row in out}) == 70  # строки различимы: проверка не пустая
+    for i in (0, 1, 31, 32, 33, 63, 64, 69):  # границы батчей по 32
+        assert np.allclose(out[i], embedder.embed(images[i : i + 1])[0], atol=1e-6)
+
+
+def test_pixel_embedder_empty_batch_returns_an_empty_matrix_like_onnx(tmp_path):
+    out = PixelEmbedder().embed(np.zeros((0, 224, 224), np.uint8))
+    assert out.shape == (0, 0) and out.dtype == np.float32
 
 
 def test_pool_output_concatenates_cls_and_mean_patch():

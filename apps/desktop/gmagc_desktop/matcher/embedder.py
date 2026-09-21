@@ -33,6 +33,8 @@ class PixelEmbedder:
         self.model_id = f"pixels-{side}"
 
     def embed(self, images: np.ndarray) -> np.ndarray:
+        if len(images) == 0:
+            return np.zeros((0, 0), dtype=np.float32)
         small = np.stack(
             [
                 cv2.resize(image, (self.side, self.side), interpolation=cv2.INTER_AREA)

@@ -124,6 +124,21 @@ def test_load_returns_none_for_missing_or_corrupt_file(tmp_path):
     assert load_index(broken) is None
 
 
+def test_load_returns_none_when_the_npy_header_is_cut_off(tmp_path):
+    """Оборванный заголовок .npy внутри npz: numpy бросает tokenize.TokenError, а не ValueError."""
+    import struct
+    import zipfile
+
+    header = b"{'descr': '<i8', 'fortran_order': False, 'shape': (1,"
+    header += b" " * ((64 - (10 + len(header) + 1) % 64) % 64) + b"\n"
+    npy = b"\x93NUMPY\x01\x00" + struct.pack("<H", len(header)) + header + b"\x00" * 8
+    damaged = tmp_path / "cut_header.npz"
+    with zipfile.ZipFile(damaged, "w") as archive:
+        archive.writestr("format_version.npy", npy)
+
+    assert load_index(damaged) is None
+
+
 def test_load_never_raises_on_damaged_cache(library, tmp_path):
     target = tmp_path / "index.npz"
     save_index(build_index(library, CountingEmbedder()), target)
