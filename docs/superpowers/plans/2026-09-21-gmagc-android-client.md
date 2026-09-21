@@ -520,7 +520,7 @@ git commit -m "feat: typed network client of the Android app" -m "Co-Authored-By
 **Files:**
 - Create: `apps/mobile/src/gmagc_mobile/store.py`, `apps/mobile/src/gmagc_mobile/imaging.py`, `apps/mobile/src/gmagc_mobile/qr.py`
 - Modify: `requirements-dev.txt` (строка `pyzbar`), `.github/workflows/ci.yml` (библиотека zbar в CI)
-- Test: `tests/mobile/test_store.py`, `tests/mobile/test_imaging.py`, `tests/mobile/test_qr.py`
+- Test: `tests/mobile/test_store.py`, `tests/mobile/test_imaging.py`, `tests/mobile/test_mobile_qr.py`
 
 **Interfaces:**
 - Produces: `store.ConnectionStore(prefs)` c async `load() -> Connection | None`, `save(connection)`, `clear()`; `imaging.prepare_upload(data: bytes, limit: int = 8 МБ) -> bytes` (`ValueError`, если файл не изображение или не уменьшается до лимита); `qr.decode_qr(image: bytes) -> str | None`, `qr.connection_from_qr(image: bytes) -> Connection | None`, `qr.QrUnavailable(RuntimeError)`.
@@ -660,7 +660,7 @@ def test_a_big_non_image_raises():
 ```
 
 ```python
-# path: tests/mobile/test_qr.py
+# path: tests/mobile/test_mobile_qr.py
 import io
 
 import pytest
@@ -734,7 +734,7 @@ def test_a_qr_with_foreign_text_is_not_a_connection():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv\Scripts\python.exe -m pytest tests/mobile/test_store.py tests/mobile/test_imaging.py tests/mobile/test_qr.py -q`
+Run: `.venv\Scripts\python.exe -m pytest tests/mobile/test_store.py tests/mobile/test_imaging.py tests/mobile/test_mobile_qr.py -q`
 Expected: FAIL (нет модулей `store`, `imaging`, `qr`).
 
 - [ ] **Step 3: Write the implementation**
