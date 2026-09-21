@@ -12,7 +12,7 @@ from gmagc_desktop.library.index import LibraryNotFound, LibraryScanError, build
 from gmagc_desktop.matcher.embedder import Embedder, OnnxEmbedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
-from gmagc_desktop.matcher.search import Searcher
+from gmagc_desktop.matcher.search import IndexMismatchError, Searcher
 
 
 def make_embedder(model: str | None) -> Embedder:
@@ -87,7 +87,12 @@ def _cmd_search(args: argparse.Namespace) -> int:
         return 2
     searcher = Searcher(index.search_data(), embedder, w_embed=args.w_embed)
     root = Path(args.library) if args.library else None
-    for rank, match in enumerate(searcher.search(normalized, top_n=args.top), start=1):
+    try:
+        matches = searcher.search(normalized, top_n=args.top)
+    except IndexMismatchError as error:
+        print(error, file=sys.stderr)
+        return 1
+    for rank, match in enumerate(matches, start=1):
         rel = index.files[match.index].rel_path
         shown = str(root / rel) if root else rel
         extra = f"  (+{len(match.members) - 1} copies)" if len(match.members) > 1 else ""

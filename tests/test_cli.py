@@ -103,6 +103,20 @@ def test_search_with_other_model_than_index_returns_1(indexed, monkeypatch, caps
     assert "index was built with" in capsys.readouterr().err
 
 
+def test_search_with_embedder_of_other_dimensions_returns_1_and_asks_to_rebuild(indexed, monkeypatch, capsys):
+    library, index_path, tmp = indexed
+    photo = save_photo(tmp, "p.png", simulate_photo(shape_images()["ell"], np.random.default_rng(5)))
+    other = PixelEmbedder(side=8)
+    other.model_id = "pixels-16"  # тот же model_id, что в индексе, но другая размерность векторов
+    monkeypatch.setattr(cli, "make_embedder", lambda model: other)
+
+    code = cli.main(["search", str(photo), "--index", str(index_path)])
+
+    out, err = capsys.readouterr()
+    assert code == 1 and "rebuild the index" in err and "Traceback" not in err
+    assert out == ""
+
+
 def test_search_with_missing_photo_returns_3(indexed, monkeypatch, capsys):
     library, index_path, tmp = indexed
     msg = "model must not be built before photo is read"

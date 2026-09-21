@@ -12,6 +12,10 @@ from gmagc_desktop.matcher.shape import ShapeMatcher, soft_mask
 from gmagc_desktop.matcher.variants import DEFAULT_ROTATIONS, query_variants
 
 
+class IndexMismatchError(ValueError):
+    """Размерность векторов индекса не совпадает с размерностью эмбеддера: индекс построен другой моделью."""
+
+
 @dataclass(frozen=True)
 class SearchData:
     embeddings: np.ndarray  # (N, D) float32, L2-нормализованные
@@ -55,6 +59,11 @@ class Searcher:
 
         variants = query_variants(normalized_query, self._n_rotations, mirror=True)
         query_vectors = self._embedder.embed(variants)  # (V, D)
+        if query_vectors.shape[1] != data.embeddings.shape[1]:
+            raise IndexMismatchError(
+                f"index vectors have {data.embeddings.shape[1]} dimensions "
+                f"but the embedder produced {query_vectors.shape[1]}; rebuild the index"
+            )
         best_embed = (data.embeddings @ query_vectors.T).max(axis=1)  # (N,)
 
         candidates: list[int] = []

@@ -4,7 +4,7 @@ import pytest
 from gmagc_desktop.library.grouping import group_duplicates
 from gmagc_desktop.matcher.embedder import PixelEmbedder
 from gmagc_desktop.matcher.normalize import normalize_gray
-from gmagc_desktop.matcher.search import SearchData, Searcher
+from gmagc_desktop.matcher.search import IndexMismatchError, SearchData, Searcher
 from gmagc_desktop.matcher.shape import soft_mask
 from gmagc_desktop.matcher.variants import rotate_image
 from tests.fixtures import shape_images
@@ -65,3 +65,13 @@ def test_top_n_limits_results_and_empty_index_is_safe(library):
         np.zeros((0, 0), np.float32), np.zeros((0, 64, 64), np.uint8), np.zeros(0, np.int32)
     )
     assert Searcher(empty, embedder).search(normalized[0]) == []
+
+
+def test_embedder_with_other_dimensions_than_the_index_is_rejected_clearly(library):
+    names, normalized, embedder, data = library  # индекс построен PixelEmbedder(side=16): 256 измерений
+    other = PixelEmbedder(side=8)  # 64 измерения
+
+    with pytest.raises(IndexMismatchError, match="256 dimensions but the embedder produced 64; rebuild the index"):
+        Searcher(data, other).search(normalized[0])
+
+    assert isinstance(IndexMismatchError("x"), ValueError)
