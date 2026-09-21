@@ -31,6 +31,23 @@ jobs:
       - run: python -m pip install "flet==$FLET_VERSION"
       - name: Сборка (универсальный пакет)
         run: flet build macos apps/desktop --yes --no-rich-output -v --build-version "$VERSION" --build-number "$GITHUB_RUN_NUMBER"
+      - name: Дымовая проверка запуска
+        run: |
+          APP=$(find apps/desktop/build/macos -maxdepth 1 -name "*.app" | head -1)
+          BIN=$(find "$APP/Contents/MacOS" -type f -perm -u+x | head -1)
+          touch "$RUNNER_TEMP/marker"
+          "$BIN" > "$RUNNER_TEMP/app_out.txt" 2> "$RUNNER_TEMP/app_err.txt" &
+          PID=$!
+          sleep 25
+          ALIVE=1
+          kill -0 "$PID" 2>/dev/null || ALIVE=0
+          kill "$PID" 2>/dev/null || true
+          LOGS=$(find "$HOME/Library" -name console.log -newer "$RUNNER_TEMP/marker" 2>/dev/null)
+          echo "--- stderr ---"; cat "$RUNNER_TEMP/app_err.txt"
+          echo "--- stdout ---"; cat "$RUNNER_TEMP/app_out.txt"
+          echo "--- console.log ---"; for f in $LOGS; do echo "$f"; cat "$f"; done
+          if [ "$ALIVE" = "0" ]; then echo "Приложение завершилось само"; exit 1; fi
+          if grep -q Traceback "$RUNNER_TEMP/app_err.txt" "$RUNNER_TEMP/app_out.txt" $LOGS 2>/dev/null; then echo "В выводе приложения есть ошибка Python"; exit 1; fi
       - name: Упаковка
         run: |
           mkdir -p dist

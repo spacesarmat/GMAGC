@@ -1,6 +1,6 @@
 [project]
 name = "gmagc-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "GMAGC: поиск гобо по фото (ПК-приложение)"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "@ANDY_BUM" }]
@@ -19,3 +19,6 @@ org = "com.spacesarmat"
 
 [tool.flet.app]
 path = "src"  # main.py лежит в src/
+
+[tool.flet.compile]
+packages = false  # OpenCV читает свой config.py как файл, поэтому исходники пакетов нужны
