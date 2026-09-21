@@ -26,6 +26,7 @@ def make_app(tmp_path, *, enabled=True, addresses=("192.168.1.5",), server=None,
     services.setdefault("qr", lambda link: links.append(link) or b"PNG:" + link.encode())
     services.setdefault("clipboard", FakeClipboard())
     services.setdefault("updates", None)
+    services.setdefault("support", False)  # окно поддержки автора в тестах экрана не показываем
     page = StubPage()
     app = build_page(
         page, service=SearchService(data), server=server or FakeServer(), addresses=lambda: list(addresses), **services

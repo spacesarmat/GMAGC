@@ -40,6 +40,9 @@ class Settings:
     check_updates: bool = True
     skipped_version: str = ""
     last_update_check: float = 0.0
+    launches: int = 0
+    support_last_ask: float = 0.0
+    support_muted: bool = False
 
 
 def _is_int(value: object) -> bool:
@@ -62,6 +65,9 @@ def load_settings(path: str | Path) -> Settings:
     check_updates = raw.get("check_updates", True)
     skipped_version = raw.get("skipped_version", "")
     last_update_check = raw.get("last_update_check", 0.0)
+    launches = raw.get("launches", 0)
+    support_last_ask = raw.get("support_last_ask", 0.0)
+    support_muted = raw.get("support_muted", False)
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
@@ -78,6 +84,16 @@ def load_settings(path: str | Path) -> Settings:
             and last_update_check >= 0
             else 0.0
         ),
+        launches=launches if _is_int(launches) and launches >= 0 else 0,
+        support_last_ask=(
+            float(support_last_ask)
+            if isinstance(support_last_ask, int | float)
+            and not isinstance(support_last_ask, bool)
+            and math.isfinite(support_last_ask)
+            and support_last_ask >= 0
+            else 0.0
+        ),
+        support_muted=support_muted if isinstance(support_muted, bool) else False,
     )
 
 

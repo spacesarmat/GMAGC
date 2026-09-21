@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from gmagc_common.protocol import is_valid_code
+from gmagc_common.support import SupportState
 from gmagc_common.updates import parse_version
 from gmagc_desktop.library.cache import update_index
 from gmagc_desktop.library.index import LibraryIndex, ProgressCallback, load_index
@@ -132,6 +133,13 @@ class SearchService:
 
     def mark_update_checked(self, when: float) -> None:
         self._update_settings(last_update_check=float(when))
+
+    def support_state(self) -> SupportState:
+        s = self.settings
+        return SupportState(s.launches, s.support_last_ask, s.support_muted)
+
+    def save_support_state(self, state: SupportState) -> None:
+        self._update_settings(launches=state.launches, support_last_ask=state.last_ask, support_muted=state.muted)
 
     def skip_update(self, version: str) -> None:
         """Запоминает версию, о которой больше не напоминать (неверный формат сбрасывает пропуск)."""

@@ -28,6 +28,7 @@ from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
+from gmagc_mobile.support import SupportPrompt
 from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
 from gmagc_mobile.update_bar import UpdateBar
 from gmagc_mobile.updates import UpdateTracker
@@ -63,6 +64,9 @@ class MobileApp:
         launcher=None,
         check_on_start: bool = True,
         update_delay: float = 3.0,
+        support: bool = False,
+        support_delay: float = 8.0,
+        prefs=None,
     ):
         self.page = page
         self.store = store
@@ -84,6 +88,12 @@ class MobileApp:
         self.check_on_start = check_on_start
         self.update_task: asyncio.Task | None = None
         self.update_bar = UpdateBar(tracker, launcher, page, delay=update_delay) if tracker is not None else None
+        self.support_task: asyncio.Task | None = None
+        self.support = (
+            SupportPrompt(prefs, launcher, page, delay=support_delay, busy=lambda: self._busy)
+            if support and prefs is not None and launcher is not None
+            else None
+        )
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
         self.mode = MODE_SHOOT
@@ -119,6 +129,7 @@ class MobileApp:
                 ft.Row([self.connect_button, self.connect_busy], spacing=12),
                 self.connect_error,
                 *self._update_controls(),
+                *([ft.Row([self.support.link, self.support.telegram_link], wrap=True)] if self.support else []),
                 ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=12),
             ],
             spacing=12,
@@ -245,6 +256,8 @@ class MobileApp:
     async def start(self) -> None:
         await self._start_flow()
         await self._begin_update_check()
+        if self.support is not None:
+            self.support_task = asyncio.create_task(self.support.startup())
 
     async def _begin_update_check(self) -> None:
         if self.update_bar is None:
@@ -660,10 +673,19 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
     controller = services.pop("controller", None) or CameraController(camera_control, permission, supported=supported)
     launcher = services.pop("launcher", None) or ft.UrlLauncher()
     tracker = services.pop("tracker", "default")  # tracker=None в тестах отключает обновления
+    support = services.pop("support", True)  # support=False в тестах отключает окно поддержки
     if tracker == "default":
         tracker = UpdateTracker(prefs)
     app = MobileApp(
-        page, ConnectionStore(prefs), controller, preview=camera_control, tracker=tracker, launcher=launcher, **services
+        page,
+        ConnectionStore(prefs),
+        controller,
+        preview=camera_control,
+        tracker=tracker,
+        launcher=launcher,
+        support=support,
+        prefs=prefs,
+        **services,
     )
     page.services.extend([prefs, permission, app.picker, app.clipboard, launcher])
     app.build()

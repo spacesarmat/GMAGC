@@ -21,6 +21,7 @@ from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import data_dir
+from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
 from gmagc_desktop.ui.update_bar import UpdateBar
 from gmagc_desktop.update.manager import UpdateManager
@@ -47,6 +48,8 @@ class DesktopApp:
         open_url: Callable[[str], object] = webbrowser.open,
         quit_app: Callable[[], None] | None = None,
         update_delay: float = 5.0,
+        support: bool = True,
+        support_delay: float = 8.0,
     ):
         self.page = page
         self.service = service
@@ -58,6 +61,11 @@ class DesktopApp:
         self.server.on_request = self.on_phone_request
         self.addresses = addresses
         self.qr = qr
+        self.support = (
+            SupportPrompt(page, service, open_url=open_url, delay=support_delay, busy=lambda: self._busy)
+            if support
+            else None
+        )
         self.update_bar = (
             UpdateBar(page, service, updates, open_url=open_url, quit_app=quit_app, delay=update_delay)
             if updates is not None
@@ -166,6 +174,7 @@ class DesktopApp:
                 ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
                 self.check_label,
                 *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
+                *([self.support.link, self.support.telegram_link] if self.support else []),
             ],
             spacing=12,
         )
@@ -188,6 +197,8 @@ class DesktopApp:
         )
         if self.update_bar is not None:
             self.update_bar.start()
+        if self.support is not None:
+            self.support.start()
         demo_photo = os.environ.get("GMAGC_DEMO_PHOTO")
         if demo_photo:
             self.page.run_thread(lambda: self._run_demo(os.environ.get("GMAGC_DEMO_LIBRARY", ""), demo_photo))

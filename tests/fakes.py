@@ -30,6 +30,7 @@ class StubPage:
         self.services = []
         self.updates = 0
         self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
+        self.dialogs = []
 
     def add(self, *controls):
         self.added.extend(controls)
@@ -39,6 +40,12 @@ class StubPage:
 
     def run_thread(self, handler, *args, **kwargs):
         handler(*args, **kwargs)
+
+    def show_dialog(self, dialog):
+        self.dialogs.append(dialog)
+
+    def pop_dialog(self):
+        return self.dialogs.pop() if self.dialogs else None
 
 
 class FakePicker:

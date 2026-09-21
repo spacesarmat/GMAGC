@@ -441,6 +441,7 @@ def test_build_page_wires_services_and_starts(monkeypatch):
             client_factory=script.factory,
             mount_seconds=0,
             tracker=None,
+            support=False,
         )
     )
 
@@ -463,6 +464,7 @@ def build_on(platform, web=False):
             client_factory=script.factory,
             mount_seconds=0,
             tracker=None,
+            support=False,
         )
     )
     return app
