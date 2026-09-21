@@ -628,12 +628,23 @@ def test_small_files_are_sent_as_is():
     assert prepare_upload(data) is data and len(data) < UPLOAD_LIMIT
 
 
+def blobs_png(width, height):
+    """Гладкие цветные пятна: PNG получается большим, а JPEG маленьким."""
+    rng = np.random.default_rng(3)
+    small = Image.fromarray(rng.integers(0, 256, (40, 60, 3), dtype=np.uint8))
+    buffer = io.BytesIO()
+    small.resize((width, height), Image.BICUBIC).save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 def test_a_file_over_the_limit_is_shrunk_to_a_jpeg_under_the_limit():
-    data = png_bytes(3000, 2000)
+    data = blobs_png(3000, 2000)
+    limit = 500_000
+    assert len(data) > limit
 
-    result = prepare_upload(data, limit=len(data) - 1)
+    result = prepare_upload(data, limit=limit)
 
-    assert result.startswith(b"\xff\xd8") and len(result) <= len(data) - 1
+    assert result.startswith(b"\xff\xd8") and len(result) <= limit
     with Image.open(io.BytesIO(result)) as picture:
         assert max(picture.size) <= 2560
 
