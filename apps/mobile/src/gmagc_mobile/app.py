@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -52,6 +53,9 @@ class MobileApp:
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
         marker_seconds: float = 1.5,
         mount_seconds: float = 0.3,
+        clock: Callable[[], float] = time.monotonic,
+        back_seconds: float = 2.5,
+        hint_seconds: float | None = None,
     ):
         self.page = page
         self.store = store
@@ -63,6 +67,11 @@ class MobileApp:
         self.qr_reader = qr_reader
         self.marker_seconds = marker_seconds
         self.mount_seconds = mount_seconds  # пауза, чтобы виджет камеры успел появиться на экране до запуска камеры
+        self._clock = clock
+        self.back_seconds = back_seconds  # окно второго нажатия «Назад» для выхода из приложения
+        self.hint_seconds = back_seconds if hint_seconds is None else hint_seconds  # сколько висит подсказка о выходе
+        self._last_back = -1e9
+        self._hint_token = 0
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
         self.mode = MODE_SHOOT
@@ -190,12 +199,20 @@ class MobileApp:
         )
 
         self.diag_text = ft.Text("", size=10, color=ft.Colors.GREY_600, selectable=True, visible=False)
+        self.back_hint = ft.Text("Нажмите «Назад» ещё раз, чтобы выйти", size=12, visible=False)
 
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
+        views = getattr(self.page, "views", None)
+        if views:  # системная кнопка «Назад» идёт в on_confirm_pop, а не закрывает приложение
+            views[0].can_pop = False
+            views[0].on_confirm_pop = self.on_confirm_pop
         self.page.add(
             ft.SafeArea(
-                ft.Column([self.connect_view, self.camera_view, self.results_view, self.diag_text], expand=True),
+                ft.Column(
+                    [self.connect_view, self.camera_view, self.results_view, self.back_hint, self.diag_text],
+                    expand=True,
+                ),
                 expand=True,
             )
         )
@@ -352,6 +369,38 @@ class MobileApp:
     async def on_scan_qr(self, _event) -> None:
         self._show_camera(MODE_SCAN)
         await self._ensure_camera()
+
+    # ---- кнопка «Назад» ------------------------------------------------------
+    async def on_confirm_pop(self, event) -> None:
+        """Системная «Назад»: возвращает на предыдущий экран; из первого экрана выходит при втором нажатии."""
+        exit_now = await self._handle_back()
+        await event.control.confirm_pop(exit_now)
+        token = self._hint_token
+        if self.back_hint.visible:
+            await asyncio.sleep(self.hint_seconds)
+            if token == self._hint_token:
+                self.back_hint.visible = False
+                self.page.update()
+
+    async def _handle_back(self) -> bool:
+        """True, если приложение нужно закрыть; иначе делает шаг назад (или показывает подсказку о выходе)."""
+        if self._busy:
+            return False  # идёт отправка или подключение: не выходим случайно
+        self.back_hint.visible = False
+        if self.results_view.visible:
+            await self.on_again(None)
+            return False
+        if self.camera_view.visible and self.mode == MODE_SCAN:
+            self._show_connect()
+            return False
+        now = self._clock()
+        if now - self._last_back <= self.back_seconds:
+            return True
+        self._last_back = now
+        self._hint_token += 1
+        self.back_hint.visible = True
+        self.page.update()
+        return False
 
     async def on_cancel_scan(self, _event) -> None:
         self._show_connect()
