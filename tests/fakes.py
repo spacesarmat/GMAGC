@@ -7,6 +7,18 @@ import flet as ft
 from gmagc_desktop.server.runner import ServerStartError
 
 
+class FakeView:
+    """Замена корневого ft.View: запоминает решения confirm_pop."""
+
+    def __init__(self):
+        self.can_pop = True
+        self.on_confirm_pop = None
+        self.decisions = []
+
+    async def confirm_pop(self, should_pop):
+        self.decisions.append(should_pop)
+
+
 class StubPage:
     """Минимальная замена ft.Page: запоминает добавленное, поток выполняет сразу."""
 
@@ -15,6 +27,7 @@ class StubPage:
         self.added = []
         self.services = []
         self.updates = 0
+        self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
 
     def add(self, *controls):
         self.added.extend(controls)

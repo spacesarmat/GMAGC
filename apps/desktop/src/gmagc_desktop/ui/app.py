@@ -222,7 +222,7 @@ class DesktopApp:
             code = self.service.ensure_access_code()
             self.server_status.value = f"Работает: {host}:{port}"
             self.qr_holder.controls = [
-                ft.Image(src=self.qr(build_link(host, port, code)), width=180, height=180, fit=ft.BoxFit.CONTAIN)
+                ft.Image(src=self.qr(build_link(host, port, code)), width=240, height=240, fit=ft.BoxFit.CONTAIN)
             ]
             self.code_text.value = f"Код: {format_code(code)}"
             self.addresses_text.value = "Другие адреса ПК: " + ", ".join(addresses[1:])
