@@ -51,6 +51,7 @@ class MobileApp:
         client_factory: Callable[[Connection], GmagcClient] = GmagcClient,
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
         marker_seconds: float = 1.5,
+        mount_seconds: float = 0.3,
     ):
         self.page = page
         self.store = store
@@ -61,6 +62,7 @@ class MobileApp:
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.marker_seconds = marker_seconds
+        self.mount_seconds = mount_seconds  # пауза, чтобы виджет камеры успел появиться на экране до запуска камеры
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
         self.mode = MODE_SHOOT
@@ -221,6 +223,8 @@ class MobileApp:
 
     # ---- вид -----------------------------------------------------------------
     def _show(self, name: str) -> None:
+        if self.camera_view.visible and name != "camera":
+            self.camera.invalidate()  # Flet убирает скрытый виджет камеры вместе с контроллером: при возврате запуск заново
         self.connect_view.visible = name == "connect"
         self.camera_view.visible = name == "camera"
         self.results_view.visible = name == "results"
@@ -319,14 +323,24 @@ class MobileApp:
         return True
 
     async def _ensure_camera(self) -> None:
-        if self.camera.ready:
-            await self.camera.resume()
-        else:
+        """Запускает камеру, если она не готова (первый заход или возврат на экран после результатов)."""
+        if not self.camera.ready:
+            await asyncio.sleep(self.mount_seconds)
             await self.camera.start()
             if not self.camera.ready:
                 self._camera_note(self.camera.error or "Камера недоступна")
         self._sync_zoom()
         self._set_busy(self._busy)
+
+    async def _take_picture(self) -> bytes:
+        """Снимок; если камера потеряла контроллер, один раз запускает её заново и снимает ещё раз."""
+        try:
+            return await self.camera.take_picture()
+        except Exception:  # noqa: BLE001 - любая ошибка снимка: пробуем восстановить камеру
+            if not await self.camera.restart():
+                raise RuntimeError(self.camera.error or "камера недоступна") from None
+            self._sync_zoom()
+            return await self.camera.take_picture()
 
     async def on_change_pc(self, _event) -> None:
         await self.store.clear()
@@ -349,7 +363,7 @@ class MobileApp:
         connection = None
         failure = ""
         try:
-            data = await self.camera.take_picture()
+            data = await self._take_picture()
             connection = await asyncio.to_thread(self.qr_reader, data)
         except QrUnavailable:
             failure = "Чтение QR недоступно на этом телефоне: введите адрес и код вручную."
@@ -371,7 +385,7 @@ class MobileApp:
             return
         self._set_busy(True)
         try:
-            data = await self.camera.take_picture()
+            data = await self._take_picture()
         except Exception as error:  # noqa: BLE001
             self._set_busy(False)
             self._camera_note(f"Не удалось снять: {error}")
@@ -418,7 +432,6 @@ class MobileApp:
         await self._show_results(data, response)
 
     async def _show_results(self, photo: bytes, response: MatchResponse) -> None:
-        await self.camera.pause()
         banner = outcome_message(response.outcome)
         self.results_banner_text.value = banner or ""
         self.results_banner.bgcolor = ft.Colors.RED_100 if response.outcome == OUTCOME_NO_PROJECTION else ft.Colors.AMBER_100
@@ -463,7 +476,7 @@ class MobileApp:
 
     async def on_again(self, _event) -> None:
         self._show_camera(MODE_SHOOT)
-        await self.camera.resume()
+        await self._ensure_camera()
 
     async def on_card_click(self, event) -> None:
         await self.copy_path(event.control.data)

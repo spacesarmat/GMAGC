@@ -25,7 +25,7 @@ def make_app(prefs=None, script=None, camera_api=None, permission=None, qr_reade
     script = script or Script()
     prefs = prefs if prefs is not None else FakePrefs()
     camera_api = camera_api or FakeCameraApi()
-    controller = CameraController(camera_api, permission or FakePermission(), settle_seconds=0)
+    controller = CameraController(camera_api, permission or FakePermission(), settle_seconds=0, retry_seconds=0)
     page = StubPage()
     app = MobileApp(
         page,
@@ -37,6 +37,7 @@ def make_app(prefs=None, script=None, camera_api=None, permission=None, qr_reade
         client_factory=script.factory,
         qr_reader=qr_reader or (lambda data: None),
         marker_seconds=0,
+        mount_seconds=0,
     )
     app.build()
     return app, page, script, prefs, camera_api
@@ -217,7 +218,7 @@ def test_capture_sends_the_shot_and_shows_the_results():
     assert len(app.results_column.controls) == 2 and app.results_photo.visible and app.results_projection.visible
     first = texts(app.results_column.controls[0])
     assert "a.png" in first and "C:\\gobos\\vendor\\a.png" in first and "91.2%" in first and "ещё 1 файлов" in first
-    assert not app.results_banner.visible and ("pause",) in camera_api.calls
+    assert not app.results_banner.visible and not app.camera.ready  # вид камеры скрыт: контроллер камеры потерян
     assert not app.capture_button.disabled
 
 
@@ -265,13 +266,78 @@ def test_a_camera_failure_while_shooting_is_reported():
     assert not app.capture_button.disabled
 
 
-def test_shoot_again_returns_to_the_camera_and_resumes_the_preview():
-    app, _, _, _, camera_api = start(prefs=FakePrefs(STORED))
+def initializations(camera_api):
+    return len([call for call in camera_api.calls if call[0] == "initialize"])
+
+
+def test_shoot_again_starts_the_camera_anew_because_the_hidden_preview_lost_its_controller():
+    app, _, script, _, camera_api = start(prefs=FakePrefs(STORED))
     shoot(app)
+    assert initializations(camera_api) == 1 and not app.camera.ready
 
     run(app.on_again(None))
 
-    assert views(app) == ["camera"] and camera_api.calls[-1] == ("resume",)
+    assert views(app) == ["camera"] and app.camera.ready and initializations(camera_api) == 2
+    shoot(app)
+    assert script.matches == [b"JPEG-shot", b"JPEG-shot"] and views(app) == ["results"]
+
+
+def test_returning_to_the_scan_after_cancelling_starts_the_camera_anew():
+    app, _, _, _, camera_api = start()
+    run(app.on_scan_qr(None))
+    assert initializations(camera_api) == 1
+
+    run(app.on_cancel_scan(None))
+    assert not app.camera.ready
+    run(app.on_scan_qr(None))
+
+    assert initializations(camera_api) == 2 and app.camera.ready and not app.camera_message.visible
+
+
+def test_switching_between_scan_and_shoot_keeps_the_running_camera():
+    app, _, _, _, camera_api = start(qr_reader=lambda data: PC)
+    run(app.on_scan_qr(None))
+
+    run(app.on_scan_now(None))  # подключение: вид камеры остаётся на экране, перезапуск не нужен
+
+    assert app.mode == "shoot" and initializations(camera_api) == 1 and app.camera.ready
+
+
+def test_a_lost_camera_controller_is_recovered_once_when_shooting():
+    camera_api = FakeCameraApi(picture_failures=1)
+    app, _, script, _, _ = start(prefs=FakePrefs(STORED), camera_api=camera_api)
+
+    shoot(app)
+
+    assert script.matches == [b"JPEG-shot"] and views(app) == ["results"]
+    assert initializations(camera_api) == 2
+
+
+def test_when_recovery_fails_the_shot_error_is_reported():
+    camera_api = FakeCameraApi(picture_failures=5)
+    app, _, script, _, _ = start(prefs=FakePrefs(STORED), camera_api=camera_api)
+
+    shoot(app)
+
+    assert script.matches == [] and views(app) == ["camera"] and "Не удалось снять" in app.camera_message.value
+    assert not app.capture_button.disabled
+
+
+def test_the_qr_scan_recovers_a_lost_controller_too():
+    camera_api = FakeCameraApi(picture_failures=1)
+    app, _, script, _, _ = start(qr_reader=lambda data: PC, camera_api=camera_api)
+    run(app.on_scan_qr(None))
+
+    run(app.on_scan_now(None))
+
+    assert script.connections == [PC] and initializations(camera_api) == 2
+
+
+def test_the_zoom_starts_at_one_when_the_camera_reaches_below_it():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), camera_api=FakeCameraApi(min_zoom=0.6, max_zoom=8.0))
+
+    assert (app.zoom_slider.min, app.zoom_slider.max, app.zoom_slider.value) == (0.6, 8.0, 1.0)
+    assert app.zoom_label.value == "×1.0"
 
 
 def test_clicking_a_card_and_the_copy_button_copy_the_path_as_is():
@@ -347,10 +413,11 @@ def test_build_page_wires_services_and_starts(monkeypatch):
             prefs=FakePrefs(STORED),
             permission=FakePermission(),
             camera_control=ft.Container(),
-            controller=CameraController(FakeCameraApi(), FakePermission(), settle_seconds=0),
+            controller=CameraController(FakeCameraApi(), FakePermission(), settle_seconds=0, retry_seconds=0),
             picker=FakePicker(),
             clipboard=FakeClipboard(),
             client_factory=script.factory,
+            mount_seconds=0,
         )
     )
 
@@ -371,6 +438,7 @@ def build_on(platform, web=False):
             picker=FakePicker(),
             clipboard=FakeClipboard(),
             client_factory=script.factory,
+            mount_seconds=0,
         )
     )
     return app

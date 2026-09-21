@@ -10,7 +10,7 @@ from tests.fakes_mobile import FakeCameraApi, FakePermission, cam
 
 def make(api=None, permission=None):
     api = api or FakeCameraApi()
-    return CameraController(api, permission or FakePermission(), settle_seconds=0), api
+    return CameraController(api, permission or FakePermission(), settle_seconds=0, retry_seconds=0), api
 
 
 def started(api=None):
@@ -190,3 +190,65 @@ def test_an_unsupported_platform_reports_it_without_touching_the_camera():
 
     assert not controller.ready and "только на телефоне" in controller.error
     assert permission.requested == [] and api.calls == []
+
+
+def test_the_initial_zoom_is_one_even_when_the_camera_reports_a_wider_minimum():
+    controller, _ = started(FakeCameraApi(min_zoom=0.6, max_zoom=8.0))
+
+    assert (controller.min_zoom, controller.max_zoom, controller.zoom) == (0.6, 8.0, 1.0)
+
+
+def test_the_initial_zoom_is_the_minimum_when_one_is_out_of_range():
+    controller, _ = started(FakeCameraApi(min_zoom=2.0, max_zoom=5.0))
+
+    assert controller.zoom == 2.0
+
+
+def test_invalidate_marks_the_camera_not_ready_and_start_creates_a_new_controller():
+    controller, api = started()
+    asyncio.run(controller.set_zoom(3))
+    asyncio.run(controller.toggle_focus_lock())
+
+    controller.invalidate()
+    assert not controller.ready
+    with pytest.raises(RuntimeError):
+        asyncio.run(controller.take_picture())
+
+    assert asyncio.run(controller.start()) is True
+
+    assert len([c for c in api.calls if c[0] == "initialize"]) == 2
+    assert controller.ready and controller.zoom == 1.0 and controller.focus_locked is False
+
+
+def test_restart_reinitializes_a_camera_that_was_ready():
+    controller, api = started()
+
+    assert asyncio.run(controller.restart()) is True
+
+    assert len([c for c in api.calls if c[0] == "initialize"]) == 2 and controller.ready
+
+
+def test_a_plugin_failure_on_the_first_attempt_is_retried_once():
+    api = FakeCameraApi()
+    original = api.initialize
+    attempts = []
+
+    async def flaky(description, preset, enable_audio=True):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("виджет камеры ещё не появился")
+        await original(description, preset, enable_audio)
+
+    api.initialize = flaky
+    controller, _ = make(api)
+
+    assert asyncio.run(controller.start()) is True
+    assert len(attempts) == 2 and controller.ready and controller.error == ""
+
+
+def test_a_denied_permission_is_not_retried():
+    permission = FakePermission(ph.PermissionStatus.DENIED)
+    controller, _ = make(permission=permission)
+
+    assert asyncio.run(controller.start()) is False
+    assert len(permission.requested) == 1
