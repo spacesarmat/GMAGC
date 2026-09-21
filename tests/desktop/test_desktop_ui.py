@@ -24,6 +24,7 @@ def library(tmp_path):
 
 def make_app(tmp_path, **services):
     services.setdefault("server", FakeServer())  # настоящий сервер в тестах экрана не запускаем
+    services.setdefault("updates", None)  # проверку обновлений в тестах отключаем
     page = StubPage()
     app = build_page(page, service=SearchService(tmp_path / "data"), **services)
     return app, page
