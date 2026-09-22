@@ -264,11 +264,14 @@ WIN = {
 }
 
 
-def test_the_windows_script_waits_backs_up_copies_restores_and_restarts():
+def test_the_windows_script_waits_backs_up_swaps_restores_and_restarts():
     script = windows_script(**WIN)
 
     assert 'set "PID=4242"' in script and "tasklist" in script and "goto wait" in script
-    assert script.count("robocopy") == 3 and "if errorlevel 8 goto restore" in script and ":restore" in script
+    # переименование папки (move), а не покопирование файл за файлом (robocopy): нечему прерваться на середине
+    assert "robocopy" not in script and script.count('move "') == 3
+    assert 'move "%DST%" "%BAK%"' in script and 'move "%SRC%" "%DST%"' in script
+    assert "if errorlevel 1 goto restore" in script and ":restore" in script
     assert 'start "" "%EXE%"' in script and "chcp 65001" in script
     assert script.endswith("\r\n") and "\n" not in script.replace("\r\n", "")
 
@@ -287,7 +290,9 @@ def test_the_macos_script_quotes_every_path():
         pid=77, staged="/tmp/up date/GMAGC.app", target=target, backup=target + ".previous", log="/tmp/u.log"
     )
 
-    assert script.startswith("#!/bin/sh") and "PID=77" in script and "ditto" in script and "kill -0" in script
+    assert script.startswith("#!/bin/sh") and "PID=77" in script and "kill -0" in script
+    # переименование (mv), а не покопирование (ditto): та же причина, что и на Windows
+    assert "ditto" not in script and 'mv "$SRC" "$DST"' in script
     assert f"DST={shlex.quote(target)}" in script and f"SRC={shlex.quote('/tmp/up date/GMAGC.app')}" in script
     assert 'open "$DST"' in script and script.endswith("\n") and "\r" not in script
 
