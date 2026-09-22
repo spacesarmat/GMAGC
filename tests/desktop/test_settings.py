@@ -1,6 +1,13 @@
 import sys
 
-from gmagc_desktop.service.settings import Settings, data_dir, load_settings, save_settings
+from gmagc_desktop.service.settings import (
+    Settings,
+    data_dir,
+    load_settings,
+    save_settings,
+    settings_from_json,
+    settings_to_json,
+)
 
 
 def test_missing_and_corrupt_files_give_defaults(tmp_path):
@@ -13,6 +20,23 @@ def test_missing_and_corrupt_files_give_defaults(tmp_path):
     listing = tmp_path / "list.json"
     listing.write_text("[1, 2]", encoding="utf-8")
     assert load_settings(listing) == Settings()
+
+
+def test_settings_from_json_parses_the_same_text_a_file_would_hold():
+    text = '{"library_dir": "D:\\\\gobos", "top_n": 15}'
+
+    assert settings_from_json(text) == Settings(library_dir="D:\\gobos", top_n=15)
+
+
+def test_settings_from_json_falls_back_to_defaults_on_bad_text():
+    assert settings_from_json("{not json") == Settings()
+    assert settings_from_json("[1, 2]") == Settings()
+
+
+def test_settings_to_json_roundtrips_through_settings_from_json():
+    original = Settings(library_dir="D:\\Библиотека гобо", top_n=15, access_code="ABCD2345")
+
+    assert settings_from_json(settings_to_json(original)) == original
 
 
 def test_roundtrip_keeps_a_cyrillic_library_path(tmp_path):

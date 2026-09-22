@@ -92,6 +92,12 @@ class DesktopApp:
         self.results_column = ft.Column(spacing=8)
         self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
         self.check_label = ft.Text("")
+        self.export_settings_button = ft.TextButton(
+            content=ft.Text("Экспорт настроек", size=12), on_click=self.on_export_settings
+        )
+        self.import_settings_button = ft.TextButton(
+            content=ft.Text("Импорт настроек", size=12), on_click=self.on_import_settings
+        )
 
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
         self.server_status = ft.Text("Выключен")
@@ -174,6 +180,8 @@ class DesktopApp:
                 ft.Text(f"{NAME} {VERSION} · Автор: {AUTHOR}", size=12),
                 ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
                 self.check_label,
+                self.export_settings_button,
+                self.import_settings_button,
                 *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
                 *([self.support.link, self.support.telegram_link, self.support.channel_link] if self.support else []),
             ],
@@ -364,6 +372,35 @@ class DesktopApp:
             await self.on_paste(None)
         elif event.key == "F5":
             await self.on_rebuild(None)
+
+    async def on_export_settings(self, _event) -> None:
+        data = self.service.export_settings_json().encode("utf-8")
+        path = await self.picker.save_file(
+            dialog_title="Экспорт настроек", file_name="gmagc-settings.json", allowed_extensions=["json"], src_bytes=data
+        )
+        if path:
+            self._show_banner(f"Настройки сохранены: {path}", error=False)
+
+    async def on_import_settings(self, _event) -> None:
+        files = await self.picker.pick_files(dialog_title="Импорт настроек", allowed_extensions=["json"])
+        if not files:
+            return
+        try:
+            raw = files[0].bytes if files[0].bytes else Path(files[0].path).read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            self._show_banner(f"Не удалось прочитать файл: {error}", error=True)
+            return
+        self.service.import_settings_json(text)
+        status = self.service.load()
+        self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.status_label.value = status_text(status)
+        if self.update_bar is not None:
+            self.update_bar.switch.value = self.service.settings.check_updates
+        self._show_banner(
+            "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.",
+            error=False,
+        )
 
     async def on_paste(self, _event) -> None:
         data = await self.clipboard.get_image()

@@ -53,15 +53,22 @@ class StubPage:
 
 
 class FakePicker:
-    def __init__(self, folder=None, files=()):
+    def __init__(self, folder=None, files=(), save_path=None):
         self.folder = folder
         self.files = list(files)
+        self.save_path = save_path  # путь, который «выбирает» пользователь в диалоге сохранения; None — отмена
+        self.saved = []  # (путь, содержимое) для каждого вызова save_file
 
     async def get_directory_path(self, dialog_title=None, initial_directory=None):
         return self.folder
 
     async def pick_files(self, **kwargs):
         return [SimpleNamespace(path=path, bytes=None) for path in self.files]
+
+    async def save_file(self, dialog_title=None, file_name=None, initial_directory=None, src_bytes=None, **kwargs):
+        if self.save_path is not None:
+            self.saved.append((self.save_path, src_bytes))
+        return self.save_path
 
 
 class FakeClipboard:

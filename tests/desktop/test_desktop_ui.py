@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import cv2
@@ -212,6 +213,64 @@ def test_other_keys_and_v_without_ctrl_do_nothing(tmp_path, library):
     asyncio.run(app.on_key(key("Escape")))
 
     assert app.results_column.controls == [] and not app.banner.visible
+
+
+def test_export_settings_saves_json_via_the_picker(tmp_path, library):
+    save_path = str(tmp_path / "out" / "gmagc-settings.json")
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(save_path=save_path))
+
+    asyncio.run(app.on_export_settings(None))
+
+    assert app.picker.saved == [(save_path, app.service.export_settings_json().encode("utf-8"))]
+    assert app.banner.visible and save_path in app.banner_text.value
+
+
+def test_cancelling_the_export_dialog_shows_no_banner(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(save_path=None))
+
+    asyncio.run(app.on_export_settings(None))
+
+    assert app.picker.saved == [] and not app.banner.visible
+
+
+def test_import_settings_replaces_settings_and_refreshes_the_screen(tmp_path, library):
+    imported = tmp_path / "imported.json"
+    imported.write_text('{"top_n": 42, "library_dir": ""}', encoding="utf-8")
+    app, _ = make_app(tmp_path, picker=FakePicker(files=[str(imported)]))
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.service.settings.top_n == 42
+    assert app.library_text.value == "не выбрана" and app.status_label.value == "Индекс не построен"
+    assert app.banner.visible and "импортированы" in app.banner_text.value
+
+
+def test_importing_the_same_library_reloads_its_index_in_the_screen(tmp_path, library):
+    imported = tmp_path / "imported.json"
+    picker = FakePicker(folder=str(library), files=[str(imported)])
+    app, _ = indexed_app(tmp_path, library, picker=picker)
+    imported.write_text(json.dumps({"library_dir": str(library)}), encoding="utf-8")
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert "6" in app.status_label.value  # индекс той же библиотеки снова загружен, а не потерян
+
+
+def test_import_with_no_file_chosen_does_nothing(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(files=[]))
+    before = app.service.settings.top_n
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.service.settings.top_n == before and not app.banner.visible
+
+
+def test_import_of_an_unreadable_file_shows_an_error(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(files=[str(tmp_path / "missing.json")]))
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.banner.visible and "Не удалось прочитать файл" in app.banner_text.value
 
 
 def test_demo_variables_run_indexing_and_a_search_at_startup(tmp_path, library, monkeypatch):

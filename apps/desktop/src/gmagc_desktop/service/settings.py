@@ -52,8 +52,20 @@ def _is_int(value: object) -> bool:
 def load_settings(path: str | Path) -> Settings:
     """Настройки из файла; отсутствующий, повреждённый или неверный файл даёт значения по умолчанию."""
     try:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return Settings()
+    return settings_from_json(text)
+
+
+def settings_from_json(text: str) -> Settings:
+    """Разбирает текст того же вида, что хранится в settings.json (используется и при импорте настроек).
+
+    Как и load_settings: неверный JSON, не-словарь и любое отдельное поле не подходящего вида просто
+    заменяются значением по умолчанию, а не бросают исключение."""
+    try:
+        raw = json.loads(text)
+    except ValueError:
         return Settings()
     if not isinstance(raw, dict):
         return Settings()
@@ -97,7 +109,11 @@ def load_settings(path: str | Path) -> Settings:
     )
 
 
+def settings_to_json(settings: Settings) -> str:
+    return json.dumps(asdict(settings), ensure_ascii=False, indent=2)
+
+
 def save_settings(settings: Settings, path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(settings_to_json(settings), encoding="utf-8")

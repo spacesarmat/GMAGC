@@ -24,7 +24,7 @@ from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Match, Searcher
 from gmagc_desktop.matcher.thumbnail import thumbnail_png
 from gmagc_desktop.service.access import generate_code
 from gmagc_desktop.service.results import LOW_CONFIDENCE_SCORE, IndexStatus, Outcome, Result, SearchOutcome
-from gmagc_desktop.service.settings import Settings, load_settings, save_settings
+from gmagc_desktop.service.settings import Settings, load_settings, save_settings, settings_from_json, settings_to_json
 
 THUMBNAIL_SIZE = 96
 PROJECTION_SIZE = 160
@@ -148,6 +148,21 @@ class SearchService:
 
     def save_support_state(self, state: SupportState) -> None:
         self._update_settings(launches=state.launches, support_last_ask=state.last_ask, support_muted=state.muted)
+
+    def export_settings_json(self) -> str:
+        return settings_to_json(self.settings)
+
+    def import_settings_json(self, text: str) -> Settings:
+        """Заменяет настройки импортированными. Если библиотека при этом изменилась, забывает загруженный
+        индекс и его файл на диске (он собран для прежней библиотеки, а не для новой)."""
+        imported = settings_from_json(text)
+        with self._lock:
+            if imported.library_dir != self.settings.library_dir:
+                self._use(None)
+                self._index_path.unlink(missing_ok=True)
+            self.settings = imported
+            save_settings(self.settings, self._settings_path)
+        return self.settings
 
     def skip_update(self, version: str) -> None:
         """Запоминает версию, о которой больше не напоминать (неверный формат сбрасывает пропуск)."""
