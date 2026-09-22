@@ -9,7 +9,7 @@ import pytest
 from gmagc_common.protocol import Connection, Health, Status
 from gmagc_mobile import client
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
-from gmagc_mobile.app import MobileApp, build_page
+from gmagc_mobile.app import PAGE_PADDING, MobileApp, build_page
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.qr import QrImageError, QrUnavailable
@@ -495,6 +495,25 @@ def test_the_camera_control_is_used_only_on_supported_platforms():
     for platform, web in ((ft.PagePlatform.ANDROID, False), (ft.PagePlatform.IOS, False), (ft.PagePlatform.WINDOWS, True)):
         app = build_on(platform, web)
         assert app.camera.supported is True and isinstance(app.preview, fc.Camera), platform
+
+
+def test_the_camera_preview_spans_the_full_width_beyond_the_page_padding():
+    app, page, _, _, _ = start()
+
+    assert page.padding == PAGE_PADDING
+    margin = app.camera_preview_area.margin
+    assert margin.left == -PAGE_PADDING and margin.right == -PAGE_PADDING
+    assert margin.top == 0 and margin.bottom == 0
+
+
+def test_the_shutter_and_gallery_buttons_float_over_the_preview_outside_the_tap_focus_area():
+    app, _, _, _, _ = start()
+
+    # предпросмотр и метка фокуса остаются под обработчиком касания как раньше, кнопки в него не входят
+    assert app.gesture.content.controls == [app.preview, app.marker]
+    overlay_content = [control.content for control in app.camera_stage.controls if isinstance(control, ft.Container)]
+    assert app.capture_button in overlay_content and app.gallery_button in overlay_content
+    assert isinstance(app.capture_button, ft.FloatingActionButton)
 
 
 def test_the_screen_is_locked_to_portrait_on_android_and_ios():

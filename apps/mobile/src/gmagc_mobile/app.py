@@ -37,6 +37,7 @@ MODE_SHOOT = "shoot"
 MODE_SCAN = "scan"
 ZOOM_STEP = 0.5
 MARKER_SIZE = 64
+PAGE_PADDING = 12  # общий отступ страницы; кадр камеры вычитает его отрицательным полем, чтобы быть во всю ширину
 SCAN_HINT = (
     "Наведите камеру на QR-код в приложении на ПК (приближение и касание для фокуса помогают) "
     "и нажмите «Считать QR»"
@@ -155,8 +156,14 @@ class MobileApp:
         self.zoom_in_button = ft.IconButton(icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in)
         self.focus_text = ft.Text("Фокус: авто")
         self.focus_button = ft.TextButton(content=self.focus_text, on_click=self.on_focus_lock)
-        self.capture_button = ft.Button("Снять", on_click=self.on_capture)
-        self.gallery_button = ft.Button("Из галереи", on_click=self.on_gallery)
+        self.capture_button = ft.FloatingActionButton(icon=ft.Icons.CAMERA_ALT, tooltip="Снять", on_click=self.on_capture)
+        self.gallery_button = ft.IconButton(
+            icon=ft.Icons.PHOTO_LIBRARY,
+            tooltip="Из галереи",
+            icon_color=ft.Colors.WHITE,
+            bgcolor=ft.Colors.with_opacity(0.45, ft.Colors.BLACK),
+            on_click=self.on_gallery,
+        )
         self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
         self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
@@ -171,24 +178,30 @@ class MobileApp:
         )
         if hasattr(self.preview, "on_size_change"):
             self.preview.on_size_change = self.on_preview_size
+        # «Снять» и «Из галереи» — отдельный слой над self.gesture (не внутри него), чтобы нажатие на кнопку
+        # не попадало и в обработчик касания кадра (фокус по точке)
+        gallery_overlay = ft.Container(
+            self.gallery_button,
+            alignment=ft.Alignment.BOTTOM_RIGHT,
+            padding=ft.Padding.only(right=16, bottom=16),
+            expand=True,
+        )
+        capture_overlay = ft.Container(
+            self.capture_button, alignment=ft.Alignment.BOTTOM_CENTER, padding=ft.Padding.only(bottom=16), expand=True
+        )
+        self.camera_stage = ft.Stack([self.gesture, gallery_overlay, capture_overlay], expand=True)
+        # отрицательное поле компенсирует отступ страницы, чтобы кадр камеры доходил до краёв экрана
+        self.camera_preview_area = ft.Container(
+            self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
+        )
         self.camera_view = ft.Column(
             [
                 ft.Row([self.camera_title, self.change_pc_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                self.gesture,
+                self.camera_preview_area,
                 ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
                 self.focus_button,
                 self.camera_message,
-                ft.Row(
-                    [
-                        self.capture_button,
-                        self.gallery_button,
-                        self.scan_now_button,
-                        self.cancel_scan_button,
-                        self.busy_ring,
-                    ],
-                    spacing=8,
-                    wrap=True,
-                ),
+                ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
             ],
             spacing=6,
             visible=False,
@@ -227,6 +240,7 @@ class MobileApp:
 
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
+        self.page.padding = PAGE_PADDING
         views = getattr(self.page, "views", None)
         if views:  # системная кнопка «Назад» идёт в on_confirm_pop, а не закрывает приложение
             views[0].can_pop = False
