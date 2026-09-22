@@ -5,7 +5,7 @@ on:
     tags: ["v*"]
   workflow_dispatch:
   pull_request:
-    paths: ["apps/**", ".github/workflows/build-windows.yml"]
+    paths: ["apps/**", "packaging/windows/**", ".github/workflows/build-windows.yml"]
 
 env:
   # держать в синхронизации с apps/*/pyproject.toml и requirements-dev.txt
@@ -56,6 +56,15 @@ jobs:
           NAME="GMAGC-desktop-windows-${VERSION}.zip"
           (cd apps/desktop/build/windows && 7z a -tzip "$GITHUB_WORKSPACE/dist/$NAME" .)
           (cd dist && sha256sum "$NAME" > "$NAME.sha256")
+      - name: Установщик (Inno Setup)
+        run: |
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then echo "::error::ISCC.exe не найден по ожидаемому пути ($ISCC)"; exit 1; fi
+          # MSYS_NO_PATHCONV: иначе Git Bash принимает /DAppVersion=... за unix-путь и портит аргумент
+          MSYS_NO_PATHCONV=1 "$ISCC" "/DAppVersion=$VERSION" "/DSourceDir=$(cygpath -w "$GITHUB_WORKSPACE/apps/desktop/build/windows")" packaging/windows/gmagc.iss
+          SETUP_NAME="GMAGC-Setup-${VERSION}.exe"
+          mv packaging/windows/dist/*.exe "dist/$SETUP_NAME"
+          (cd dist && sha256sum "$SETUP_NAME" > "$SETUP_NAME.sha256")
       - uses: actions/upload-artifact@v4
         with:
           name: GMAGC-desktop-windows
