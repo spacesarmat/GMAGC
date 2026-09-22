@@ -168,6 +168,25 @@ def test_the_qr_scan_reads_the_link_and_connects():
     assert app.mode == "shoot" and app.capture_button.visible and not app.scan_now_button.visible
 
 
+def test_connecting_by_qr_shows_a_notice_that_the_connection_succeeded():
+    app, page, _, _, _ = start(qr_reader=lambda data: PC)
+    run(app.on_scan_qr(None))
+
+    run(app.on_scan_now(None))
+
+    assert len(page.dialogs) == 1
+    snack_bar = page.dialogs[0]
+    assert isinstance(snack_bar, ft.SnackBar) and "Подключено" in snack_bar.content.value
+
+
+def test_connecting_manually_shows_no_qr_notice():
+    app, page, _, _, _ = start()
+
+    connect_manually(app)
+
+    assert page.dialogs == []
+
+
 def test_a_qr_scan_without_a_code_asks_to_move_closer_and_appends_the_diagnosis():
     app, _, script, _, _ = start()
     app.qr_diagnose = lambda data: f"снимок: {len(data)} байт; самопроверка: ок"

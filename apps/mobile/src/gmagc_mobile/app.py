@@ -365,7 +365,7 @@ class MobileApp:
             return
         await self._connect(Connection(address[0], address[1], normalize_code(code)))
 
-    async def _connect(self, connection: Connection) -> bool:
+    async def _connect(self, connection: Connection, announce: bool = False) -> bool:
         self._set_busy(True)
         client = self.client_factory(connection)
         try:
@@ -385,6 +385,8 @@ class MobileApp:
         self.status_text = status_line(connection, status)
         self._set_busy(False)
         self._show_camera(MODE_SHOOT, note=None if status.indexed else NO_INDEX_NOTE)
+        if announce:  # по QR подключение происходит без ручного ввода: коротко подтвердить, что оно удалось
+            self.page.show_dialog(ft.SnackBar(ft.Text(f"Подключено к ПК: {connection.host}:{connection.port}")))
         await self._ensure_camera()
         return True
 
@@ -472,7 +474,7 @@ class MobileApp:
             failure = f"Ошибка камеры: {error}"
         self._set_busy(False)
         if connection is not None:
-            await self._connect(connection)
+            await self._connect(connection, announce=True)
             return
         if not failure:
             failure = (
