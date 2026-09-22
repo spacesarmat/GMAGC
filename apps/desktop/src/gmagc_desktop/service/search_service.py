@@ -139,6 +139,12 @@ class SearchService:
     def set_check_updates(self, enabled: bool) -> None:
         self._update_settings(check_updates=enabled)
 
+    def set_dark_theme(self, enabled: bool) -> None:
+        self._update_settings(dark_theme=enabled)
+
+    def set_large_text(self, enabled: bool) -> None:
+        self._update_settings(large_text=enabled)
+
     def mark_update_checked(self, when: float) -> None:
         self._update_settings(last_update_check=float(when))
 

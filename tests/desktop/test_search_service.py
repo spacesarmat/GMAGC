@@ -34,6 +34,18 @@ def ell_photo(seed=5):
     return simulate_photo(shape_images()["ell"], np.random.default_rng(seed))
 
 
+def test_the_service_persists_the_theme_and_text_size_choices(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    service.set_dark_theme(True)
+    service.set_large_text(True)
+
+    other = SearchService(tmp_path / "data")
+    other.load()
+    assert other.settings.dark_theme is True and other.settings.large_text is True
+
+
 def test_export_settings_json_matches_the_current_settings(service):
     assert service.export_settings_json() == settings_to_json(service.settings)
 

@@ -60,6 +60,46 @@ def test_initial_screen_shows_name_version_author_and_empty_state(tmp_path):
     assert len(page.services) == 2
 
 
+def test_the_theme_starts_light_and_normal_sized(tmp_path):
+    app, page = make_app(tmp_path)
+
+    assert page.theme_mode == ft.ThemeMode.LIGHT
+    assert page.theme.text_theme is None and not app.dark_theme_switch.value and not app.large_text_switch.value
+
+
+def test_toggling_dark_theme_updates_the_page_and_persists(tmp_path):
+    app, page = make_app(tmp_path)
+    app.dark_theme_switch.value = True
+
+    app.on_toggle_dark_theme(None)
+
+    assert page.theme_mode == ft.ThemeMode.DARK
+    assert app.service.settings.dark_theme is True
+
+    other, _ = make_app(tmp_path)
+    assert other.dark_theme_switch.value is True and other.page.theme_mode == ft.ThemeMode.DARK
+
+
+def test_toggling_large_text_enlarges_the_default_theme_text():
+    from gmagc_desktop.ui.app import _theme
+
+    normal = _theme(False)
+    large = _theme(True)
+
+    assert normal.text_theme is None
+    assert large.text_theme.body_medium.size == 16 and large.text_theme.title_large.size == 26
+
+
+def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
+    app, page = make_app(tmp_path)
+    app.large_text_switch.value = True
+
+    app.on_toggle_large_text(None)
+
+    assert page.theme.text_theme is not None and page.dark_theme.text_theme is not None
+    assert app.service.settings.large_text is True
+
+
 def test_choosing_a_folder_builds_the_index_and_restores_the_controls(tmp_path, library):
     app, _ = indexed_app(tmp_path, library)
 
