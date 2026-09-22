@@ -26,7 +26,7 @@ from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
-from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_qr, diagnose
+from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.support import SupportPrompt
 from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
@@ -37,9 +37,14 @@ MODE_SHOOT = "shoot"
 MODE_SCAN = "scan"
 ZOOM_STEP = 0.5
 MARKER_SIZE = 64
+PAGE_PADDING = 12  # общий отступ страницы; кадр камеры вычитает его отрицательным полем, чтобы быть во всю ширину
+SCAN_INTERVAL = 0.4  # пауза между попытками распознать QR в потоке кадров камеры: бережёт батарею и процессор
 SCAN_HINT = (
-    "Наведите камеру на QR-код в приложении на ПК (приближение и касание для фокуса помогают) "
-    "и нажмите «Считать QR»"
+    "Наведите камеру на QR-код в приложении на ПК — считается автоматически (приближение и касание для фокуса помогают)"
+)
+SCAN_HINT_MANUAL = (
+    "Автосканирование недоступно на этом телефоне. Наведите камеру на QR-код в приложении на ПК "
+    "(приближение и касание для фокуса помогают) и нажмите «Считать QR»"
 )
 
 
@@ -55,6 +60,8 @@ class MobileApp:
         client_factory: Callable[[Connection], GmagcClient] = GmagcClient,
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
         qr_diagnose: Callable[[bytes], str] = diagnose,
+        frame_reader: Callable[[int, int, str, bytes], Connection | None] = connection_from_frame,
+        scan_interval: float = SCAN_INTERVAL,
         marker_seconds: float = 1.5,
         mount_seconds: float = 0.3,
         clock: Callable[[], float] = time.monotonic,
@@ -77,6 +84,10 @@ class MobileApp:
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.qr_diagnose = qr_diagnose
+        self.frame_reader = frame_reader
+        self.scan_interval = scan_interval  # пауза между попытками распознать QR в потоке кадров
+        self._scan_busy = False
+        self._scan_last = -1e9
         self.marker_seconds = marker_seconds
         self.mount_seconds = mount_seconds  # пауза, чтобы виджет камеры успел появиться на экране до запуска камеры
         self._clock = clock
@@ -155,8 +166,14 @@ class MobileApp:
         self.zoom_in_button = ft.IconButton(icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in)
         self.focus_text = ft.Text("Фокус: авто")
         self.focus_button = ft.TextButton(content=self.focus_text, on_click=self.on_focus_lock)
-        self.capture_button = ft.Button("Снять", on_click=self.on_capture)
-        self.gallery_button = ft.Button("Из галереи", on_click=self.on_gallery)
+        self.capture_button = ft.FloatingActionButton(icon=ft.Icons.CAMERA_ALT, tooltip="Снять", on_click=self.on_capture)
+        self.gallery_button = ft.IconButton(
+            icon=ft.Icons.PHOTO_LIBRARY,
+            tooltip="Из галереи",
+            icon_color=ft.Colors.WHITE,
+            bgcolor=ft.Colors.with_opacity(0.45, ft.Colors.BLACK),
+            on_click=self.on_gallery,
+        )
         self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
         self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
@@ -171,24 +188,30 @@ class MobileApp:
         )
         if hasattr(self.preview, "on_size_change"):
             self.preview.on_size_change = self.on_preview_size
+        # «Снять» и «Из галереи» — отдельный слой над self.gesture (не внутри него), чтобы нажатие на кнопку
+        # не попадало и в обработчик касания кадра (фокус по точке)
+        gallery_overlay = ft.Container(
+            self.gallery_button,
+            alignment=ft.Alignment.BOTTOM_RIGHT,
+            padding=ft.Padding.only(right=16, bottom=16),
+            expand=True,
+        )
+        capture_overlay = ft.Container(
+            self.capture_button, alignment=ft.Alignment.BOTTOM_CENTER, padding=ft.Padding.only(bottom=16), expand=True
+        )
+        self.camera_stage = ft.Stack([self.gesture, gallery_overlay, capture_overlay], expand=True)
+        # отрицательное поле компенсирует отступ страницы, чтобы кадр камеры доходил до краёв экрана
+        self.camera_preview_area = ft.Container(
+            self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
+        )
         self.camera_view = ft.Column(
             [
                 ft.Row([self.camera_title, self.change_pc_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                self.gesture,
+                self.camera_preview_area,
                 ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
                 self.focus_button,
                 self.camera_message,
-                ft.Row(
-                    [
-                        self.capture_button,
-                        self.gallery_button,
-                        self.scan_now_button,
-                        self.cancel_scan_button,
-                        self.busy_ring,
-                    ],
-                    spacing=8,
-                    wrap=True,
-                ),
+                ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
             ],
             spacing=6,
             visible=False,
@@ -227,6 +250,7 @@ class MobileApp:
 
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
+        self.page.padding = PAGE_PADDING
         views = getattr(self.page, "views", None)
         if views:  # системная кнопка «Назад» идёт в on_confirm_pop, а не закрывает приложение
             views[0].can_pop = False
@@ -317,7 +341,8 @@ class MobileApp:
         scanning = mode == MODE_SCAN
         self.camera_title.value = SCAN_HINT if scanning else self.status_text
         self.capture_button.visible = self.gallery_button.visible = not scanning
-        self.scan_now_button.visible = self.cancel_scan_button.visible = scanning
+        self.scan_now_button.visible = False  # включится в _start_auto_scan, если автопоток недоступен на телефоне
+        self.cancel_scan_button.visible = scanning
         self.change_pc_button.visible = not scanning
         self.camera_message.value = note or ""
         self.camera_message.visible = bool(note)
@@ -365,7 +390,7 @@ class MobileApp:
             return
         await self._connect(Connection(address[0], address[1], normalize_code(code)))
 
-    async def _connect(self, connection: Connection) -> bool:
+    async def _connect(self, connection: Connection, announce: bool = False) -> bool:
         self._set_busy(True)
         client = self.client_factory(connection)
         try:
@@ -385,6 +410,8 @@ class MobileApp:
         self.status_text = status_line(connection, status)
         self._set_busy(False)
         self._show_camera(MODE_SHOOT, note=None if status.indexed else NO_INDEX_NOTE)
+        if announce:  # по QR подключение происходит без ручного ввода: коротко подтвердить, что оно удалось
+            self.page.show_dialog(ft.SnackBar(ft.Text(f"Подключено к ПК: {connection.host}:{connection.port}")))
         await self._ensure_camera()
         return True
 
@@ -418,6 +445,45 @@ class MobileApp:
     async def on_scan_qr(self, _event) -> None:
         self._show_camera(MODE_SCAN)
         await self._ensure_camera()
+        await self._start_auto_scan()
+
+    async def _start_auto_scan(self) -> None:
+        """Пробует читать QR из потока кадров камеры без нажатия кнопки; если телефон это не умеет — ручная кнопка."""
+        self._scan_busy = False
+        self._scan_last = -1e9
+        started = self.camera.ready and await self.camera.start_scanning(self._on_scan_frame)
+        self.scan_now_button.visible = not started
+        if not started:
+            self.camera_title.value = SCAN_HINT_MANUAL
+        self.page.update()
+
+    async def _on_scan_frame(self, event) -> None:
+        """Вызывается на каждый кадр потока камеры, пока идёт сканирование; не чаще scan_interval и не параллельно."""
+        now = self._clock()
+        if self._scan_busy or now - self._scan_last < self.scan_interval:
+            return
+        self._scan_busy = True
+        self._scan_last = now
+        connection = None
+        try:
+            connection = await asyncio.to_thread(
+                self.frame_reader, event.width, event.height, event.encoded_format, event.bytes
+            )
+        except QrUnavailable:
+            await self.camera.stop_scanning()
+            self.scan_now_button.visible = True
+            self.camera_title.value = SCAN_HINT_MANUAL
+            self._camera_note("Автоматическое чтение QR недоступно на этом телефоне: введите адрес и код вручную.")
+        except QrImageError:
+            pass  # нечитаемый кадр — обычное дело на видео с камеры, просто ждём следующий
+        except Exception:  # noqa: BLE001 - поток не должен падать экран, просто пробуем следующий кадр
+            pass
+        finally:
+            self._scan_busy = False
+        if connection is None:
+            return
+        await self.camera.stop_scanning()
+        await self._connect(connection, announce=True)
 
     # ---- кнопка «Назад» ------------------------------------------------------
     async def on_confirm_pop(self, event) -> None:
@@ -440,6 +506,7 @@ class MobileApp:
             await self.on_again(None)
             return False
         if self.camera_view.visible and self.mode == MODE_SCAN:
+            await self.camera.stop_scanning()
             self._show_connect()
             return False
         now = self._clock()
@@ -452,6 +519,7 @@ class MobileApp:
         return False
 
     async def on_cancel_scan(self, _event) -> None:
+        await self.camera.stop_scanning()
         self._show_connect()
 
     async def on_scan_now(self, _event) -> None:
@@ -472,7 +540,7 @@ class MobileApp:
             failure = f"Ошибка камеры: {error}"
         self._set_busy(False)
         if connection is not None:
-            await self._connect(connection)
+            await self._connect(connection, announce=True)
             return
         if not failure:
             failure = (
@@ -664,6 +732,11 @@ def _camera_placeholder() -> ft.Control:
 async def build_page(page: ft.Page, **services) -> MobileApp:
     """Собирает экран из служб Flet (в тестах их подменяют) и запускает подключение."""
     page.title = f"{NAME} {VERSION}"
+    if getattr(page, "platform", None) in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        try:  # приложение рассчитано только на вертикальное положение (камера, экраны)
+            await page.set_allowed_device_orientations([ft.DeviceOrientation.PORTRAIT_UP])
+        except Exception:  # noqa: BLE001 - блокировка поворота не должна мешать запуску экрана
+            pass
     prefs = services.pop("prefs", None) or ft.SharedPreferences()
     permission = services.pop("permission", None) or ph.PermissionHandler()
     supported = camera_supported(page)

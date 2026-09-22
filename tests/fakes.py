@@ -31,9 +31,13 @@ class StubPage:
         self.updates = 0
         self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
         self.dialogs = []
+        self.orientation_calls = []
 
     def add(self, *controls):
         self.added.extend(controls)
+
+    async def set_allowed_device_orientations(self, orientations):
+        self.orientation_calls.append(list(orientations))
 
     def update(self):
         self.updates += 1

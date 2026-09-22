@@ -9,19 +9,21 @@ import pytest
 from gmagc_common.protocol import Connection, Health, Status
 from gmagc_mobile import client
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
-from gmagc_mobile.app import MobileApp, build_page
+from gmagc_mobile.app import PAGE_PADDING, MobileApp, build_page
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.qr import QrImageError, QrUnavailable
 from gmagc_mobile.store import KEY_CODE, KEY_HOST, KEY_PORT, ConnectionStore
 from tests.fakes import FakeClipboard, FakePicker, StubPage, texts, walk
-from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, Script, sample_response
+from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, Script, frame_event, sample_response
 
 PC = Connection("192.168.1.121", 8765, "ZBZ36YNK")
 STORED = {KEY_HOST: "192.168.1.121", KEY_PORT: 8765, KEY_CODE: "ZBZ36YNK"}
 
 
-def make_app(prefs=None, script=None, camera_api=None, permission=None, qr_reader=None, picker=None, clipboard=None):
+def make_app(
+    prefs=None, script=None, camera_api=None, permission=None, qr_reader=None, frame_reader=None, picker=None, clipboard=None
+):
     script = script or Script()
     prefs = prefs if prefs is not None else FakePrefs()
     camera_api = camera_api or FakeCameraApi()
@@ -36,6 +38,7 @@ def make_app(prefs=None, script=None, camera_api=None, permission=None, qr_reade
         clipboard=clipboard or FakeClipboard(),
         client_factory=script.factory,
         qr_reader=qr_reader or (lambda data: None),
+        frame_reader=frame_reader or (lambda width, height, encoded_format, data: None),
         marker_seconds=0,
         mount_seconds=0,
     )
@@ -166,6 +169,108 @@ def test_the_qr_scan_reads_the_link_and_connects():
 
     assert seen == [b"JPEG-shot"] and script.connections == [PC] and prefs.data == STORED
     assert app.mode == "shoot" and app.capture_button.visible and not app.scan_now_button.visible
+
+
+def test_a_phone_that_supports_streaming_scans_automatically_without_the_button():
+    camera_api = FakeCameraApi(streaming=True)
+    app, _, script, prefs, _ = start(camera_api=camera_api, frame_reader=lambda w, h, fmt, data: PC)
+
+    run(app.on_scan_qr(None))
+    assert camera_api.stream_started == 1 and not app.scan_now_button.visible and "автоматически" in app.camera_title.value
+
+    run(camera_api.on_stream_image(frame_event()))
+
+    assert script.connections == [PC] and prefs.data == STORED
+    assert app.mode == "shoot" and camera_api.stream_stopped == 1
+
+
+def test_frames_that_do_not_contain_a_code_are_silently_skipped():
+    camera_api = FakeCameraApi(streaming=True)
+    seen = []
+
+    def reader(width, height, encoded_format, data):
+        seen.append(data)
+        return None
+
+    app, _, script, _, _ = start(camera_api=camera_api, frame_reader=reader)
+    run(app.on_scan_qr(None))
+
+    run(camera_api.on_stream_image(frame_event(data=b"first")))
+
+    assert seen == [b"first"] and script.connections == [] and views(app) == ["camera"] and app.mode == "scan"
+
+
+def test_frames_are_throttled_and_never_processed_concurrently():
+    camera_api = FakeCameraApi(streaming=True)
+    seen = []
+    app, _, _, _, _ = start(camera_api=camera_api, frame_reader=lambda w, h, fmt, data: seen.append(data) or None)
+    run(app.on_scan_qr(None))
+
+    run(camera_api.on_stream_image(frame_event(data=b"one")))
+    run(camera_api.on_stream_image(frame_event(data=b"two")))  # тут же следом: должно быть отброшено паузой
+
+    assert seen == [b"one"]
+
+    app._scan_last = app._clock() - app.scan_interval - 1  # имитируем, что пауза истекла
+    run(camera_api.on_stream_image(frame_event(data=b"three")))
+
+    assert seen == [b"one", b"three"]
+
+
+def test_when_the_reader_is_unavailable_streaming_stops_and_the_manual_button_returns():
+    from gmagc_mobile.qr import QrUnavailable
+
+    camera_api = FakeCameraApi(streaming=True)
+
+    def reader(width, height, encoded_format, data):
+        raise QrUnavailable("нет zbar")
+
+    app, _, script, _, _ = start(camera_api=camera_api, frame_reader=reader)
+    run(app.on_scan_qr(None))
+
+    run(camera_api.on_stream_image(frame_event()))
+
+    assert camera_api.stream_stopped == 1 and app.scan_now_button.visible and script.connections == []
+    assert "недоступно" in app.camera_message.value
+
+
+def test_a_phone_without_streaming_support_falls_back_to_the_manual_button():
+    camera_api = FakeCameraApi(streaming=False)
+    app, _, _, _, _ = start(camera_api=camera_api)
+
+    run(app.on_scan_qr(None))
+
+    assert camera_api.stream_started == 0 and app.scan_now_button.visible
+    assert "Автосканирование недоступно" in app.camera_title.value
+
+
+def test_cancelling_the_scan_stops_the_stream():
+    camera_api = FakeCameraApi(streaming=True)
+    app, _, _, _, _ = start(camera_api=camera_api)
+    run(app.on_scan_qr(None))
+
+    run(app.on_cancel_scan(None))
+
+    assert camera_api.stream_stopped == 1 and views(app) == ["connect"]
+
+
+def test_connecting_by_qr_shows_a_notice_that_the_connection_succeeded():
+    app, page, _, _, _ = start(qr_reader=lambda data: PC)
+    run(app.on_scan_qr(None))
+
+    run(app.on_scan_now(None))
+
+    assert len(page.dialogs) == 1
+    snack_bar = page.dialogs[0]
+    assert isinstance(snack_bar, ft.SnackBar) and "Подключено" in snack_bar.content.value
+
+
+def test_connecting_manually_shows_no_qr_notice():
+    app, page, _, _, _ = start()
+
+    connect_manually(app)
+
+    assert page.dialogs == []
 
 
 def test_a_qr_scan_without_a_code_asks_to_move_closer_and_appends_the_diagnosis():
@@ -476,6 +581,37 @@ def test_the_camera_control_is_used_only_on_supported_platforms():
     for platform, web in ((ft.PagePlatform.ANDROID, False), (ft.PagePlatform.IOS, False), (ft.PagePlatform.WINDOWS, True)):
         app = build_on(platform, web)
         assert app.camera.supported is True and isinstance(app.preview, fc.Camera), platform
+
+
+def test_the_camera_preview_spans_the_full_width_beyond_the_page_padding():
+    app, page, _, _, _ = start()
+
+    assert page.padding == PAGE_PADDING
+    margin = app.camera_preview_area.margin
+    assert margin.left == -PAGE_PADDING and margin.right == -PAGE_PADDING
+    assert margin.top == 0 and margin.bottom == 0
+
+
+def test_the_shutter_and_gallery_buttons_float_over_the_preview_outside_the_tap_focus_area():
+    app, _, _, _, _ = start()
+
+    # предпросмотр и метка фокуса остаются под обработчиком касания как раньше, кнопки в него не входят
+    assert app.gesture.content.controls == [app.preview, app.marker]
+    overlay_content = [control.content for control in app.camera_stage.controls if isinstance(control, ft.Container)]
+    assert app.capture_button in overlay_content and app.gallery_button in overlay_content
+    assert isinstance(app.capture_button, ft.FloatingActionButton)
+
+
+def test_the_screen_is_locked_to_portrait_on_android_and_ios():
+    for platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        app = build_on(platform)
+        assert app.page.orientation_calls == [[ft.DeviceOrientation.PORTRAIT_UP]], platform
+
+
+def test_the_orientation_is_left_alone_on_desktop_and_web():
+    for platform, web in ((ft.PagePlatform.WINDOWS, False), (ft.PagePlatform.WINDOWS, True)):
+        app = build_on(platform, web)
+        assert app.page.orientation_calls == []
 
 
 def test_on_a_desktop_a_placeholder_replaces_the_camera_so_the_screen_still_works():

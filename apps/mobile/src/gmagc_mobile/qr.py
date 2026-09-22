@@ -46,15 +46,7 @@ def _variants(picture):
         yield ImageOps.autocontrast(small, cutoff=2)
 
 
-def decode_qr(image: bytes) -> str | None:
-    """Текст первого QR-кода на снимке или None, если кода не видно; нечитаемый снимок даёт QrImageError."""
-    Image, pyzbar = _load()
-    try:
-        with Image.open(io.BytesIO(image)) as opened:
-            picture = opened.convert("L")
-    except Exception as error:  # noqa: BLE001 - причина нужна для диагностики на телефоне
-        raise QrImageError(f"{type(error).__name__}: {error}") from error
-    picture.thumbnail((MAX_SIDE, MAX_SIDE))
+def _scan(picture, pyzbar) -> str | None:
     for candidate in _variants(picture):
         for symbol in pyzbar.decode(candidate, symbols=[pyzbar.ZBarSymbol.QRCODE]):
             try:
@@ -64,8 +56,39 @@ def decode_qr(image: bytes) -> str | None:
     return None
 
 
+def decode_qr(image: bytes) -> str | None:
+    """Текст первого QR-кода на снимке или None, если кода не видно; нечитаемый снимок даёт QrImageError."""
+    Image, pyzbar = _load()
+    try:
+        with Image.open(io.BytesIO(image)) as opened:
+            picture = opened.convert("L")
+    except Exception as error:  # noqa: BLE001 - причина нужна для диагностики на телефоне
+        raise QrImageError(f"{type(error).__name__}: {error}") from error
+    picture.thumbnail((MAX_SIDE, MAX_SIDE))
+    return _scan(picture, pyzbar)
+
+
 def connection_from_qr(image: bytes) -> Connection | None:
     text = decode_qr(image)
+    return parse_link(text) if text else None
+
+
+def decode_frame(width: int, height: int, encoded_format: str, data: bytes) -> str | None:
+    """Текст QR в кадре потока камеры: JPEG читается как снимок, сырой формат (NV21/YUV420) — по яркостной плоскости
+    (первые width×height байт кадра), без перевода цвета — для чтения QR он не нужен."""
+    if encoded_format.lower() in ("jpeg", "jpg", "png"):
+        return decode_qr(data)
+    Image, pyzbar = _load()
+    size = width * height
+    if width <= 0 or height <= 0 or len(data) < size:
+        raise QrImageError(f"кадр камеры повреждён: {len(data)} байт для {width}×{height}")
+    picture = Image.frombytes("L", (width, height), data[:size])
+    picture.thumbnail((MAX_SIDE, MAX_SIDE))
+    return _scan(picture, pyzbar)
+
+
+def connection_from_frame(width: int, height: int, encoded_format: str, data: bytes) -> Connection | None:
+    text = decode_frame(width, height, encoded_format, data)
     return parse_link(text) if text else None
 
 

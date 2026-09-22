@@ -15,13 +15,28 @@ def cam(direction: str):
 class FakeCameraApi:
     """Замена fc.Camera: записывает вызовы в calls."""
 
-    def __init__(self, cameras=None, min_zoom=1.0, max_zoom=6.0, picture=b"JPEG-shot", fail=None, picture_failures=0):
+    def __init__(
+        self,
+        cameras=None,
+        min_zoom=1.0,
+        max_zoom=6.0,
+        picture=b"JPEG-shot",
+        fail=None,
+        picture_failures=0,
+        streaming=False,
+        stream_fail=None,
+    ):
         self.cameras = list(cameras) if cameras is not None else [cam("front"), cam("back")]
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
         self.picture = picture
         self.fail = fail  # имя метода, который должен упасть
         self.picture_failures = picture_failures  # сколько первых снимков упадёт, как при потерянном контроллере
+        self.streaming = streaming  # поддерживает ли этот телефон поток кадров (для автосканирования QR)
+        self.stream_fail = stream_fail  # причина сбоя запуска потока, если задана
+        self.on_stream_image = None
+        self.stream_started = 0
+        self.stream_stopped = 0
         self.calls = []
 
     def _maybe_fail(self, name):
@@ -73,6 +88,23 @@ class FakeCameraApi:
 
     async def resume_preview(self):
         self.calls.append(("resume",))
+
+    async def supports_image_streaming(self):
+        self._maybe_fail("supports_image_streaming")
+        return self.streaming
+
+    async def start_image_stream(self):
+        if self.stream_fail:
+            raise RuntimeError(self.stream_fail)
+        self.stream_started += 1
+
+    async def stop_image_stream(self):
+        self.stream_stopped += 1
+
+
+def frame_event(width=300, height=300, encoded_format="jpeg", data=b"JPEG-frame"):
+    """Замена flet_camera.CameraImageEvent: кадр из потока камеры для тестов автосканирования QR."""
+    return SimpleNamespace(width=width, height=height, format=None, encoded_format=encoded_format, bytes=data)
 
 
 class FakePermission:
