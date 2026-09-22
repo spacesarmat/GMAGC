@@ -10,6 +10,7 @@ from pathlib import Path
 import flet as ft
 
 from gmagc_common.protocol import build_link, format_code
+from gmagc_common.theme import SEED_COLOR, score_band
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.selfcheck import run_core_check
@@ -38,15 +39,34 @@ ONBOARDING_HINT = (
 HISTORY_LIMIT = 10
 
 
+_BADGE_COLORS = {
+    "good": (ft.Colors.GREEN_100, ft.Colors.GREEN_900),
+    "low": (ft.Colors.AMBER_100, ft.Colors.AMBER_900),
+    "bad": (ft.Colors.RED_100, ft.Colors.RED_900),
+}
+
+
+def _score_badge(score: float) -> ft.Container:
+    """Цветной бейдж оценки на карточке результата: зелёный/жёлтый/красный по порогу совпадения."""
+    bgcolor, color = _BADGE_COLORS[score_band(score)]
+    return ft.Container(
+        ft.Text(score_text(score), size=12, weight=ft.FontWeight.BOLD, color=color),
+        bgcolor=bgcolor,
+        border_radius=12,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
+
+
 def _theme(large_text: bool) -> ft.Theme:
     """Обычная тема или увеличенная (крупнее шрифт по умолчанию и просторнее элементы) — для тёмных залов.
 
     Затрагивает текст без явно заданного размера (многие подписи в этом приложении задают свой размер
     напрямую и увеличенным текстом не становятся крупнее)."""
     if not large_text:
-        return ft.Theme(use_material3=True)
+        return ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
     return ft.Theme(
         use_material3=True,
+        color_scheme_seed=SEED_COLOR,
         visual_density=ft.VisualDensity.COMFORTABLE,
         text_theme=ft.TextTheme(
             body_small=ft.TextStyle(size=14),
@@ -562,7 +582,6 @@ class DesktopApp:
         details: list[ft.Control] = [
             ft.Text(result.name, weight=ft.FontWeight.BOLD),
             ft.Text(result.full_path, size=12),
-            ft.Text(score_text(result.score)),
         ]
         if result.copies:
             details.append(ft.Text(f"ещё {len(result.copies)} файлов", tooltip="\n".join(result.copies)))
@@ -572,10 +591,17 @@ class DesktopApp:
                     [
                         ft.Image(src=result.thumbnail_png, width=96, height=96, fit=ft.BoxFit.CONTAIN),
                         ft.Column(details, spacing=2, expand=True),
-                        ft.IconButton(
-                            icon=ft.Icons.FOLDER_OPEN,
-                            tooltip="Показать в папке",
-                            on_click=lambda _event, path=result.full_path: self.reveal(path),
+                        ft.Column(
+                            [
+                                _score_badge(result.score),
+                                ft.IconButton(
+                                    icon=ft.Icons.FOLDER_OPEN,
+                                    tooltip="Показать в папке",
+                                    on_click=lambda _event, path=result.full_path: self.reveal(path),
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.END,
+                            spacing=4,
                         ),
                     ],
                     spacing=12,

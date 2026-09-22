@@ -93,6 +93,14 @@ def test_toggling_large_text_enlarges_the_default_theme_text():
     assert large.text_theme.body_medium.size == 16 and large.text_theme.title_large.size == 26
 
 
+def test_both_theme_variants_use_the_shared_brand_seed_color():
+    from gmagc_common.theme import SEED_COLOR
+    from gmagc_desktop.ui.app import _theme
+
+    assert _theme(False).color_scheme_seed == SEED_COLOR
+    assert _theme(True).color_scheme_seed == SEED_COLOR
+
+
 def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
     app, page = make_app(tmp_path)
     app.large_text_switch.value = True
@@ -241,6 +249,21 @@ def test_picked_photo_shows_the_photo_the_projection_and_result_cards(tmp_path, 
     first = texts(app.results_column.controls[0])
     assert any(t.endswith(".png") and "ell" in t for t in first) and any(t.endswith("%") for t in first)
     assert not app.pick_photo_button.disabled
+
+
+def test_the_score_badge_colour_follows_the_match_confidence(tmp_path):
+    from gmagc_desktop.service.results import Result
+
+    app, _ = make_app(tmp_path)
+
+    def badge(score):
+        result = Result(1, "a", "a.png", "/lib/a.png", score, (), b"")
+        card = app._result_card(result)  # noqa: SLF001 - сборка карточки результата, не публичный API
+        return card.content.content.controls[2].controls[0]
+
+    good, low, bad = badge(0.92), badge(0.78), badge(0.50)
+    assert good.bgcolor != low.bgcolor != bad.bgcolor
+    assert "92" in good.content.value and "78" in low.content.value and "50" in bad.content.value
 
 
 def test_flat_photo_shows_the_no_projection_message(tmp_path, library):

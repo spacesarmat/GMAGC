@@ -87,6 +87,16 @@ def test_the_first_start_shows_the_connect_screen_and_leaves_the_camera_off():
     assert NAME in shown and VERSION in shown and AUTHOR in shown
 
 
+def test_the_theme_uses_the_shared_brand_seed_and_follows_the_phone_system_theme():
+    from gmagc_common.theme import SEED_COLOR
+
+    _, page, _, _, _ = make_app()
+
+    assert page.theme.color_scheme_seed == SEED_COLOR
+    assert page.dark_theme.color_scheme_seed == SEED_COLOR
+    assert page.theme_mode == ft.ThemeMode.SYSTEM
+
+
 def test_a_stored_connection_is_restored_and_opens_the_camera():
     app, _, script, _, camera_api = start(prefs=FakePrefs(STORED))
 

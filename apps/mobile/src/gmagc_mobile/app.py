@@ -22,6 +22,7 @@ from gmagc_common.protocol import (
     parse_address,
     parse_link,
 )
+from gmagc_common.theme import SEED_COLOR
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
@@ -293,6 +294,9 @@ class MobileApp:
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
         self.page.padding = PAGE_PADDING
+        self.page.theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
+        self.page.dark_theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
+        self.page.theme_mode = ft.ThemeMode.SYSTEM  # тёмная/светлая — как в системе телефона
         views = getattr(self.page, "views", None)
         if views:  # системная кнопка «Назад» идёт в on_confirm_pop, а не закрывает приложение
             views[0].can_pop = False

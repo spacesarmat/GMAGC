@@ -1,0 +1,22 @@
+"""Единый акцентный цвет темы: общий для ПК и телефона, чтобы приложения выглядели одним продуктом."""
+
+from __future__ import annotations
+
+# Затравка для Material 3 (color_scheme_seed у Flet): из одного цвета генерируется вся тональная палитра
+# (primary/secondary/surface и их варианты в светлой и тёмной теме). Синий в тон фона значка (#040c1f).
+SEED_COLOR = "#2F6FED"
+
+# Пороги совпадения, при которых оценка результата подсвечивается как надёжная/сомнительная/ненадёжная.
+# SCORE_LOW совпадает с LOW_CONFIDENCE_SCORE ядра — там же, где решают, показывать ли предупреждение
+# "совпадение ненадёжно" (gmagc_desktop.service.results.LOW_CONFIDENCE_SCORE).
+SCORE_GOOD = 0.85
+SCORE_LOW = 0.72
+
+
+def score_band(score: float) -> str:
+    """"good" / "low" / "bad" — для цвета бейджа оценки на карточке результата (ПК и телефон)."""
+    if score >= SCORE_GOOD:
+        return "good"
+    if score >= SCORE_LOW:
+        return "low"
+    return "bad"
