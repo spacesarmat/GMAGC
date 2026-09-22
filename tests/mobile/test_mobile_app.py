@@ -478,6 +478,18 @@ def test_the_camera_control_is_used_only_on_supported_platforms():
         assert app.camera.supported is True and isinstance(app.preview, fc.Camera), platform
 
 
+def test_the_screen_is_locked_to_portrait_on_android_and_ios():
+    for platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        app = build_on(platform)
+        assert app.page.orientation_calls == [[ft.DeviceOrientation.PORTRAIT_UP]], platform
+
+
+def test_the_orientation_is_left_alone_on_desktop_and_web():
+    for platform, web in ((ft.PagePlatform.WINDOWS, False), (ft.PagePlatform.WINDOWS, True)):
+        app = build_on(platform, web)
+        assert app.page.orientation_calls == []
+
+
 def test_on_a_desktop_a_placeholder_replaces_the_camera_so_the_screen_still_works():
     import flet_camera as fc
 

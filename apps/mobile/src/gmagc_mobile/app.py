@@ -664,6 +664,11 @@ def _camera_placeholder() -> ft.Control:
 async def build_page(page: ft.Page, **services) -> MobileApp:
     """Собирает экран из служб Flet (в тестах их подменяют) и запускает подключение."""
     page.title = f"{NAME} {VERSION}"
+    if getattr(page, "platform", None) in (ft.PagePlatform.ANDROID, ft.PagePlatform.IOS):
+        try:  # приложение рассчитано только на вертикальное положение (камера, экраны)
+            await page.set_allowed_device_orientations([ft.DeviceOrientation.PORTRAIT_UP])
+        except Exception:  # noqa: BLE001 - блокировка поворота не должна мешать запуску экрана
+            pass
     prefs = services.pop("prefs", None) or ft.SharedPreferences()
     permission = services.pop("permission", None) or ph.PermissionHandler()
     supported = camera_supported(page)
