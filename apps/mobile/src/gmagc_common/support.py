@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 SUPPORT_URL = "https://boosty.to/djmaker/donate"
 AUTHOR_TELEGRAM_URL = "https://t.me/Andy_bum"  # Telegram автора: постоянная ссылка на экранах
+CHANNEL_URL = "https://t.me/gmagclight"  # канал о GMAGC: постоянная ссылка на экранах
 FIRST_ASK_LAUNCH = 5  # первое окно не раньше пятого запуска
 REMIND_AFTER_SECONDS = 30 * 24 * 60 * 60  # «Позже» напоминает через 30 суток
 

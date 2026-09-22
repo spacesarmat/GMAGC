@@ -174,7 +174,7 @@ class DesktopApp:
                 ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
                 self.check_label,
                 *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
-                *([self.support.link, self.support.telegram_link] if self.support else []),
+                *([self.support.link, self.support.telegram_link, self.support.channel_link] if self.support else []),
             ],
             spacing=12,
         )

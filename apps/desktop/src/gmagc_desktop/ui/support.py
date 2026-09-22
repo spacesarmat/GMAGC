@@ -10,6 +10,7 @@ import flet as ft
 
 from gmagc_common.support import (
     AUTHOR_TELEGRAM_URL,
+    CHANNEL_URL,
     DIALOG_TEXT,
     DIALOG_TITLE,
     LATER,
@@ -42,6 +43,7 @@ class SupportPrompt:
         self.busy = busy
         self.link = ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.on_open_link)
         self.telegram_link = ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.on_open_telegram)
+        self.channel_link = ft.TextButton(content=ft.Text("Канал GMAGC", size=12), on_click=self.on_open_channel)
         self._dialog: ft.AlertDialog | None = None
 
     def start(self) -> None:
@@ -89,3 +91,6 @@ class SupportPrompt:
 
     def on_open_telegram(self, _event) -> None:
         self.open_url(AUTHOR_TELEGRAM_URL)
+
+    def on_open_channel(self, _event) -> None:
+        self.open_url(CHANNEL_URL)
