@@ -183,16 +183,15 @@ def test_the_aspect_ratio_is_not_reapplied_when_the_size_does_not_change():
     assert app.page.updates == updates_before
 
 
-def test_the_camera_preview_keeps_its_place_no_matter_how_much_history_piles_up():
+def test_history_lives_on_its_own_gallery_screen_not_on_the_camera_screen():
     """История снимков росла без ограничения в той же нескроллящейся колонке, что и камера — после
-    десятка снимков за сессию превью почти исчезало (реальный отзыв пользователя). Управляющие элементы
-    под камерой (зум, фокус, история) теперь в отдельной колонке с фиксированной высотой и своей
-    прокруткой — камере всегда достаётся одна и та же доля экрана."""
+    десятка снимков за сессию превью почти исчезало (реальный отзыв пользователя). История теперь —
+    отдельный экран «Галерея» (открывается из нижней навигации), а не часть экрана камеры: он вообще
+    не может отжать место у превью, сколько бы снимков ни накопилось."""
+    from tests.fakes import walk
+
     app, _ = make_running_app()
 
     assert app.camera_preview_area in app.camera_view.controls
-    below = app.camera_view.controls[-1]
-    assert app.history_column not in app.camera_view.controls  # не напрямую в главной колонке
-    assert app.history_title in below.controls and app.history_column in below.controls
-    assert below.height is not None  # фиксированная высота: не может расти бесконечно вместе с историей
-    assert below.scroll is not None  # то, что не влезло, скроллится внутри своей колонки, а не давит на камеру
+    assert app.history_column not in list(walk(app.camera_view))
+    assert app.history_column in list(walk(app.gallery_view))

@@ -128,33 +128,27 @@ def link_texts(view):
     return [c.content.value for c in walk(view) if isinstance(c, ft.TextButton) and isinstance(c.content, ft.Text)]
 
 
-def test_support_links_appear_on_the_connect_and_results_screens():
+def test_support_links_appear_on_the_about_screen():
+    """Ссылки поддержки собраны в одном месте («О программе»), открывается с экранов подключения и камеры."""
     app, _ = make_app()
 
-    for view in (app.connect_view, app.results_view):
-        texts = link_texts(view)
-        assert "Поддержать автора" in texts and "Telegram автора" in texts and "Канал GMAGC" in texts
+    texts = link_texts(app.about_view)
+    assert "Поддержать автора" in texts and "Telegram автора" in texts and "Канал GMAGC" in texts
 
 
-def test_support_links_do_not_crowd_the_camera_screen():
-    """Экран камеры не скроллится, и живой кадр там важнее: ссылки только на экранах подключения и результатов."""
+def test_support_links_do_not_crowd_the_connect_or_camera_screens():
     app, _ = make_app()
 
     labels = {"Поддержать автора", "Telegram автора", "Канал GMAGC"}
+    assert not labels & set(link_texts(app.connect_view))
     assert not labels & set(link_texts(app.camera_view))
 
 
-def test_each_screens_channel_link_button_is_its_own_control_and_opens_the_channel():
-    """Один и тот же контрол Flet нельзя вставить сразу в несколько мест дерева — на каждом экране своя кнопка."""
+def test_the_channel_link_opens_the_channel():
     app, launcher = make_app()
 
-    def channel_button(view):
-        return next(c for c in walk(view) if isinstance(c, ft.TextButton) and c.content.value == "Канал GMAGC")
-
-    connect_button, results_button = channel_button(app.connect_view), channel_button(app.results_view)
-    assert connect_button is not results_button
-
-    run(results_button.on_click(None))
+    button = next(c for c in walk(app.about_view) if isinstance(c, ft.TextButton) and c.content.value == "Канал GMAGC")
+    run(button.on_click(None))
 
     assert launcher.opened == [CHANNEL_URL]
 
@@ -162,6 +156,5 @@ def test_each_screens_channel_link_button_is_its_own_control_and_opens_the_chann
 def test_no_support_links_when_support_is_disabled():
     app, _ = make_app(support_flag=False)
 
-    for view in (app.connect_view, app.results_view):
-        labels = {"Поддержать автора", "Telegram автора", "Канал GMAGC"}
-        assert not labels & set(link_texts(view))
+    labels = {"Поддержать автора", "Telegram автора", "Канал GMAGC"}
+    assert not labels & set(link_texts(app.about_view))

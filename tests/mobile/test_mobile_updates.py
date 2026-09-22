@@ -218,10 +218,10 @@ async def _finish(app):
     return await app.update_task
 
 
-def test_the_connect_screen_has_the_manual_check_and_no_switch_to_turn_it_off():
+def test_the_settings_screen_has_the_manual_check_and_no_switch_to_turn_it_off():
     app, _ = make_app(tracker(), check_on_start=False)
 
-    controls = list(_walk(app.connect_view))
+    controls = list(_walk(app.settings_view))
 
     assert app.update_bar.check_button in controls
     assert not any(isinstance(control, ft.Switch) for control in controls)
