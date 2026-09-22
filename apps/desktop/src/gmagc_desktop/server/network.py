@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import socket
+import threading
+
+HOSTNAME_LOOKUP_TIMEOUT = 1.0  # секунд: резолв имени хоста — best-effort, а не обязательный шаг
 
 
 def _usable(address: str) -> bool:
@@ -20,11 +23,22 @@ def _primary_address() -> str | None:
 
 
 def _all_addresses() -> list[str]:
-    try:
-        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
-    except OSError:
-        return []
-    return [str(info[4][0]) for info in infos]
+    """Адреса по имени хоста — best-effort с таймаутом: на некоторых системах (macOS, имя хоста
+    оканчивается на .local) резолв идёт через mDNS и может подвисать на десятки секунд, а этот
+    список — лишь дополнение к основному адресу из _primary_address(), не критичный."""
+    found: list[str] = []
+
+    def resolve() -> None:
+        try:
+            infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+        except OSError:
+            return
+        found.extend(str(info[4][0]) for info in infos)
+
+    thread = threading.Thread(target=resolve, daemon=True)
+    thread.start()
+    thread.join(HOSTNAME_LOOKUP_TIMEOUT)
+    return found
 
 
 def lan_addresses() -> list[str]:

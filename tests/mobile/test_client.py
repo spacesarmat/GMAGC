@@ -1,4 +1,5 @@
 import json
+import socketserver
 import threading
 import time
 from contextlib import contextmanager
@@ -45,7 +46,16 @@ def stub_server(status=200, body=b"{}", content_type="application/json", delay=0
         def log_message(self, *args):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    class _Server(ThreadingHTTPServer):
+        def server_bind(self) -> None:
+            # HTTPServer.server_bind вызывает getfqdn(): на macOS-раннерах CI это резолв .local-имени
+            # через mDNS, который там может виснуть на десятки секунд (та же причина, что и в
+            # gmagc_desktop.server.runner._Server). Имя сервера тестам не нужно.
+            socketserver.TCPServer.server_bind(self)
+            host, port = self.server_address[:2]
+            self.server_name, self.server_port = str(host), port
+
+    server = _Server(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

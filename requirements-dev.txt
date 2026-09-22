@@ -4,6 +4,7 @@ onnxruntime
 onnx
 Pillow
 pytest
+pytest-timeout
 ruff
 flet==1.0.0
 flet-camera==1.0.0

@@ -1,6 +1,9 @@
 [tool.pytest.ini_options]
 pythonpath = ["apps/desktop/src", "apps/mobile/src", "."]
 testpaths = ["tests"]
+# весь набор обычно укладывается в ~70с; таймаут на отдельный тест — чтобы зависший тест падал с трассировкой
+# за секунды, а не молча вешал CI на 15-20 минут (случалось на macOS-раннере, причина не установлена)
+timeout = 30
 
 [tool.ruff]
 line-length = 125

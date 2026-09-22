@@ -181,3 +181,18 @@ def test_the_aspect_ratio_is_not_reapplied_when_the_size_does_not_change():
     app.on_preview_size(SimpleNamespace(width=400.0, height=800.0))
 
     assert app.page.updates == updates_before
+
+
+def test_the_camera_preview_keeps_its_place_no_matter_how_much_history_piles_up():
+    """История снимков росла без ограничения в той же нескроллящейся колонке, что и камера — после
+    десятка снимков за сессию превью почти исчезало (реальный отзыв пользователя). Управляющие элементы
+    под камерой (зум, фокус, история) теперь в отдельной колонке с фиксированной высотой и своей
+    прокруткой — камере всегда достаётся одна и та же доля экрана."""
+    app, _ = make_running_app()
+
+    assert app.camera_preview_area in app.camera_view.controls
+    below = app.camera_view.controls[-1]
+    assert app.history_column not in app.camera_view.controls  # не напрямую в главной колонке
+    assert app.history_title in below.controls and app.history_column in below.controls
+    assert below.height is not None  # фиксированная высота: не может расти бесконечно вместе с историей
+    assert below.scroll is not None  # то, что не влезло, скроллится внутри своей колонки, а не давит на камеру

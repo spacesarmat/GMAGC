@@ -87,6 +87,31 @@ def test_the_first_start_shows_the_connect_screen_and_leaves_the_camera_off():
     assert NAME in shown and VERSION in shown and AUTHOR in shown
 
 
+def test_the_theme_uses_the_shared_brand_seed_and_follows_the_phone_system_theme():
+    from gmagc_common.theme import SEED_COLOR
+
+    _, page, _, _, _ = make_app()
+
+    assert page.theme.color_scheme_seed == SEED_COLOR
+    assert page.dark_theme.color_scheme_seed == SEED_COLOR
+    assert page.theme_mode == ft.ThemeMode.SYSTEM
+
+
+def test_the_score_badge_colour_follows_the_match_confidence():
+    from gmagc_common.protocol import ResultItem
+
+    app, _, _, _, _ = make_app()
+
+    def badge(score):
+        item = ResultItem(1, "a", "/lib/a.png", score, (), b"")
+        card = app._result_card(item)  # noqa: SLF001 - сборка карточки результата, не публичный API
+        return card.content.content.controls[1].controls[0].controls[-1]
+
+    good, low, bad = badge(0.92), badge(0.78), badge(0.50)
+    assert good.bgcolor != low.bgcolor != bad.bgcolor
+    assert "92" in good.content.value and "78" in low.content.value and "50" in bad.content.value
+
+
 def test_a_stored_connection_is_restored_and_opens_the_camera():
     app, _, script, _, camera_api = start(prefs=FakePrefs(STORED))
 

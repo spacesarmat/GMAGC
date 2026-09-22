@@ -10,6 +10,7 @@ from pathlib import Path
 import flet as ft
 
 from gmagc_common.protocol import build_link, format_code
+from gmagc_common.theme import SEED_COLOR, score_band
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.selfcheck import run_core_check
@@ -38,15 +39,39 @@ ONBOARDING_HINT = (
 HISTORY_LIMIT = 10
 
 
+_BADGE_COLORS = {
+    "good": (ft.Colors.GREEN_100, ft.Colors.GREEN_900),
+    "low": (ft.Colors.AMBER_100, ft.Colors.AMBER_900),
+    "bad": (ft.Colors.RED_100, ft.Colors.RED_900),
+}
+
+
+def _score_badge(score: float) -> ft.Container:
+    """Цветной бейдж оценки на карточке результата: зелёный/жёлтый/красный по порогу совпадения."""
+    bgcolor, color = _BADGE_COLORS[score_band(score)]
+    return ft.Container(
+        ft.Text(score_text(score), size=12, weight=ft.FontWeight.BOLD, color=color),
+        bgcolor=bgcolor,
+        border_radius=12,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
+
+
+def _section_card(controls: list[ft.Control]) -> ft.Card:
+    """Приподнятая карточка-секция левой колонки («Библиотека», «Телефон», «Вид»)."""
+    return ft.Card(ft.Container(ft.Column(controls, spacing=8), padding=12))
+
+
 def _theme(large_text: bool) -> ft.Theme:
     """Обычная тема или увеличенная (крупнее шрифт по умолчанию и просторнее элементы) — для тёмных залов.
 
     Затрагивает текст без явно заданного размера (многие подписи в этом приложении задают свой размер
     напрямую и увеличенным текстом не становятся крупнее)."""
     if not large_text:
-        return ft.Theme(use_material3=True)
+        return ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
     return ft.Theme(
         use_material3=True,
+        color_scheme_seed=SEED_COLOR,
         visual_density=ft.VisualDensity.COMFORTABLE,
         text_theme=ft.TextTheme(
             body_small=ft.TextStyle(size=14),
@@ -181,9 +206,8 @@ class DesktopApp:
             self.server_switch.value = True
             self._start_server()
 
-        left = ft.Column(
+        library_card = _section_card(
             [
-                self.onboarding_hint,
                 ft.Text("Библиотека", size=18, weight=ft.FontWeight.BOLD),
                 self.library_text,
                 self.choose_folder_button,
@@ -192,7 +216,10 @@ class DesktopApp:
                 self.progress,
                 self.progress_label,
                 self.cancel_button,
-                ft.Divider(),
+            ]
+        )
+        phone_card = _section_card(
+            [
                 ft.Text("Телефон", size=18, weight=ft.FontWeight.BOLD),
                 self.server_switch,
                 self.server_status,
@@ -206,12 +233,18 @@ class DesktopApp:
                 self.history_title,
                 self.history_column,
                 *([self.update_bar.switch] if self.update_bar else []),
-                ft.Divider(),
+            ]
+        )
+        appearance_card = _section_card(
+            [
                 ft.Text("Вид", size=18, weight=ft.FontWeight.BOLD),
                 self.dark_theme_switch,
                 self.large_text_switch,
-            ],
-            spacing=8,
+            ]
+        )
+        left = ft.Column(
+            [self.onboarding_hint, library_card, phone_card, appearance_card],
+            spacing=12,
             width=320,
             scroll=ft.ScrollMode.AUTO,
         )
@@ -562,7 +595,6 @@ class DesktopApp:
         details: list[ft.Control] = [
             ft.Text(result.name, weight=ft.FontWeight.BOLD),
             ft.Text(result.full_path, size=12),
-            ft.Text(score_text(result.score)),
         ]
         if result.copies:
             details.append(ft.Text(f"ещё {len(result.copies)} файлов", tooltip="\n".join(result.copies)))
@@ -572,10 +604,17 @@ class DesktopApp:
                     [
                         ft.Image(src=result.thumbnail_png, width=96, height=96, fit=ft.BoxFit.CONTAIN),
                         ft.Column(details, spacing=2, expand=True),
-                        ft.IconButton(
-                            icon=ft.Icons.FOLDER_OPEN,
-                            tooltip="Показать в папке",
-                            on_click=lambda _event, path=result.full_path: self.reveal(path),
+                        ft.Column(
+                            [
+                                _score_badge(result.score),
+                                ft.IconButton(
+                                    icon=ft.Icons.FOLDER_OPEN,
+                                    tooltip="Показать в папке",
+                                    on_click=lambda _event, path=result.full_path: self.reveal(path),
+                                ),
+                            ],
+                            horizontal_alignment=ft.CrossAxisAlignment.END,
+                            spacing=4,
                         ),
                     ],
                     spacing=12,
