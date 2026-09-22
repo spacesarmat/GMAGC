@@ -31,6 +31,10 @@ from gmagc_desktop.update.manager import UpdateManager
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
 PHONE_HINT = "Телефон и ПК должны быть в одной сети Wi-Fi. При первом запуске разрешите доступ в брандмауэре Windows."
+ONBOARDING_HINT = (
+    "Добро пожаловать! Сначала выберите папку библиотеки гобо и постройте индекс — после этого можно искать "
+    "по фото (файл или буфер обмена) или подключить телефон по Wi-Fi (код и QR — в блоке «Телефон»)."
+)
 HISTORY_LIMIT = 10
 
 
@@ -101,6 +105,17 @@ class DesktopApp:
         self._busy = False
         self._cancel = False
 
+        self.onboarding_text = ft.Text(ONBOARDING_HINT, size=13)
+        self.onboarding_dismiss_button = ft.TextButton(
+            content=ft.Text("Понятно", size=12), on_click=self.on_dismiss_onboarding
+        )
+        self.onboarding_hint = ft.Container(
+            ft.Column([self.onboarding_text, self.onboarding_dismiss_button], spacing=2),
+            padding=10,
+            border_radius=6,
+            bgcolor=ft.Colors.BLUE_50,
+            visible=False,
+        )
         self.library_text = ft.Text("не выбрана", selectable=True)
         self.status_label = ft.Text("Индекс не построен")
         self.progress = ft.ProgressBar(value=0, visible=False)
@@ -151,6 +166,7 @@ class DesktopApp:
     def build(self) -> None:
         status = self.service.load()
         self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.onboarding_hint.visible = not self.service.settings.library_dir
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
@@ -167,6 +183,7 @@ class DesktopApp:
 
         left = ft.Column(
             [
+                self.onboarding_hint,
                 ft.Text("Библиотека", size=18, weight=ft.FontWeight.BOLD),
                 self.library_text,
                 self.choose_folder_button,
@@ -356,6 +373,10 @@ class DesktopApp:
         self._show_photo(record.photo)
         self._show_outcome(record.outcome)
 
+    def on_dismiss_onboarding(self, _event) -> None:
+        self.onboarding_hint.visible = False
+        self.page.update()
+
     # ---- индексация --------------------------------------------------------
     async def on_choose_folder(self, _event) -> None:
         folder = await self.picker.get_directory_path(dialog_title="Папка библиотеки гобо")
@@ -363,6 +384,7 @@ class DesktopApp:
             return
         self.service.set_library(folder)
         self.library_text.value = folder
+        self.onboarding_hint.visible = False
         self.status_label.value = status_text(self.service.status())
         self._start_index()
 
@@ -458,6 +480,7 @@ class DesktopApp:
         self.service.import_settings_json(text)
         status = self.service.load()
         self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.onboarding_hint.visible = not self.service.settings.library_dir
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates

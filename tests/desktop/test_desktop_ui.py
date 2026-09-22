@@ -159,6 +159,37 @@ def test_choosing_a_folder_builds_the_index_and_restores_the_controls(tmp_path, 
     assert not app.choose_folder_button.disabled and not app.pick_photo_button.disabled
 
 
+# ---- подсказка при первом запуске -----------------------------------------------------------------
+def test_the_onboarding_hint_shows_when_no_library_is_chosen_yet(tmp_path):
+    app, page = make_app(tmp_path)
+
+    assert app.onboarding_hint.visible
+    assert app.onboarding_hint in list(walk(page.added[0]))
+
+
+def test_the_onboarding_hint_is_hidden_once_a_library_is_already_saved(tmp_path, library):
+    first, _ = make_app(tmp_path)
+    first.service.set_library(str(library))
+
+    second, _ = make_app(tmp_path)  # тот же data_dir: настройки библиотеки уже сохранены на диске
+
+    assert not second.onboarding_hint.visible
+
+
+def test_choosing_a_folder_hides_the_onboarding_hint_even_without_a_page_restart(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+
+    assert not app.onboarding_hint.visible
+
+
+def test_dismissing_the_onboarding_hint_hides_it_without_choosing_a_folder(tmp_path):
+    app, _ = make_app(tmp_path)
+
+    app.on_dismiss_onboarding(None)
+
+    assert not app.onboarding_hint.visible
+
+
 def test_missing_folder_is_reported_in_the_banner(tmp_path):
     app, _ = make_app(tmp_path, picker=FakePicker(folder=str(tmp_path / "nope")))
 
