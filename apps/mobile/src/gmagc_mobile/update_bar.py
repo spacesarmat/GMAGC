@@ -71,6 +71,12 @@ class UpdateBar:
             await self.launcher.launch_url(self.notice.url)
         except Exception as error:  # noqa: BLE001
             self._status(f"Не удалось открыть ссылку на загрузку: {error}")
+            return
+        try:
+            # закрываем приложение: иначе после установки APK рядом с новой версией остаётся висеть старая
+            await self.page.window.close()
+        except Exception:  # noqa: BLE001 - закрытие не должно ронять экран, если недоступно на платформе
+            pass
 
     async def on_skip(self, _event) -> None:
         if self.notice is not None:

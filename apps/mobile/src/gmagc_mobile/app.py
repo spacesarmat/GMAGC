@@ -232,7 +232,6 @@ class MobileApp:
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
                 self.history_title,
                 self.history_column,
-                *self._support_links(),
             ],
             spacing=6,
             visible=False,

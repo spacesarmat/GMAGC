@@ -21,6 +21,16 @@ class FakeView:
         self.decisions.append(should_pop)
 
 
+class FakeWindow:
+    """Замена ft.Window: запоминает, что приложение попросили закрыться."""
+
+    def __init__(self):
+        self.closed = False
+
+    async def close(self):
+        self.closed = True
+
+
 class StubPage:
     """Минимальная замена ft.Page: запоминает добавленное, поток выполняет сразу."""
 
@@ -32,6 +42,7 @@ class StubPage:
         self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
         self.dialogs = []
         self.orientation_calls = []
+        self.window = FakeWindow()
 
     def add(self, *controls):
         self.added.extend(controls)

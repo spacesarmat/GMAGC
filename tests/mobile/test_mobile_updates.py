@@ -136,17 +136,28 @@ def test_download_opens_the_apk_link_and_skip_hides_the_bar():
     assert launcher.opened == ["https://example.invalid/GMAGC-android-0.9.0.apk"] and not bar.container.visible
 
 
+def test_a_successful_download_closes_the_app_so_the_old_version_does_not_linger_alongside_the_new_one():
+    """Иначе после ручной установки APK рядом остаётся висеть старый процесс — будто открыты две версии сразу."""
+    bar, _, page = make_bar()
+    run(bar.startup())
+
+    run(bar.on_download(None))
+
+    assert page.window.closed is True
+
+
 def test_a_failing_launcher_is_reported_not_raised():
     class Broken:
         async def launch_url(self, url, **kwargs):
             raise RuntimeError("нет браузера")
 
-    bar, _, _ = make_bar(launcher=Broken())
+    bar, _, page = make_bar(launcher=Broken())
     run(bar.startup())
 
     run(bar.on_download(None))
 
     assert "нет браузера" in bar.status.value
+    assert page.window.closed is False  # ссылка не открылась — закрывать приложение незачем
 
 
 # ---- встроено в экран ---------------------------------------------------------------------------------
