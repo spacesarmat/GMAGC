@@ -31,6 +31,10 @@ def make_app(tmp_path, **services):
     services.setdefault("server", FakeServer())  # настоящий сервер в тестах экрана не запускаем
     services.setdefault("updates", None)  # проверку обновлений в тестах отключаем
     services.setdefault("support", False)  # окно поддержки автора в тестах экрана не показываем
+    # настоящие ft.FilePicker()/ft.Clipboard() — сервисы Flet, обращающиеся к системе за пределами
+    # запущенного приложения; в тестах экрана не нужны и на macOS-раннере CI заметно подвисают
+    services.setdefault("picker", FakePicker())
+    services.setdefault("clipboard", FakeClipboard())
     page = StubPage()
     app = build_page(page, service=SearchService(tmp_path / "data"), **services)
     return app, page

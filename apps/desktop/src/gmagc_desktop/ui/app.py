@@ -57,6 +57,11 @@ def _score_badge(score: float) -> ft.Container:
     )
 
 
+def _section_card(controls: list[ft.Control]) -> ft.Card:
+    """Приподнятая карточка-секция левой колонки («Библиотека», «Телефон», «Вид»)."""
+    return ft.Card(ft.Container(ft.Column(controls, spacing=8), padding=12))
+
+
 def _theme(large_text: bool) -> ft.Theme:
     """Обычная тема или увеличенная (крупнее шрифт по умолчанию и просторнее элементы) — для тёмных залов.
 
@@ -201,9 +206,8 @@ class DesktopApp:
             self.server_switch.value = True
             self._start_server()
 
-        left = ft.Column(
+        library_card = _section_card(
             [
-                self.onboarding_hint,
                 ft.Text("Библиотека", size=18, weight=ft.FontWeight.BOLD),
                 self.library_text,
                 self.choose_folder_button,
@@ -212,7 +216,10 @@ class DesktopApp:
                 self.progress,
                 self.progress_label,
                 self.cancel_button,
-                ft.Divider(),
+            ]
+        )
+        phone_card = _section_card(
+            [
                 ft.Text("Телефон", size=18, weight=ft.FontWeight.BOLD),
                 self.server_switch,
                 self.server_status,
@@ -226,12 +233,18 @@ class DesktopApp:
                 self.history_title,
                 self.history_column,
                 *([self.update_bar.switch] if self.update_bar else []),
-                ft.Divider(),
+            ]
+        )
+        appearance_card = _section_card(
+            [
                 ft.Text("Вид", size=18, weight=ft.FontWeight.BOLD),
                 self.dark_theme_switch,
                 self.large_text_switch,
-            ],
-            spacing=8,
+            ]
+        )
+        left = ft.Column(
+            [self.onboarding_hint, library_card, phone_card, appearance_card],
+            spacing=12,
             width=320,
             scroll=ft.ScrollMode.AUTO,
         )
