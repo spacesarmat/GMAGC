@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 import tokenize
 import zipfile
@@ -162,6 +163,20 @@ def build_index(
     return LibraryIndex(
         embedder.model_id, files, embeddings, masks, group_duplicates(embeddings, masks), skipped, transient
     )
+
+
+def backup_index(path: str | Path) -> None:
+    """Копирует нынешний index.npz рядом как index.npz.previous, пока его не перезаписали новым.
+
+    Резерв необязателен: если файла ещё нет или копирование не удалось (диск занят и т. п.), просто
+    ничего не делает — это не должно мешать сохранению нового, исправного индекса."""
+    path = Path(path)
+    if not path.exists():
+        return
+    try:
+        shutil.copy2(path, path.with_name(path.name + ".previous"))
+    except OSError:
+        pass
 
 
 def save_index(index: LibraryIndex, path: str | Path) -> None:

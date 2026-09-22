@@ -1,3 +1,5 @@
+import shutil
+
 import cv2
 import numpy as np
 import pytest
@@ -40,7 +42,61 @@ def test_build_index_reports_status_and_progress(tmp_path, library):
     status = service.build_index(progress=lambda done, total: calls.append((done, total)))
 
     assert (status.files, status.families, status.skipped, status.transient) == (6, 5, 1, 0)
+    assert status.stale is False
     assert calls and calls[-1][0] == calls[-1][1]
+
+
+def test_a_freshly_built_index_is_not_stale(service):
+    assert service.index_is_stale() is False and service.status().stale is False
+
+
+def test_adding_a_file_to_the_library_makes_the_index_stale(service, library):
+    cv2.imwrite(str(library / "vendor_a" / "new_shape.png"), shape_images()["ell"])
+
+    assert service.index_is_stale() is True and service.status().stale is True
+
+
+def test_removing_a_library_file_makes_the_index_stale(service, library):
+    next((library / "vendor_a").glob("*.png")).unlink()
+
+    assert service.index_is_stale() is True
+
+
+def test_touching_a_library_file_without_changing_it_leaves_the_index_fresh(service, library):
+    """Пересборка индекса не запускается сама, только предупреждение: контроль по размеру и времени изменения."""
+    assert service.index_is_stale() is False
+
+
+def test_a_disconnected_library_folder_is_not_reported_as_stale(service, library):
+    """Папка временно недоступна (например, отключён диск), а не «всё удалили» — предупреждение не показываем."""
+    shutil.rmtree(library)
+
+    assert service.index_is_stale() is False
+
+
+def test_without_a_library_or_an_index_staleness_is_false(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    assert service.index_is_stale() is False and service.status() is None
+
+
+def test_load_falls_back_to_the_backup_when_the_main_index_file_is_missing(service, tmp_path):
+    service.build_index()  # второй раз: теперь есть index.npz.previous
+    (tmp_path / "data" / "index.npz").unlink()
+
+    status = service.load()
+
+    assert status is not None and status.files == 6
+
+
+def test_load_falls_back_to_the_backup_when_the_main_index_file_is_corrupt(service, tmp_path):
+    service.build_index()
+    (tmp_path / "data" / "index.npz").write_bytes(b"not a real npz file")
+
+    status = service.load()
+
+    assert status is not None and status.files == 6
 
 
 def test_search_returns_families_with_copies_thumbnails_and_projection(service, library):

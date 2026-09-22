@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import cv2
 import flet as ft
@@ -168,6 +169,49 @@ def test_core_check_button_shows_the_result(tmp_path):
     button.on_click(None)
 
     assert "ОК" in app.check_label.value and "numpy: 9.9" in app.check_label.value
+
+
+def test_the_footer_wraps_instead_of_hiding_the_rest_of_its_own_content(tmp_path):
+    # длинный текст (результат «Проверить ядро» или статус обновления) не должен сталкивать остальные
+    # элементы футера за край окна — строка должна переноситься
+    app, page = make_app(tmp_path)
+
+    footer = next(c for c in walk(page.added[0]) if isinstance(c, ft.Row) and app.check_label in c.controls)
+
+    assert footer.wrap is True
+
+
+def key(k, ctrl=False, shift=False, alt=False, meta=False):
+    return SimpleNamespace(key=k, ctrl=ctrl, shift=shift, alt=alt, meta=meta)
+
+
+def test_ctrl_v_pastes_a_photo_from_the_clipboard(tmp_path, library):
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app, _ = indexed_app(tmp_path, library, clipboard=FakeClipboard(image=photo.read_bytes()))
+
+    asyncio.run(app.on_key(key("V", ctrl=True)))
+
+    assert len(app.results_column.controls) == 5
+
+
+def test_f5_rebuilds_the_index(tmp_path, library):
+    app, _ = make_app(tmp_path, picker=FakePicker(folder=str(library)))
+    asyncio.run(app.on_choose_folder(None))
+    app.status_label.value = "устарело"
+
+    asyncio.run(app.on_key(key("F5")))
+
+    assert "6" in app.status_label.value  # индекс снова построен, файлы посчитаны
+
+
+def test_other_keys_and_v_without_ctrl_do_nothing(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, clipboard=FakeClipboard(image=b"\x89PNG-not-really"))
+
+    asyncio.run(app.on_key(key("V", ctrl=False)))
+    asyncio.run(app.on_key(key("A", ctrl=True)))
+    asyncio.run(app.on_key(key("Escape")))
+
+    assert app.results_column.controls == [] and not app.banner.visible
 
 
 def test_demo_variables_run_indexing_and_a_search_at_startup(tmp_path, library, monkeypatch):

@@ -178,7 +178,9 @@ class MobileApp:
         self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
         self.camera_message = ft.Text("", visible=False, selectable=True)
+        self.retry_button = ft.Button("Повторить", on_click=self.on_retry, visible=False)
         self.busy_ring = ft.ProgressRing(visible=False, width=24, height=24)
+        self._retry_data: bytes | None = None
         self.gesture = ft.GestureDetector(
             content=ft.Stack([self.preview, self.marker], expand=True),
             on_tap_down=self.on_preview_tap,
@@ -210,6 +212,7 @@ class MobileApp:
                 ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
                 self.focus_button,
                 self.camera_message,
+                self.retry_button,
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
                 *self._support_links(),
             ],
@@ -371,7 +374,14 @@ class MobileApp:
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
-        buttons = (self.capture_button, self.gallery_button, self.scan_now_button, self.connect_button, self.scan_button)
+        buttons = (
+            self.capture_button,
+            self.gallery_button,
+            self.scan_now_button,
+            self.connect_button,
+            self.scan_button,
+            self.retry_button,
+        )
         for button in buttons:
             button.disabled = busy
         if not busy and not self.camera.ready:
@@ -597,6 +607,7 @@ class MobileApp:
 
     async def _search(self, data: bytes) -> None:
         """Отправляет фото на ПК (вызывающий уже включил busy) и показывает результат или ошибку."""
+        self.retry_button.visible = False
         response: MatchResponse | None = None
         failure: ClientError | None = None
         message = ""
@@ -611,12 +622,25 @@ class MobileApp:
             if failure.kind == UNAUTHORIZED:
                 self._show_connect(error_text(failure))
             else:
-                self._camera_note(error_text(failure))
+                self._offer_retry(data, error_text(failure))
             return
         if response is None:
-            self._camera_note(message or "Ошибка поиска")
+            self._offer_retry(data, message or "Ошибка поиска")
             return
+        self._retry_data = None
         await self._show_results(data, response)
+
+    def _offer_retry(self, data: bytes, message: str) -> None:
+        """Запоминает неотправленное фото и предлагает отправить его ещё раз без повторной съёмки."""
+        self._retry_data = data
+        self.retry_button.visible = True
+        self._camera_note(message)
+
+    async def on_retry(self, _event) -> None:
+        if self._busy or self._retry_data is None:
+            return
+        self._set_busy(True)
+        await self._search(self._retry_data)
 
     async def _show_results(self, photo: bytes, response: MatchResponse) -> None:
         banner = outcome_message(response.outcome)

@@ -10,6 +10,7 @@ from gmagc_desktop.library.index import (
     IndexCancelled,
     LibraryNotFound,
     LibraryScanError,
+    backup_index,
     build_index,
     load_index,
     save_index,
@@ -75,6 +76,38 @@ def test_save_and_load_roundtrip(library, tmp_path):
     assert np.array_equal(loaded.masks, index.masks)
     assert np.array_equal(loaded.group_ids, index.group_ids)
     assert loaded.embeddings.dtype == np.float32
+
+
+def test_backup_copies_the_existing_file_next_to_itself(library, tmp_path):
+    target = tmp_path / "cache" / "index.npz"
+    backup = target.with_name("index.npz.previous")
+    save_index(build_index(library, CountingEmbedder()), target)
+
+    backup_index(target)
+
+    assert backup.exists() and backup.read_bytes() == target.read_bytes()
+
+
+def test_backup_does_nothing_when_there_is_no_existing_index(tmp_path):
+    target = tmp_path / "cache" / "index.npz"
+
+    backup_index(target)  # индекса ещё нет: резервировать нечего, не должно падать
+
+    assert not target.with_name("index.npz.previous").exists()
+
+
+def test_backup_failure_does_not_raise(library, tmp_path, monkeypatch):
+    target = tmp_path / "cache" / "index.npz"
+    save_index(build_index(library, CountingEmbedder()), target)
+
+    def broken_copy(*args, **kwargs):
+        raise OSError("диск занят")
+
+    import shutil
+
+    monkeypatch.setattr(shutil, "copy2", broken_copy)
+
+    backup_index(target)  # резерв необязателен: сбой резервного копирования не должен мешать
 
 
 def test_incremental_build_embeds_only_new_files(library, tmp_path):

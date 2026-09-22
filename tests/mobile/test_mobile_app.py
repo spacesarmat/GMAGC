@@ -373,6 +373,49 @@ def test_a_search_error_stays_on_the_camera_with_a_message():
     assert not app.capture_button.disabled and "Нет связи" in app.diag_text.value
 
 
+def test_a_search_error_offers_a_retry_that_resends_the_same_photo_without_reshooting():
+    script = Script()
+    script.match_result = ClientError(client.UNREACHABLE, "TimeoutError: timed out")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+    assert app.retry_button.visible is True and script.matches == [b"JPEG-shot"]
+
+    script.match_result = sample_response()  # ПК снова доступен
+    run(app.on_retry(None))
+
+    assert script.matches == [b"JPEG-shot", b"JPEG-shot"]  # тот же снимок, без повторной съёмки
+    assert views(app) == ["results"] and app.retry_button.visible is False
+
+
+def test_a_generic_search_exception_also_offers_retry():
+    script = Script()
+    script.match_result = RuntimeError("connection reset")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+
+    assert app.retry_button.visible is True and "Ошибка" in app.camera_message.value
+
+
+def test_retry_does_nothing_without_a_previous_failure():
+    app, _, script, _, _ = start(prefs=FakePrefs(STORED))
+
+    run(app.on_retry(None))
+
+    assert script.matches == []
+
+
+def test_an_unauthorized_error_does_not_offer_a_retry_on_the_camera():
+    script = Script()
+    script.match_result = ClientError(client.UNAUTHORIZED, "неверный код доступа")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+
+    assert views(app) == ["connect"] and app.retry_button.visible is False
+
+
 def test_a_changed_code_on_the_pc_sends_the_user_back_to_the_connect_screen():
     script = Script()
     script.match_result = ClientError(client.UNAUTHORIZED, "неверный код доступа")
