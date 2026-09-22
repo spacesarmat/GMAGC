@@ -163,6 +163,18 @@ def test_the_hint_overlays_the_screen_instead_of_shrinking_the_camera_view():
     assert app.camera_view in flow_column.controls
 
 
+def test_the_hidden_hint_overlay_does_not_sit_on_top_of_the_whole_screen():
+    """Регресс: оверлей был обёрнут в отдельный Container без visible=False, который сам оставался в дереве
+    expand=True поверх всего экрана и перехватывал касания по всем кнопкам, хотя подсказка не видна."""
+    app, _, _, _ = make(STORED)
+
+    stack = app.page.added[0].content  # SafeArea -> Stack
+    overlay = stack.controls[1]
+
+    assert overlay is app.back_hint  # сама подсказка — единственный слой поверх экрана, без обёртки
+    assert overlay.visible is False  # по умолчанию, до первого нажатия «Назад»
+
+
 def test_a_page_without_views_does_not_break_the_build():
     class Bare(StubPage):
         def __init__(self):
