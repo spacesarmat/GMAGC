@@ -32,6 +32,30 @@ PHONE_HINT = "Телефон и ПК должны быть в одной сет�
 HISTORY_LIMIT = 10
 
 
+def _theme(large_text: bool) -> ft.Theme:
+    """Обычная тема или увеличенная (крупнее шрифт по умолчанию и просторнее элементы) — для тёмных залов.
+
+    Затрагивает текст без явно заданного размера (многие подписи в этом приложении задают свой размер
+    напрямую и увеличенным текстом не становятся крупнее)."""
+    if not large_text:
+        return ft.Theme(use_material3=True)
+    return ft.Theme(
+        use_material3=True,
+        visual_density=ft.VisualDensity.COMFORTABLE,
+        text_theme=ft.TextTheme(
+            body_small=ft.TextStyle(size=14),
+            body_medium=ft.TextStyle(size=16),
+            body_large=ft.TextStyle(size=18),
+            label_small=ft.TextStyle(size=14),
+            label_medium=ft.TextStyle(size=16),
+            label_large=ft.TextStyle(size=18),
+            title_small=ft.TextStyle(size=16),
+            title_medium=ft.TextStyle(size=20),
+            title_large=ft.TextStyle(size=26),
+        ),
+    )
+
+
 class DesktopApp:
     def __init__(
         self,
@@ -92,6 +116,14 @@ class DesktopApp:
         self.results_column = ft.Column(spacing=8)
         self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
         self.check_label = ft.Text("")
+        self.export_settings_button = ft.TextButton(
+            content=ft.Text("Экспорт настроек", size=12), on_click=self.on_export_settings
+        )
+        self.import_settings_button = ft.TextButton(
+            content=ft.Text("Импорт настроек", size=12), on_click=self.on_import_settings
+        )
+        self.dark_theme_switch = ft.Switch(label="Тёмная тема", value=False, on_change=self.on_toggle_dark_theme)
+        self.large_text_switch = ft.Switch(label="Крупный текст", value=False, on_change=self.on_toggle_large_text)
 
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
         self.server_status = ft.Text("Выключен")
@@ -117,6 +149,9 @@ class DesktopApp:
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
+        self.dark_theme_switch.value = self.service.settings.dark_theme
+        self.large_text_switch.value = self.service.settings.large_text
+        self._apply_theme()
         self.page.services.extend([self.picker, self.clipboard])
         self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
@@ -146,6 +181,10 @@ class DesktopApp:
                 self.history_title,
                 self.history_column,
                 *([self.update_bar.switch] if self.update_bar else []),
+                ft.Divider(),
+                ft.Text("Вид", size=18, weight=ft.FontWeight.BOLD),
+                self.dark_theme_switch,
+                self.large_text_switch,
             ],
             spacing=8,
             width=320,
@@ -174,6 +213,8 @@ class DesktopApp:
                 ft.Text(f"{NAME} {VERSION} · Автор: {AUTHOR}", size=12),
                 ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
                 self.check_label,
+                self.export_settings_button,
+                self.import_settings_button,
                 *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
                 *([self.support.link, self.support.telegram_link, self.support.channel_link] if self.support else []),
             ],
@@ -358,12 +399,56 @@ class DesktopApp:
         if files and files[0].path:
             self._search_bytes_from(Path(files[0].path))
 
+    def _apply_theme(self) -> None:
+        theme = _theme(self.service.settings.large_text)
+        self.page.theme = theme
+        self.page.dark_theme = theme
+        self.page.theme_mode = ft.ThemeMode.DARK if self.service.settings.dark_theme else ft.ThemeMode.LIGHT
+        self.page.update()
+
+    def on_toggle_dark_theme(self, _event) -> None:
+        self.service.set_dark_theme(bool(self.dark_theme_switch.value))
+        self._apply_theme()
+
+    def on_toggle_large_text(self, _event) -> None:
+        self.service.set_large_text(bool(self.large_text_switch.value))
+        self._apply_theme()
+
     async def on_key(self, event) -> None:
         """Ctrl+V — вставить фото из буфера, F5 — обновить индекс: горячие клавиши для частой работы."""
         if event.ctrl and event.key == "V":
             await self.on_paste(None)
         elif event.key == "F5":
             await self.on_rebuild(None)
+
+    async def on_export_settings(self, _event) -> None:
+        data = self.service.export_settings_json().encode("utf-8")
+        path = await self.picker.save_file(
+            dialog_title="Экспорт настроек", file_name="gmagc-settings.json", allowed_extensions=["json"], src_bytes=data
+        )
+        if path:
+            self._show_banner(f"Настройки сохранены: {path}", error=False)
+
+    async def on_import_settings(self, _event) -> None:
+        files = await self.picker.pick_files(dialog_title="Импорт настроек", allowed_extensions=["json"])
+        if not files:
+            return
+        try:
+            raw = files[0].bytes if files[0].bytes else Path(files[0].path).read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            self._show_banner(f"Не удалось прочитать файл: {error}", error=True)
+            return
+        self.service.import_settings_json(text)
+        status = self.service.load()
+        self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.status_label.value = status_text(status)
+        if self.update_bar is not None:
+            self.update_bar.switch.value = self.service.settings.check_updates
+        self._show_banner(
+            "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.",
+            error=False,
+        )
 
     async def on_paste(self, _event) -> None:
         data = await self.clipboard.get_image()

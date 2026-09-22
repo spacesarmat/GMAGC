@@ -1,7 +1,17 @@
 from gmagc_common.protocol import Connection, Status
 from gmagc_mobile import client
 from gmagc_mobile.client import ClientError
-from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
+from gmagc_mobile.texts import (
+    NO_INDEX_NOTE,
+    error_text,
+    history_text,
+    outcome_message,
+    score_text,
+    share_text,
+    status_line,
+    zoom_text,
+)
+from tests.fakes_mobile import sample_response
 
 
 def test_each_error_kind_has_a_clear_text():
@@ -40,3 +50,14 @@ def test_status_line_shows_the_pc_and_the_library_size():
 
 def test_zoom_text():
     assert zoom_text(1) == "×1.0" and zoom_text(2.0) == "×2.0" and zoom_text(3.25) == "×3.2"
+
+
+def test_history_text_names_the_top_result_or_says_no_projection():
+    assert history_text(sample_response()) == "a.png 91.2%"
+    assert history_text(sample_response("no_projection", results=[])) == "проекция не найдена"
+
+
+def test_share_text_summarizes_the_top_result_or_says_no_projection():
+    text = share_text(sample_response())
+    assert "a.png (91.2%)" in text and "C:\\gobos\\vendor\\a.png" in text
+    assert share_text(sample_response("no_projection", results=[])) == "GMAGC: проекция на фото не найдена"

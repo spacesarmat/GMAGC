@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gmagc_common.protocol import OUTCOME_LOW_CONFIDENCE, OUTCOME_NO_PROJECTION, Connection, Status
+from gmagc_common.protocol import OUTCOME_LOW_CONFIDENCE, OUTCOME_NO_PROJECTION, Connection, MatchResponse, Status
 from gmagc_mobile import client
 from gmagc_mobile.client import ClientError
 
@@ -59,3 +59,17 @@ def status_line(connection: Connection, status: Status) -> str:
 
 def zoom_text(zoom: float) -> str:
     return f"×{zoom:.1f}"
+
+
+def history_text(response: MatchResponse) -> str:
+    if response.outcome == OUTCOME_NO_PROJECTION or not response.results:
+        return "проекция не найдена"
+    top = response.results[0]
+    return f"{top.name} {score_text(top.score)}"
+
+
+def share_text(response: MatchResponse) -> str:
+    if response.outcome == OUTCOME_NO_PROJECTION or not response.results:
+        return "GMAGC: проекция на фото не найдена"
+    top = response.results[0]
+    return f"GMAGC нашёл: {top.name} ({score_text(top.score)})\n{top.path}"

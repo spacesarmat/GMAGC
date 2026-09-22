@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import cv2
@@ -57,6 +58,46 @@ def test_initial_screen_shows_name_version_author_and_empty_state(tmp_path):
     assert NAME in shown and VERSION in shown and AUTHOR in shown
     assert "не выбрана" in shown and "Индекс не построен" in shown
     assert len(page.services) == 2
+
+
+def test_the_theme_starts_light_and_normal_sized(tmp_path):
+    app, page = make_app(tmp_path)
+
+    assert page.theme_mode == ft.ThemeMode.LIGHT
+    assert page.theme.text_theme is None and not app.dark_theme_switch.value and not app.large_text_switch.value
+
+
+def test_toggling_dark_theme_updates_the_page_and_persists(tmp_path):
+    app, page = make_app(tmp_path)
+    app.dark_theme_switch.value = True
+
+    app.on_toggle_dark_theme(None)
+
+    assert page.theme_mode == ft.ThemeMode.DARK
+    assert app.service.settings.dark_theme is True
+
+    other, _ = make_app(tmp_path)
+    assert other.dark_theme_switch.value is True and other.page.theme_mode == ft.ThemeMode.DARK
+
+
+def test_toggling_large_text_enlarges_the_default_theme_text():
+    from gmagc_desktop.ui.app import _theme
+
+    normal = _theme(False)
+    large = _theme(True)
+
+    assert normal.text_theme is None
+    assert large.text_theme.body_medium.size == 16 and large.text_theme.title_large.size == 26
+
+
+def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
+    app, page = make_app(tmp_path)
+    app.large_text_switch.value = True
+
+    app.on_toggle_large_text(None)
+
+    assert page.theme.text_theme is not None and page.dark_theme.text_theme is not None
+    assert app.service.settings.large_text is True
 
 
 def test_choosing_a_folder_builds_the_index_and_restores_the_controls(tmp_path, library):
@@ -212,6 +253,64 @@ def test_other_keys_and_v_without_ctrl_do_nothing(tmp_path, library):
     asyncio.run(app.on_key(key("Escape")))
 
     assert app.results_column.controls == [] and not app.banner.visible
+
+
+def test_export_settings_saves_json_via_the_picker(tmp_path, library):
+    save_path = str(tmp_path / "out" / "gmagc-settings.json")
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(save_path=save_path))
+
+    asyncio.run(app.on_export_settings(None))
+
+    assert app.picker.saved == [(save_path, app.service.export_settings_json().encode("utf-8"))]
+    assert app.banner.visible and save_path in app.banner_text.value
+
+
+def test_cancelling_the_export_dialog_shows_no_banner(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(save_path=None))
+
+    asyncio.run(app.on_export_settings(None))
+
+    assert app.picker.saved == [] and not app.banner.visible
+
+
+def test_import_settings_replaces_settings_and_refreshes_the_screen(tmp_path, library):
+    imported = tmp_path / "imported.json"
+    imported.write_text('{"top_n": 42, "library_dir": ""}', encoding="utf-8")
+    app, _ = make_app(tmp_path, picker=FakePicker(files=[str(imported)]))
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.service.settings.top_n == 42
+    assert app.library_text.value == "не выбрана" and app.status_label.value == "Индекс не построен"
+    assert app.banner.visible and "импортированы" in app.banner_text.value
+
+
+def test_importing_the_same_library_reloads_its_index_in_the_screen(tmp_path, library):
+    imported = tmp_path / "imported.json"
+    picker = FakePicker(folder=str(library), files=[str(imported)])
+    app, _ = indexed_app(tmp_path, library, picker=picker)
+    imported.write_text(json.dumps({"library_dir": str(library)}), encoding="utf-8")
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert "6" in app.status_label.value  # индекс той же библиотеки снова загружен, а не потерян
+
+
+def test_import_with_no_file_chosen_does_nothing(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(files=[]))
+    before = app.service.settings.top_n
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.service.settings.top_n == before and not app.banner.visible
+
+
+def test_import_of_an_unreadable_file_shows_an_error(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library, picker=FakePicker(files=[str(tmp_path / "missing.json")]))
+
+    asyncio.run(app.on_import_settings(None))
+
+    assert app.banner.visible and "Не удалось прочитать файл" in app.banner_text.value
 
 
 def test_demo_variables_run_indexing_and_a_search_at_startup(tmp_path, library, monkeypatch):

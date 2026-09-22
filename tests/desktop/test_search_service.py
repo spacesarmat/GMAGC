@@ -9,6 +9,7 @@ from gmagc_desktop.matcher.synthetic import simulate_photo
 from gmagc_desktop.service import search_service
 from gmagc_desktop.service.results import Outcome
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
+from gmagc_desktop.service.settings import Settings, settings_to_json
 from tests.fixtures import shape_images, write_library
 
 
@@ -31,6 +32,49 @@ def service(tmp_path, library):
 
 def ell_photo(seed=5):
     return simulate_photo(shape_images()["ell"], np.random.default_rng(seed))
+
+
+def test_the_service_persists_the_theme_and_text_size_choices(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    service.set_dark_theme(True)
+    service.set_large_text(True)
+
+    other = SearchService(tmp_path / "data")
+    other.load()
+    assert other.settings.dark_theme is True and other.settings.large_text is True
+
+
+def test_export_settings_json_matches_the_current_settings(service):
+    assert service.export_settings_json() == settings_to_json(service.settings)
+
+
+def test_import_settings_json_replaces_settings_and_persists_to_disk(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+    imported = settings_to_json(Settings(top_n=42, access_code="ZZZZ9999"))
+
+    result = service.import_settings_json(imported)
+
+    assert result.top_n == 42 and service.settings.top_n == 42
+    reloaded = SearchService(tmp_path / "data")
+    assert reloaded.load() is None and reloaded.settings.top_n == 42
+
+
+def test_importing_a_different_library_forgets_the_loaded_index_and_its_cache_file(service, tmp_path, library):
+    index_path = tmp_path / "data" / "index.npz"
+    assert service.status() is not None and index_path.exists()
+
+    service.import_settings_json(settings_to_json(Settings(library_dir=str(tmp_path / "other-lib"))))
+
+    assert service.status() is None and not index_path.exists()
+
+
+def test_importing_the_same_library_keeps_the_loaded_index(service, library):
+    service.import_settings_json(settings_to_json(Settings(library_dir=str(library), top_n=7)))
+
+    assert service.status() is not None and service.settings.top_n == 7
 
 
 def test_build_index_reports_status_and_progress(tmp_path, library):
