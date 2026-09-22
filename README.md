@@ -126,7 +126,7 @@ APK собирается только под **arm64-v8a** (`target_arch`, ок�
 ## Разработка
 
 ```powershell
-.venv\Scripts\python.exe -m pytest -q          # 718 тестов, только синтетические данные
+.venv\Scripts\python.exe -m pytest -q          # 719 тестов, только синтетические данные
 .venv\Scripts\python.exe -m ruff check .
 .venv\Scripts\python.exe scripts\benchmark.py --library D:\путь\к\gobos --samples 150
 .venv\Scripts\python.exe scripts\report_photos.py --library D:\путь\к\gobos --top 10   # HTML-отчёт для разметки фото
