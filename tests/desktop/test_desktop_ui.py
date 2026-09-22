@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -7,9 +8,11 @@ import flet as ft
 import numpy as np
 import pytest
 
+import gmagc_desktop.ui.app as app_module
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled
 from gmagc_desktop.matcher.synthetic import simulate_photo
+from gmagc_desktop.service import autostart
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_desktop.ui.app import build_page
 from tests.fakes import FakeClipboard, FakePicker, FakeServer, StubPage, texts, walk
@@ -98,6 +101,53 @@ def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
 
     assert page.theme.text_theme is not None and page.dark_theme.text_theme is not None
     assert app.service.settings.large_text is True
+
+
+def test_the_autostart_switch_reflects_the_current_state_when_supported(tmp_path, monkeypatch):
+    monkeypatch.setattr(autostart, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart, "is_autostart_enabled", lambda: True)
+
+    app, page = make_app(tmp_path)
+
+    assert app.autostart_switch.value is True
+    assert app.autostart_switch in list(walk(page.added[0]))
+
+
+def test_the_autostart_switch_is_hidden_when_unsupported(tmp_path, monkeypatch):
+    monkeypatch.setattr(autostart, "is_supported", lambda: False)
+
+    app, page = make_app(tmp_path)
+
+    assert app.autostart_switch not in list(walk(page.added[0]))
+
+
+def test_toggling_autostart_calls_set_autostart_with_the_current_exe(tmp_path, monkeypatch):
+    monkeypatch.setattr(autostart, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart, "is_autostart_enabled", lambda: False)
+    calls = []
+    monkeypatch.setattr(autostart, "set_autostart", lambda enabled, exe: calls.append((enabled, exe)))
+    monkeypatch.setattr(app_module, "current_executable", lambda: Path("C:/Apps/GMAGC/gmagc-desktop.exe"))
+    app, _ = make_app(tmp_path)
+
+    app.autostart_switch.value = True
+    app.on_toggle_autostart(None)
+
+    assert calls == [(True, Path("C:/Apps/GMAGC/gmagc-desktop.exe"))]
+
+
+def test_a_missing_executable_path_disables_the_switch_and_shows_a_banner(tmp_path, monkeypatch):
+    monkeypatch.setattr(autostart, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart, "is_autostart_enabled", lambda: False)
+    calls = []
+    monkeypatch.setattr(autostart, "set_autostart", lambda enabled, exe: calls.append((enabled, exe)))
+    monkeypatch.setattr(app_module, "current_executable", lambda: None)
+    app, _ = make_app(tmp_path)
+
+    app.autostart_switch.value = True
+    app.on_toggle_autostart(None)
+
+    assert calls == [] and app.autostart_switch.value is False
+    assert app.banner.visible and "Не удалось определить путь" in app.banner_text.value
 
 
 def test_choosing_a_folder_builds_the_index_and_restores_the_controls(tmp_path, library):

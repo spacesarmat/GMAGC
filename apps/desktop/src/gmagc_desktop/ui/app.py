@@ -17,6 +17,7 @@ from gmagc_desktop.server.api import RequestRecord
 from gmagc_desktop.server.network import lan_addresses
 from gmagc_desktop.server.qr import qr_png
 from gmagc_desktop.server.runner import PhoneServer, ServerStartError
+from gmagc_desktop.service import autostart
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
@@ -24,6 +25,7 @@ from gmagc_desktop.service.settings import data_dir
 from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
 from gmagc_desktop.ui.update_bar import UpdateBar
+from gmagc_desktop.update.installer import current_executable
 from gmagc_desktop.update.manager import UpdateManager
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
@@ -126,6 +128,9 @@ class DesktopApp:
         self.large_text_switch = ft.Switch(label="Крупный текст", value=False, on_change=self.on_toggle_large_text)
 
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
+        self.autostart_switch = ft.Switch(
+            label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
+        )
         self.server_status = ft.Text("Выключен")
         self.qr_holder = ft.Column(visible=False)
         self.code_text = ft.Text("", size=16, weight=ft.FontWeight.BOLD, selectable=True, visible=False)
@@ -152,6 +157,8 @@ class DesktopApp:
         self.dark_theme_switch.value = self.service.settings.dark_theme
         self.large_text_switch.value = self.service.settings.large_text
         self._apply_theme()
+        if autostart.is_supported():
+            self.autostart_switch.value = autostart.is_autostart_enabled()
         self.page.services.extend([self.picker, self.clipboard])
         self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
@@ -178,6 +185,7 @@ class DesktopApp:
                 self.phone_note,
                 self.addresses_text,
                 ft.Text(PHONE_HINT, size=12),
+                *([self.autostart_switch] if autostart.is_supported() else []),
                 self.history_title,
                 self.history_column,
                 *([self.update_bar.switch] if self.update_bar else []),
@@ -413,6 +421,14 @@ class DesktopApp:
     def on_toggle_large_text(self, _event) -> None:
         self.service.set_large_text(bool(self.large_text_switch.value))
         self._apply_theme()
+
+    def on_toggle_autostart(self, _event) -> None:
+        exe = current_executable()
+        if exe is None:
+            self.autostart_switch.value = False
+            self._show_banner("Не удалось определить путь к приложению", error=True)
+            return
+        autostart.set_autostart(bool(self.autostart_switch.value), exe)
 
     async def on_key(self, event) -> None:
         """Ctrl+V — вставить фото из буфера, F5 — обновить индекс: горячие клавиши для частой работы."""
