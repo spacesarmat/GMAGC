@@ -22,7 +22,7 @@ from gmagc_common.protocol import (
     parse_address,
     parse_link,
 )
-from gmagc_common.theme import SEED_COLOR, score_band
+from gmagc_common.theme import MOBILE_ACCENT_COLOR, SEED_COLOR, score_band
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
@@ -74,6 +74,37 @@ def _score_badge(score: float) -> ft.Container:
         border_radius=12,
         padding=ft.Padding.symmetric(horizontal=8, vertical=3),
     )
+
+
+def _nav_item(icon: str, label: str, on_click) -> ft.Container:
+    """Один пункт нижней навигации (иконка + подпись), как на референсе дизайна."""
+    return ft.Container(
+        ft.Column(
+            [ft.Icon(icon, size=22), ft.Text(label, size=11)],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=2,
+            tight=True,
+        ),
+        on_click=on_click,
+        padding=8,
+        expand=True,
+    )
+
+
+def _nav_row(items: list[ft.Control]) -> ft.Row:
+    """Нижняя навигация экрана: пункты через тонкий разделитель, поровну делят ширину."""
+    row: list[ft.Control] = []
+    for index, item in enumerate(items):
+        if index:
+            row.append(ft.VerticalDivider(width=1))
+        row.append(item)
+    return ft.Row(row, alignment=ft.MainAxisAlignment.SPACE_EVENLY)
+
+
+def _back_row(title: str, on_back) -> ft.Row:
+    """Заголовок вложенного экрана (Настройки/О программе/Помощь/Галерея) со стрелкой назад."""
+    back_button = ft.IconButton(icon=ft.Icons.ARROW_BACK, on_click=on_back)
+    return ft.Row([back_button, ft.Text(title, size=20, weight=ft.FontWeight.BOLD)])
 
 
 class MobileApp:
@@ -137,6 +168,7 @@ class MobileApp:
         )
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
+        self._return_view = "connect"  # куда вернуться со вложенного экрана (Настройки/О программе/Помощь/Галерея)
         self.mode = MODE_SHOOT
         self.status_text = ""
         self.last_error = ""
@@ -161,6 +193,7 @@ class MobileApp:
         self.connect_error = ft.Text("", color=ft.Colors.RED_700, visible=False, selectable=True)
         self.connect_view = ft.Column(
             [
+                ft.Image(src="logo.svg", width=88, height=88, fit=ft.BoxFit.CONTAIN),
                 ft.Text(NAME, size=28, weight=ft.FontWeight.BOLD),
                 ft.Text("Поиск гобо по фото проекции. Подключитесь к ПК с GMAGC в той же сети Wi-Fi."),
                 self.scan_button,
@@ -169,9 +202,16 @@ class MobileApp:
                 self.code_field,
                 ft.Row([self.connect_button, self.connect_busy], spacing=12),
                 self.connect_error,
-                *self._update_controls(),
-                *self._support_links(),
-                ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=12),
+                ft.Container(expand=True),
+                ft.Divider(),
+                _nav_row(
+                    [
+                        _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
+                        _nav_item(ft.Icons.HELP_OUTLINE, "Помощь", self.on_open_help),
+                        _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
+                    ]
+                ),
+                ft.Text(f"Версия {VERSION}", size=11, color=ft.Colors.GREY_600),
             ],
             spacing=12,
             scroll=ft.ScrollMode.AUTO,
@@ -180,7 +220,8 @@ class MobileApp:
         )
 
         # камера
-        self.camera_title = ft.Text("", size=14, expand=True)  # переносится на несколько строк, кнопка справа остаётся видна
+        self.camera_title = ft.Text("", size=14, expand=True)  # переносится на несколько строк, значок остаётся виден
+        self.connection_dot = ft.Icon(ft.Icons.CIRCLE, size=10, color=ft.Colors.GREEN_400)
         self.marker = ft.Container(
             width=MARKER_SIZE,
             height=MARKER_SIZE,
@@ -196,14 +237,16 @@ class MobileApp:
         self.zoom_in_button = ft.IconButton(icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in)
         self.focus_text = ft.Text("Фокус: авто")
         self.focus_button = ft.TextButton(content=self.focus_text, on_click=self.on_focus_lock)
-        self.capture_button = ft.FloatingActionButton(icon=ft.Icons.CAMERA_ALT, tooltip="Снять", on_click=self.on_capture)
-        self.gallery_button = ft.IconButton(
-            icon=ft.Icons.PHOTO_LIBRARY,
-            tooltip="Из галереи",
-            icon_color=ft.Colors.WHITE,
-            bgcolor=ft.Colors.with_opacity(0.45, ft.Colors.BLACK),
-            on_click=self.on_gallery,
+        self.capture_title = ft.Text("СФОТОГРАФИРОВАТЬ", size=13, weight=ft.FontWeight.BOLD)
+        self.capture_subtitle = ft.Text("Готово к съёмке", size=11, color=ft.Colors.GREY_500)
+        self.capture_button = ft.FloatingActionButton(
+            icon=ft.Icons.CAMERA_ALT,
+            tooltip="Снять",
+            bgcolor=ft.Colors.WHITE,
+            foreground_color=ft.Colors.BLACK,
+            on_click=self.on_capture,
         )
+        self.gallery_button = ft.IconButton(icon=ft.Icons.PHOTO_LIBRARY, tooltip="Выбрать фото", on_click=self.on_gallery)
         self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
         self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
@@ -213,7 +256,7 @@ class MobileApp:
         self._retry_data: bytes | None = None
         self.history: list[tuple[bytes, MatchResponse]] = []  # снимки этой сессии, самый новый первым
         self._current_response: MatchResponse | None = None  # для кнопки «Поделиться» на экране результатов
-        self.history_title = ft.Text("Прошлые снимки", size=14, weight=ft.FontWeight.BOLD, visible=False)
+        self.history_empty = ft.Text("Пока нет снимков в этой сессии", size=13, color=ft.Colors.GREY_500)
         self.history_column = ft.Column(spacing=0)
         self.gesture = ft.GestureDetector(
             content=ft.Stack([self.preview, self.marker], expand=True),
@@ -223,25 +266,32 @@ class MobileApp:
             expand=True,
         )
         self.gesture.on_size_change = self.on_preview_size  # реальный размер кадра, а не виджета камеры внутри него
-        # «Снять» и «Из галереи» — отдельный слой над self.gesture (не внутри него), чтобы нажатие на кнопку
-        # не попадало и в обработчик касания кадра (фокус по точке)
-        gallery_overlay = ft.Container(
-            self.gallery_button,
-            alignment=ft.Alignment.BOTTOM_RIGHT,
-            padding=ft.Padding.only(right=16, bottom=16),
-            expand=True,
-        )
-        capture_overlay = ft.Container(
-            self.capture_button, alignment=ft.Alignment.BOTTOM_CENTER, padding=ft.Padding.only(bottom=16), expand=True
-        )
-        self.camera_stage = ft.Stack([self.gesture, gallery_overlay, capture_overlay], expand=True)
+        # угловые скобки рамки-видоискателя (только оформление, по референсу дизайна)
+        corner_side = ft.BorderSide(3, MOBILE_ACCENT_COLOR)
+        no_side = ft.BorderSide(0, ft.Colors.TRANSPARENT)
+        corners = [
+            ft.Container(
+                width=28,
+                height=28,
+                border=ft.Border(
+                    top=corner_side if top else no_side,
+                    bottom=no_side if top else corner_side,
+                    left=corner_side if left else no_side,
+                    right=no_side if left else corner_side,
+                ),
+                top=12 if top else None,
+                bottom=12 if not top else None,
+                left=12 if left else None,
+                right=12 if not left else None,
+            )
+            for top in (True, False)
+            for left in (True, False)
+        ]
+        self.camera_stage = ft.Stack([self.gesture, *corners], expand=True)
         # отрицательное поле компенсирует отступ страницы, чтобы кадр камеры доходил до краёв экрана
         self.camera_preview_area = ft.Container(
             self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
         )
-        # фиксированная высота и своя прокрутка: иначе история снимков (растёт с каждым кадром за сессию)
-        # отжимает всё больше места у камеры в той же нескроллящейся колонке — после десятка снимков
-        # превью почти исчезало (отзыв пользователя). Камере теперь всегда достаётся одна и та же доля экрана.
         self.below_camera_controls = ft.Column(
             [
                 ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
@@ -249,22 +299,95 @@ class MobileApp:
                 self.camera_message,
                 self.retry_button,
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
-                self.history_title,
-                self.history_column,
             ],
             spacing=6,
-            height=180,
-            scroll=ft.ScrollMode.AUTO,
         )
         self.camera_view = ft.Column(
             [
-                ft.Row([self.camera_title, self.change_pc_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Row(
+                    [
+                        ft.Column([ft.Text(NAME, size=18, weight=ft.FontWeight.BOLD), self.camera_title], spacing=0),
+                        self.connection_dot,
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
                 self.camera_preview_area,
+                ft.Row(
+                    [
+                        self.gallery_button,
+                        ft.Column(
+                            [self.capture_button, self.capture_title, self.capture_subtitle],
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            spacing=2,
+                            expand=True,
+                        ),
+                        ft.Container(width=48),  # уравновешивает gallery_button, кнопка съёмки остаётся по центру
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
                 self.below_camera_controls,
+                ft.Divider(),
+                _nav_row(
+                    [
+                        _nav_item(ft.Icons.PHOTO_LIBRARY, "Галерея", self.on_open_gallery),
+                        _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
+                        _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
+                    ]
+                ),
             ],
             spacing=6,
             visible=False,
             expand=True,
+        )
+
+        # вложенные экраны (Галерея / Настройки / О программе / Помощь) — открываются с экранов
+        # подключения и камеры через нижнюю навигацию, «назад» возвращает туда, откуда открыли
+        self.gallery_view = ft.Column(
+            [_back_row("Галерея", self.on_close_overlay), self.history_empty, self.history_column],
+            spacing=8,
+            visible=False,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        self.settings_view = ft.Column(
+            [
+                _back_row("Настройки", self.on_close_overlay),
+                self.change_pc_button,
+                ft.Divider(),
+                *self._update_controls(),
+            ],
+            spacing=8,
+            visible=False,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        self.about_view = ft.Column(
+            [
+                _back_row("О программе", self.on_close_overlay),
+                ft.Text(NAME, size=22, weight=ft.FontWeight.BOLD),
+                ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=13),
+                *self._support_links(),
+            ],
+            spacing=8,
+            visible=False,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        self.help_view = ft.Column(
+            [
+                _back_row("Помощь", self.on_close_overlay),
+                ft.Text(
+                    "Подключитесь к ПК с запущенным GMAGC в той же сети Wi-Fi: наведите камеру на QR-код в его "
+                    "окне (подключение произойдёт само) или введите адрес и код вручную. Дальше наводите камеру "
+                    "на проекцию и снимайте — совпадения из библиотеки на ПК придут в ответ.",
+                    size=13,
+                ),
+            ],
+            spacing=8,
+            visible=False,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
         )
 
         # результаты
@@ -288,7 +411,6 @@ class MobileApp:
                 ft.Text("Результаты (нажмите на карточку, чтобы скопировать путь)", size=14, weight=ft.FontWeight.BOLD),
                 self.copy_note,
                 self.results_column,
-                *self._support_links(),
             ],
             spacing=8,
             scroll=ft.ScrollMode.AUTO,
@@ -311,9 +433,10 @@ class MobileApp:
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
         self.page.padding = PAGE_PADDING
-        self.page.theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
-        self.page.dark_theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
-        self.page.theme_mode = ft.ThemeMode.SYSTEM  # тёмная/светлая — как в системе телефона
+        theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
+        self.page.theme = theme
+        self.page.dark_theme = theme
+        self.page.theme_mode = ft.ThemeMode.DARK  # всегда тёмная — по одобренному референсу дизайна
         views = getattr(self.page, "views", None)
         if views:  # системная кнопка «Назад» идёт в on_confirm_pop, а не закрывает приложение
             views[0].can_pop = False
@@ -328,6 +451,10 @@ class MobileApp:
                                 self.connect_view,
                                 self.camera_view,
                                 self.results_view,
+                                self.gallery_view,
+                                self.settings_view,
+                                self.about_view,
+                                self.help_view,
                                 self.diag_text,
                             ],
                             expand=True,
@@ -396,13 +523,34 @@ class MobileApp:
             await self._search(Path(photo).read_bytes())
 
     # ---- вид -----------------------------------------------------------------
+    _VIEW_NAMES = ("connect", "camera", "results", "gallery", "settings", "about", "help")
+
     def _show(self, name: str) -> None:
         if self.camera_view.visible and name != "camera":
             self.camera.invalidate()  # Flet убирает скрытый виджет камеры вместе с контроллером: при возврате запуск заново
-        self.connect_view.visible = name == "connect"
-        self.camera_view.visible = name == "camera"
-        self.results_view.visible = name == "results"
+        for view_name in self._VIEW_NAMES:
+            getattr(self, f"{view_name}_view").visible = view_name == name
         self.page.update()
+
+    def _open_overlay(self, name: str) -> None:
+        """Открывает Галерею/Настройки/О программе/Помощь; «назад» вернёт туда, откуда открыли."""
+        self._return_view = "camera" if self.camera_view.visible else "connect"
+        self._show(name)
+
+    def on_close_overlay(self, _event) -> None:
+        self._show(self._return_view)
+
+    def on_open_gallery(self, _event) -> None:
+        self._open_overlay("gallery")
+
+    def on_open_settings(self, _event) -> None:
+        self._open_overlay("settings")
+
+    def on_open_about(self, _event) -> None:
+        self._open_overlay("about")
+
+    def on_open_help(self, _event) -> None:
+        self._open_overlay("help")
 
     def _remember(self, text: str) -> None:
         self.last_error = text
@@ -427,7 +575,6 @@ class MobileApp:
         self.capture_button.visible = self.gallery_button.visible = not scanning
         self.scan_now_button.visible = False  # включится в _start_auto_scan, если автопоток недоступен на телефоне
         self.cancel_scan_button.visible = scanning
-        self.change_pc_button.visible = not scanning
         self.camera_message.value = note or ""
         self.camera_message.visible = bool(note)
         self._show("camera")
@@ -596,8 +743,13 @@ class MobileApp:
         if self.results_view.visible:
             await self.on_again(None)
             return False
-        if self.camera_view.visible and self.mode == MODE_SCAN:
-            await self.camera.stop_scanning()
+        if any(getattr(self, f"{name}_view").visible for name in ("gallery", "settings", "about", "help")):
+            self._show(self._return_view)
+            return False
+        if self.camera_view.visible:
+            # с камеры «Назад» всегда сразу на стартовый экран — без второго нажатия для выхода
+            if self.mode == MODE_SCAN:
+                await self.camera.stop_scanning()
             self._show_connect()
             return False
         now = self._clock()
@@ -701,7 +853,7 @@ class MobileApp:
         """Добавляет успешный поиск в историю этой сессии (самый новый первым, не больше HISTORY_LIMIT)."""
         self.history.insert(0, (photo, response))
         del self.history[HISTORY_LIMIT:]
-        self.history_title.visible = bool(self.history)
+        self.history_empty.visible = not self.history
         self.history_column.controls = [
             ft.TextButton(
                 content=ft.Text(history_text(item), size=12), data=(entry_photo, item), on_click=self.on_history_click

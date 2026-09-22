@@ -43,9 +43,14 @@ class StubPage:
         self.dialogs = []
         self.orientation_calls = []
         self.window = FakeWindow()
+        self.clean_calls = 0
 
     def add(self, *controls):
         self.added.extend(controls)
+
+    def clean(self):
+        self.added = []
+        self.clean_calls += 1
 
     async def set_allowed_device_orientations(self, orientations):
         self.orientation_calls.append(list(orientations))
@@ -166,7 +171,7 @@ class FakeUpdates:
 
 def walk(control):
     yield control
-    for attribute in ("content", "controls"):
+    for attribute in ("content", "controls", "actions", "items", "leading", "title"):
         value = getattr(control, attribute, None)
         for child in value if isinstance(value, list) else [value] if value is not None else []:
             if isinstance(child, ft.Control):

@@ -79,16 +79,15 @@ def test_back_while_scanning_returns_to_the_connect_screen():
     assert views_shown(app) == ["connect"] and view.decisions == [False]
 
 
-def test_the_camera_screen_needs_a_second_back_press_to_exit():
-    app, view, clock, _ = make(STORED)
+def test_the_camera_screen_returns_to_connect_on_a_single_back_press():
+    """Раньше с камеры нужно было нажать «Назад» дважды, как и с экрана подключения. Теперь — сразу
+    на стартовый экран одним нажатием, без подтверждения выхода (решение по новому дизайну)."""
+    app, view, _, _ = make(STORED)
     app.back_seconds = 2.5
 
     press_back(app, view)
-    assert view.decisions == [False] and views_shown(app) == ["camera"]
-    clock.now += 1.0
-    press_back(app, view)
 
-    assert view.decisions == [False, True]
+    assert view.decisions == [False] and views_shown(app) == ["connect"]
 
 
 def test_a_late_second_back_press_only_shows_the_hint_again():
@@ -103,7 +102,9 @@ def test_a_late_second_back_press_only_shows_the_hint_again():
 
 
 def test_the_first_back_press_shows_the_hint_and_it_disappears_afterwards():
-    app, view, _, _ = make(STORED)
+    """Подсказка «Назад ещё раз» — только на экране подключения теперь: с камеры «Назад» уходит сразу
+    на старт, без подтверждения (см. test_the_camera_screen_returns_to_connect_on_a_single_back_press)."""
+    app, view, _, _ = make()
     seen = []
     original = view.confirm_pop
 
@@ -137,18 +138,6 @@ def test_back_while_busy_never_exits_and_does_not_navigate():
     press_back(app, view)
 
     assert view.decisions == [False, False] and views_shown(app) == ["camera"]
-
-
-def test_the_exit_hint_is_hidden_when_going_back_a_screen():
-    app, _, _, _ = make(STORED)
-    app.back_seconds = 2.5
-
-    assert asyncio.run(app._handle_back()) is False  # noqa: SLF001 - первое нажатие показывает подсказку
-    assert app.back_hint.visible
-    asyncio.run(app.on_capture(None))
-    assert asyncio.run(app._handle_back()) is False  # noqa: SLF001 - возврат с результатов
-
-    assert views_shown(app) == ["camera"] and not app.back_hint.visible
 
 
 def test_the_hint_overlays_the_screen_instead_of_shrinking_the_camera_view():

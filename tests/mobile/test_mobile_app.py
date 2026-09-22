@@ -72,7 +72,8 @@ def connect_manually(app, address="192.168.1.121:8765", code="zbz3-6ynk"):
 
 
 def views(app):
-    return [name for name in ("connect", "camera", "results") if getattr(app, f"{name}_view").visible]
+    names = ("connect", "camera", "results", "gallery", "settings", "about", "help")
+    return [name for name in names if getattr(app, f"{name}_view").visible]
 
 
 def shoot(app):
@@ -87,14 +88,55 @@ def test_the_first_start_shows_the_connect_screen_and_leaves_the_camera_off():
     assert NAME in shown and VERSION in shown and AUTHOR in shown
 
 
-def test_the_theme_uses_the_shared_brand_seed_and_follows_the_phone_system_theme():
+def test_opening_settings_about_and_help_from_the_connect_screen_returns_there():
+    app, _, _, _, _ = start()
+    assert views(app) == ["connect"]
+
+    for open_handler, name in (
+        (app.on_open_settings, "settings"),
+        (app.on_open_about, "about"),
+        (app.on_open_help, "help"),
+    ):
+        open_handler(None)
+        assert views(app) == [name]
+        app.on_close_overlay(None)
+        assert views(app) == ["connect"]
+
+
+def test_opening_gallery_and_settings_from_the_camera_screen_returns_there():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED))
+    assert views(app) == ["camera"]
+
+    app.on_open_gallery(None)
+    assert views(app) == ["gallery"]
+    app.on_close_overlay(None)
+    assert views(app) == ["camera"]
+
+    app.on_open_settings(None)
+    assert views(app) == ["settings"]
+    app.on_close_overlay(None)
+    assert views(app) == ["camera"]
+
+
+def test_the_gallery_screen_shows_an_empty_hint_until_a_photo_is_taken():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED))
+
+    assert app.history_empty.visible is True
+    shoot(app)
+    run(app.on_again(None))
+
+    assert app.history_empty.visible is False
+
+
+def test_the_theme_uses_the_shared_brand_seed_and_is_always_dark():
+    """Всегда тёмная, независимо от системной темы телефона — по одобренному референсу дизайна."""
     from gmagc_common.theme import SEED_COLOR
 
     _, page, _, _, _ = make_app()
 
     assert page.theme.color_scheme_seed == SEED_COLOR
     assert page.dark_theme.color_scheme_seed == SEED_COLOR
-    assert page.theme_mode == ft.ThemeMode.SYSTEM
+    assert page.theme_mode == ft.ThemeMode.DARK
 
 
 def test_the_score_badge_colour_follows_the_match_confidence():
@@ -562,7 +604,7 @@ def test_a_successful_search_is_added_to_the_history_and_can_be_revisited():
     app, _, _, _, _ = start(prefs=FakePrefs(STORED))
 
     shoot(app)
-    assert app.history_title.visible is True and len(app.history_column.controls) == 1
+    assert app.history_empty.visible is False and len(app.history_column.controls) == 1
     assert any("a.png" in t and "91.2%" in t for t in texts(app.history_column.controls[0]))
 
     run(app.on_again(None))
@@ -736,13 +778,16 @@ def test_the_camera_preview_spans_the_full_width_beyond_the_page_padding():
     assert margin.top == 0 and margin.bottom == 0
 
 
-def test_the_shutter_and_gallery_buttons_float_over_the_preview_outside_the_tap_focus_area():
+def test_the_shutter_and_gallery_buttons_sit_below_the_preview_outside_the_tap_focus_area():
     app, _, _, _, _ = start()
 
-    # предпросмотр и метка фокуса остаются под обработчиком касания как раньше, кнопки в него не входят
+    # предпросмотр и метка фокуса остаются под обработчиком касания, кнопки съёмки в него не входят —
+    # чтобы нажатие на кнопку не попадало и в обработчик касания кадра (фокус по точке)
     assert app.gesture.content.controls == [app.preview, app.marker]
-    overlay_content = [control.content for control in app.camera_stage.controls if isinstance(control, ft.Container)]
-    assert app.capture_button in overlay_content and app.gallery_button in overlay_content
+    below_preview = [c for c in app.camera_view.controls if c is not app.camera_preview_area]
+    assert not any(app.capture_button in getattr(c, "controls", []) for c in [app.gesture, *app.camera_stage.controls])
+    assert any(app.capture_button in list(walk(row)) for row in below_preview)
+    assert any(app.gallery_button in list(walk(row)) for row in below_preview)
     assert isinstance(app.capture_button, ft.FloatingActionButton)
 
 

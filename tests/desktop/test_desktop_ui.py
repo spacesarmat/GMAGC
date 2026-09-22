@@ -60,34 +60,70 @@ def indexed_app(tmp_path, library, **services):
     return app, page
 
 
+def shown_texts(page):
+    """Тексты и в содержимом страницы, и в верхнем меню (AppBar живёт в page.views[0], не в page.added)."""
+    appbar = page.views[0].appbar
+    return texts(page.added[0]) + (texts(appbar) if appbar else [])
+
+
 def test_initial_screen_shows_name_version_author_and_empty_state(tmp_path):
     app, page = make_app(tmp_path)
 
-    shown = " ".join(t for t in texts(page.added[0]) if t)
-    assert page.title == f"{NAME} {VERSION}"
-    assert NAME in shown and VERSION in shown and AUTHOR in shown
+    shown = " ".join(t for t in shown_texts(page) if t)
+    assert page.title == f"{NAME} {VERSION} — {AUTHOR}"
+    assert NAME in shown and AUTHOR in shown
     assert "не выбрана" in shown and "Индекс не построен" in shown
     assert len(page.services) == 2
+
+
+def test_the_splash_is_shown_first_and_then_replaced_by_the_real_screen(tmp_path):
+    """Иначе окно остаётся пустым, пока грузятся настройки/индекс — сплэш с логотипом закрывает это время."""
+    app, page = make_app(tmp_path)
+
+    assert page.clean_calls == 1  # сплэш показали и убрали ровно раз, освободив место реальному экрану
+    assert app.splash not in page.added
+    assert app.splash.visible is not False  # сам сплэш не «выключен» — просто больше не на странице
+
+
+def test_the_appbar_has_the_logo_author_in_the_title_and_a_settings_menu(tmp_path):
+    app, page = make_app(tmp_path)
+    appbar = page.views[0].appbar
+
+    assert appbar is not None
+    assert appbar.leading.src == "logo.svg"
+    assert appbar.title.value == f"{NAME} — {AUTHOR}"
+    assert app.menu_button in appbar.actions
+    assert app.dark_theme_item in app.menu_button.items and app.large_text_item in app.menu_button.items
+
+
+def test_the_left_column_holds_only_the_phone_section_library_is_in_the_main_area(tmp_path):
+    app, page = make_app(tmp_path)
+    root_row = next(c for c in walk(page.added[0]) if isinstance(c, ft.Row) and c.vertical_alignment is not None)
+    left, right = root_row.controls[0], root_row.controls[2]
+
+    assert "Телефон" in texts(left) and "Библиотека" not in texts(left)
+    assert "Библиотека" in texts(right) and "Телефон" not in texts(right)
+    assert app.onboarding_hint in list(walk(right))
 
 
 def test_the_theme_starts_light_and_normal_sized(tmp_path):
     app, page = make_app(tmp_path)
 
     assert page.theme_mode == ft.ThemeMode.LIGHT
-    assert page.theme.text_theme is None and not app.dark_theme_switch.value and not app.large_text_switch.value
+    assert page.theme.text_theme is None and not app.dark_theme_item.checked and not app.large_text_item.checked
 
 
 def test_toggling_dark_theme_updates_the_page_and_persists(tmp_path):
     app, page = make_app(tmp_path)
-    app.dark_theme_switch.value = True
 
     app.on_toggle_dark_theme(None)
 
     assert page.theme_mode == ft.ThemeMode.DARK
     assert app.service.settings.dark_theme is True
+    assert app.dark_theme_item.checked is True
 
     other, _ = make_app(tmp_path)
-    assert other.dark_theme_switch.value is True and other.page.theme_mode == ft.ThemeMode.DARK
+    assert other.dark_theme_item.checked is True and other.page.theme_mode == ft.ThemeMode.DARK
 
 
 def test_toggling_large_text_enlarges_the_default_theme_text():
@@ -110,30 +146,30 @@ def test_both_theme_variants_use_the_shared_brand_seed_color():
 
 def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
     app, page = make_app(tmp_path)
-    app.large_text_switch.value = True
 
     app.on_toggle_large_text(None)
 
     assert page.theme.text_theme is not None and page.dark_theme.text_theme is not None
     assert app.service.settings.large_text is True
+    assert app.large_text_item.checked is True
 
 
-def test_the_autostart_switch_reflects_the_current_state_when_supported(tmp_path, monkeypatch):
+def test_the_autostart_item_reflects_the_current_state_when_supported(tmp_path, monkeypatch):
     monkeypatch.setattr(autostart, "is_supported", lambda: True)
     monkeypatch.setattr(autostart, "is_autostart_enabled", lambda: True)
 
     app, page = make_app(tmp_path)
 
-    assert app.autostart_switch.value is True
-    assert app.autostart_switch in list(walk(page.added[0]))
+    assert app.autostart_item.checked is True
+    assert app.autostart_item in list(walk(page.views[0].appbar))
 
 
-def test_the_autostart_switch_is_hidden_when_unsupported(tmp_path, monkeypatch):
+def test_the_autostart_item_is_hidden_when_unsupported(tmp_path, monkeypatch):
     monkeypatch.setattr(autostart, "is_supported", lambda: False)
 
     app, page = make_app(tmp_path)
 
-    assert app.autostart_switch not in list(walk(page.added[0]))
+    assert app.autostart_item not in list(walk(page.views[0].appbar))
 
 
 def test_toggling_autostart_calls_set_autostart_with_the_current_exe(tmp_path, monkeypatch):
@@ -144,13 +180,13 @@ def test_toggling_autostart_calls_set_autostart_with_the_current_exe(tmp_path, m
     monkeypatch.setattr(app_module, "current_executable", lambda: Path("C:/Apps/GMAGC/gmagc-desktop.exe"))
     app, _ = make_app(tmp_path)
 
-    app.autostart_switch.value = True
     app.on_toggle_autostart(None)
 
     assert calls == [(True, Path("C:/Apps/GMAGC/gmagc-desktop.exe"))]
+    assert app.autostart_item.checked is True
 
 
-def test_a_missing_executable_path_disables_the_switch_and_shows_a_banner(tmp_path, monkeypatch):
+def test_a_missing_executable_path_disables_the_item_and_shows_a_banner(tmp_path, monkeypatch):
     monkeypatch.setattr(autostart, "is_supported", lambda: True)
     monkeypatch.setattr(autostart, "is_autostart_enabled", lambda: False)
     calls = []
@@ -158,10 +194,9 @@ def test_a_missing_executable_path_disables_the_switch_and_shows_a_banner(tmp_pa
     monkeypatch.setattr(app_module, "current_executable", lambda: None)
     app, _ = make_app(tmp_path)
 
-    app.autostart_switch.value = True
     app.on_toggle_autostart(None)
 
-    assert calls == [] and app.autostart_switch.value is False
+    assert calls == [] and app.autostart_item.checked is False
     assert app.banner.visible and "Не удалось определить путь" in app.banner_text.value
 
 
@@ -224,6 +259,41 @@ def test_rebuild_without_a_library_and_photo_without_an_index_ask_for_a_folder(t
 
     asyncio.run(app.on_pick_photo(None))
     assert "Сначала выберите папку" in app.banner_text.value
+
+
+def _report_wrong_button(app):
+    return next(
+        c for c in walk(app.results_column) if isinstance(c, ft.IconButton) and c.tooltip and "не то" in c.tooltip
+    )
+
+
+def test_reporting_a_wrong_result_learns_and_immediately_refreshes_results(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    assert app.results_column.controls[0].content.data.endswith("ell.png")
+
+    button = _report_wrong_button(app)
+    app.picker.files = [str(library / "vendor_c" / "gobo.png")]
+
+    asyncio.run(app.on_report_wrong(SimpleNamespace(control=button)))
+
+    assert "Запомнено" in app.banner_text.value
+    assert app.results_column.controls[0].content.data.endswith("gobo.png")
+
+
+def test_reporting_a_wrong_result_shows_an_error_for_a_file_outside_the_library(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    button = _report_wrong_button(app)
+    app.picker.files = [str(tmp_path / "outside.png")]
+
+    asyncio.run(app.on_report_wrong(SimpleNamespace(control=button)))
+
+    assert app.banner.visible and "не в папке библиотеки" in app.banner_text.value
 
 
 def test_indexing_errors_and_cancel_are_shown_not_raised(tmp_path, library, monkeypatch):
@@ -314,23 +384,45 @@ def test_paste_prefers_an_image_then_a_copied_file_then_reports_an_empty_clipboa
     assert "В буфере обмена" in app.banner_text.value and app.results_column.controls == []
 
 
-def test_core_check_button_shows_the_result(tmp_path):
+def test_core_check_menu_item_shows_the_result(tmp_path):
     app, page = make_app(tmp_path, check=lambda: {"ok": True, "shape": (224, 224), "versions": {"numpy": "9.9"}})
+    assert app.check_label in list(walk(page.views[0].appbar))  # доступно из верхнего меню
 
-    button = next(c for c in walk(page.added[0]) if isinstance(c, ft.TextButton) and c.content.value == "Проверить ядро")
-    button.on_click(None)
+    app.on_check(None)
 
     assert "ОК" in app.check_label.value and "numpy: 9.9" in app.check_label.value
 
 
-def test_the_footer_wraps_instead_of_hiding_the_rest_of_its_own_content(tmp_path):
-    # длинный текст (результат «Проверить ядро» или статус обновления) не должен сталкивать остальные
-    # элементы футера за край окна — строка должна переноситься
-    app, page = make_app(tmp_path)
+def test_the_log_file_lives_next_to_the_search_service_data_not_the_real_user_profile(tmp_path):
+    app, _ = make_app(tmp_path)
 
-    footer = next(c for c in walk(page.added[0]) if isinstance(c, ft.Row) and app.check_label in c.controls)
+    assert app._log_path == app.service.data_dir / "gmagc.log"
+    assert app._log_path.parent == tmp_path / "data"
 
-    assert footer.wrap is True
+
+def test_send_log_opens_mail_with_diagnostics_and_reveals_the_log_file(tmp_path, library):
+    opened = []
+    revealed = []
+    app, _ = indexed_app(tmp_path, library, open_url=opened.append, reveal=revealed.append)
+    app._show_banner("что-то пошло не так", error=True)  # попадает в лог-файл
+
+    app.on_send_log(None)
+
+    assert len(opened) == 1
+    assert opened[0].startswith(f"mailto:{app_module.SUPPORT_EMAIL}?")
+    assert "subject=GMAGC" in opened[0]
+    assert revealed == [str(app._log_path)]
+    assert "что-то пошло не так" in app._log_path.read_text(encoding="utf-8")
+
+
+def test_send_log_shows_a_message_when_the_log_has_no_errors_yet(tmp_path):
+    opened = []
+    app, _ = make_app(tmp_path, open_url=opened.append)
+
+    app.on_send_log(None)
+
+    assert opened  # письмо всё равно открывается — лог просто не прикладываем
+    assert "пока пуст" in app.banner_text.value
 
 
 def key(k, ctrl=False, shift=False, alt=False, meta=False):

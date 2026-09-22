@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import platform
+import urllib.parse
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
@@ -19,15 +22,19 @@ from gmagc_desktop.server.network import lan_addresses
 from gmagc_desktop.server.qr import qr_png
 from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service import autostart
+from gmagc_desktop.service.logging_setup import setup_logging
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
-from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
+from gmagc_desktop.service.search_service import CorrectionError, NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import data_dir
 from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
 from gmagc_desktop.ui.update_bar import UpdateBar
 from gmagc_desktop.update.installer import current_executable
 from gmagc_desktop.update.manager import UpdateManager
+
+logger = logging.getLogger("gmagc.desktop")
+SUPPORT_EMAIL = "yodayodaspace@gmail.com"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
@@ -105,12 +112,15 @@ class DesktopApp:
         update_delay: float = 5.0,
         support: bool = True,
         support_delay: float = 8.0,
+        log_path: Path | None = None,
     ):
         self.page = page
         self.service = service
         self.picker = picker or ft.FilePicker()
         self.clipboard = clipboard or ft.Clipboard()
         self.reveal = reveal
+        self._open_url = open_url
+        self._log_path = log_path or (service.data_dir / "gmagc.log")
         self.check = check
         self.server = server or PhoneServer(service)
         self.server.on_request = self.on_phone_request
@@ -129,7 +139,14 @@ class DesktopApp:
         self.history: list[RequestRecord] = []
         self._busy = False
         self._cancel = False
+        self._last_query_photo: bytes | None = None  # для повтора поиска сразу после «Это не то»
 
+        self.splash = ft.Container(
+            ft.Image(src="logo.svg", width=140, height=140, fit=ft.BoxFit.CONTAIN),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+            bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.BLACK),
+        )
         self.onboarding_text = ft.Text(ONBOARDING_HINT, size=13)
         self.onboarding_dismiss_button = ft.TextButton(
             content=ft.Text("Понятно", size=12), on_click=self.on_dismiss_onboarding
@@ -157,20 +174,19 @@ class DesktopApp:
         self.projection_holder = ft.Column(visible=False, spacing=4)
         self.results_column = ft.Column(spacing=8)
         self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
-        self.check_label = ft.Text("")
-        self.export_settings_button = ft.TextButton(
-            content=ft.Text("Экспорт настроек", size=12), on_click=self.on_export_settings
+        self.check_label = ft.Text("", size=12)
+        self.dark_theme_item = ft.PopupMenuItem(
+            content=ft.Text("Тёмная тема"), checked=False, on_click=self.on_toggle_dark_theme
         )
-        self.import_settings_button = ft.TextButton(
-            content=ft.Text("Импорт настроек", size=12), on_click=self.on_import_settings
+        self.large_text_item = ft.PopupMenuItem(
+            content=ft.Text("Крупный текст"), checked=False, on_click=self.on_toggle_large_text
         )
-        self.dark_theme_switch = ft.Switch(label="Тёмная тема", value=False, on_change=self.on_toggle_dark_theme)
-        self.large_text_switch = ft.Switch(label="Крупный текст", value=False, on_change=self.on_toggle_large_text)
+        self.autostart_item = ft.PopupMenuItem(
+            content=ft.Text("Автозапуск при включении компьютера"), checked=False, on_click=self.on_toggle_autostart
+        )
+        self.menu_button = ft.PopupMenuButton(icon=ft.Icons.MENU, tooltip="Настройки и поддержка")
 
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
-        self.autostart_switch = ft.Switch(
-            label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
-        )
         self.server_status = ft.Text("Выключен")
         self.qr_holder = ft.Column(visible=False)
         self.code_text = ft.Text("", size=16, weight=ft.FontWeight.BOLD, selectable=True, visible=False)
@@ -189,17 +205,58 @@ class DesktopApp:
 
     # ---- построение экрана -------------------------------------------------
     def build(self) -> None:
+        # сплэш сразу, до тяжёлой части построения экрана — окно не остаётся пустым, пока грузятся настройки/индекс
+        self.page.add(self.splash)
+        self.page.update()
+        self._finish_build()
+
+    def _build_appbar(self) -> ft.AppBar:
+        items: list[ft.PopupMenuItem] = [
+            self.dark_theme_item,
+            self.large_text_item,
+            *([self.autostart_item] if autostart.is_supported() else []),
+            ft.PopupMenuItem(content=ft.Text("Экспорт настроек", size=13), on_click=self.on_export_settings),
+            ft.PopupMenuItem(content=ft.Text("Импорт настроек", size=13), on_click=self.on_import_settings),
+            ft.PopupMenuItem(
+                content=ft.Row([ft.Text("Проверить ядро", size=13), self.check_label]), on_click=self.on_check
+            ),
+            ft.PopupMenuItem(content=ft.Text("Отправить лог по почте", size=13), on_click=self.on_send_log),
+        ]
+        if self.update_bar is not None:
+            items.append(
+                ft.PopupMenuItem(
+                    content=ft.Row([ft.Text("Проверить обновления", size=13), self.update_bar.status]),
+                    on_click=self.update_bar.on_check,
+                )
+            )
+        if self.support is not None:
+            items += [
+                ft.PopupMenuItem(content=ft.Text("Поддержать автора", size=13), on_click=self.support.on_open_link),
+                ft.PopupMenuItem(
+                    content=ft.Text("Telegram автора", size=13), on_click=self.support.on_open_telegram
+                ),
+                ft.PopupMenuItem(content=ft.Text("Канал GMAGC", size=13), on_click=self.support.on_open_channel),
+            ]
+        self.menu_button.items = items
+        return ft.AppBar(
+            leading=ft.Image(src="logo.svg", width=30, height=30, fit=ft.BoxFit.CONTAIN),
+            leading_width=48,
+            title=ft.Text(f"{NAME} — {AUTHOR}"),
+            actions=[self.menu_button],
+        )
+
+    def _finish_build(self) -> None:
         status = self.service.load()
         self.library_text.value = self.service.settings.library_dir or "не выбрана"
         self.onboarding_hint.visible = not self.service.settings.library_dir
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
-        self.dark_theme_switch.value = self.service.settings.dark_theme
-        self.large_text_switch.value = self.service.settings.large_text
+        self.dark_theme_item.checked = self.service.settings.dark_theme
+        self.large_text_item.checked = self.service.settings.large_text
         self._apply_theme()
         if autostart.is_supported():
-            self.autostart_switch.value = autostart.is_autostart_enabled()
+            self.autostart_item.checked = autostart.is_autostart_enabled()
         self.page.services.extend([self.picker, self.clipboard])
         self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
@@ -229,27 +286,17 @@ class DesktopApp:
                 self.phone_note,
                 self.addresses_text,
                 ft.Text(PHONE_HINT, size=12),
-                *([self.autostart_switch] if autostart.is_supported() else []),
                 self.history_title,
                 self.history_column,
                 *([self.update_bar.switch] if self.update_bar else []),
             ]
         )
-        appearance_card = _section_card(
-            [
-                ft.Text("Вид", size=18, weight=ft.FontWeight.BOLD),
-                self.dark_theme_switch,
-                self.large_text_switch,
-            ]
-        )
-        left = ft.Column(
-            [self.onboarding_hint, library_card, phone_card, appearance_card],
-            spacing=12,
-            width=320,
-            scroll=ft.ScrollMode.AUTO,
-        )
+        left = ft.Column([phone_card], spacing=12, width=320, scroll=ft.ScrollMode.AUTO)
         right = ft.Column(
             [
+                self.onboarding_hint,
+                library_card,
+                ft.Divider(),
                 ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
                 self.source_label,
                 self.banner,
@@ -266,19 +313,10 @@ class DesktopApp:
             expand=True,
             scroll=ft.ScrollMode.AUTO,
         )
-        footer = ft.Row(
-            [
-                ft.Text(f"{NAME} {VERSION} · Автор: {AUTHOR}", size=12),
-                ft.TextButton(content=ft.Text("Проверить ядро", size=12), on_click=self.on_check),
-                self.check_label,
-                self.export_settings_button,
-                self.import_settings_button,
-                *([self.update_bar.check_button, self.update_bar.status] if self.update_bar else []),
-                *([self.support.link, self.support.telegram_link, self.support.channel_link] if self.support else []),
-            ],
-            spacing=12,
-            wrap=True,  # длинный текст (проверка ядра, статус обновления) переносится, а не прячет остальное за краем
-        )
+        views = getattr(self.page, "views", None)
+        if views:
+            views[0].appbar = self._build_appbar()
+        self.page.clean()
         self.page.add(
             ft.SafeArea(
                 ft.Column(
@@ -289,13 +327,13 @@ class DesktopApp:
                             expand=True,
                             vertical_alignment=ft.CrossAxisAlignment.START,
                         ),
-                        footer,
                     ],
                     expand=True,
                 ),
                 expand=True,
             )
         )
+        self.page.update()
         if self.update_bar is not None:
             self.update_bar.start()
         if self.support is not None:
@@ -320,6 +358,8 @@ class DesktopApp:
         self.banner_text.value = text
         self.banner.bgcolor = ft.Colors.RED_100 if error else ft.Colors.AMBER_100
         self.banner.visible = True
+        if error:
+            logger.error(text)  # попадает в лог-файл — можно приложить письмом («Отправить лог по почте»)
         self.page.update()
 
     def _hide_banner(self) -> None:
@@ -470,20 +510,25 @@ class DesktopApp:
         self.page.update()
 
     def on_toggle_dark_theme(self, _event) -> None:
-        self.service.set_dark_theme(bool(self.dark_theme_switch.value))
+        self.dark_theme_item.checked = not self.dark_theme_item.checked
+        self.service.set_dark_theme(bool(self.dark_theme_item.checked))
         self._apply_theme()
 
     def on_toggle_large_text(self, _event) -> None:
-        self.service.set_large_text(bool(self.large_text_switch.value))
+        self.large_text_item.checked = not self.large_text_item.checked
+        self.service.set_large_text(bool(self.large_text_item.checked))
         self._apply_theme()
 
     def on_toggle_autostart(self, _event) -> None:
+        target = not self.autostart_item.checked
         exe = current_executable()
         if exe is None:
-            self.autostart_switch.value = False
+            self.autostart_item.checked = False
             self._show_banner("Не удалось определить путь к приложению", error=True)
             return
-        autostart.set_autostart(bool(self.autostart_switch.value), exe)
+        autostart.set_autostart(target, exe)
+        self.autostart_item.checked = target
+        self.page.update()
 
     async def on_key(self, event) -> None:
         """Ctrl+V — вставить фото из буфера, F5 — обновить индекс: горячие клавиши для частой работы."""
@@ -568,6 +613,7 @@ class DesktopApp:
             self._set_busy(False)
 
     def _show_photo(self, data: bytes) -> None:
+        self._last_query_photo = data
         self.photo_holder.controls = [
             ft.Text("Фото"),
             ft.Image(src=data, width=260, height=200, fit=ft.BoxFit.CONTAIN),
@@ -612,6 +658,12 @@ class DesktopApp:
                                     tooltip="Показать в папке",
                                     on_click=lambda _event, path=result.full_path: self.reveal(path),
                                 ),
+                                ft.IconButton(
+                                    icon=ft.Icons.THUMB_DOWN_OUTLINED,
+                                    tooltip="Это не то — указать верный файл",
+                                    data=result,
+                                    on_click=self.on_report_wrong,
+                                ),
                             ],
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             spacing=4,
@@ -638,12 +690,43 @@ class DesktopApp:
         self.copy_label.visible = True
         self.page.update()
 
+    async def on_report_wrong(self, event) -> None:
+        """«Это не то»: пользователь указывает верный файл — учитывается при похожих запросах впредь."""
+        result: Result = event.control.data
+        files = await self.picker.pick_files(dialog_title="Выберите верный файл", file_type=ft.FilePickerFileType.IMAGE)
+        if not files or not files[0].path:
+            return
+        try:
+            self.service.add_correction(result.rel_path, files[0].path)
+        except CorrectionError as error:
+            self._show_banner(str(error), error=True)
+            return
+        self._show_banner("Запомнено: при похожих запросах теперь будет показан верный файл", error=False)
+        if self._last_query_photo is not None:
+            self._start_search(self._last_query_photo)
+
     # ---- прочее ------------------------------------------------------------
     def on_check(self, _event) -> None:
         info = self.check()
         head = "ОК: ядро работает" if info["ok"] else "ОШИБКА: ядро не сработало"
         self.check_label.value = head + ", " + ", ".join(f"{name}: {value}" for name, value in info["versions"].items())
         self.page.update()
+
+    def on_send_log(self, _event) -> None:
+        """Открывает почтовый клиент с готовым письмом и показывает файл лога в проводнике, чтобы приложить
+        его вручную: само приложение не может безопасно отправить почту (учётные данные никуда не вшиты)."""
+        body = (
+            f"Версия: {NAME} {VERSION}\n"
+            f"ОС: {platform.platform()}\n"
+            f"Индекс: {status_text(self.service.status())}\n\n"
+            "Опишите проблему и приложите файл лога — он открыт в проводнике/Finder.\n"
+        )
+        query = urllib.parse.urlencode({"subject": "GMAGC: лог и описание проблемы", "body": body})
+        self._open_url(f"mailto:{SUPPORT_EMAIL}?{query}")
+        if self._log_path.exists() and self._log_path.stat().st_size > 0:
+            self.reveal(str(self._log_path))
+        else:
+            self._show_banner("Файл лога пока пуст: ошибок в этой сессии не было", error=False)
 
     def _run_demo(self, library: str, photo: str) -> None:
         """Отладка: GMAGC_DEMO_LIBRARY / GMAGC_DEMO_PHOTO запускают индексацию и поиск при старте."""
@@ -659,13 +742,14 @@ class DesktopApp:
 
 
 def build_page(page: ft.Page, service: SearchService | None = None, **services) -> DesktopApp:
-    page.title = f"{NAME} {VERSION}"
+    page.title = f"{NAME} {VERSION} — {AUTHOR}"
     window = getattr(page, "window", None)
     if window is not None:
         window.width, window.height = 1100, 760
     service = service or SearchService(data_dir())
     if "updates" not in services:  # updates=None в тестах отключает обновления
         services["updates"] = UpdateManager(service, data_dir())
+    services.setdefault("log_path", setup_logging(service.data_dir))
     app = DesktopApp(page, service, **services)
     app.build()
     return app
