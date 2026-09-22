@@ -19,6 +19,8 @@ def status_text(status: IndexStatus | None) -> str:
         text += f", пропущено {_number(status.skipped)}"
     if status.transient:
         text += f", нечитаемо сейчас {_number(status.transient)} (повторю при обновлении)"
+    if status.stale:
+        text += ". Библиотека изменилась — обновите индекс"
     return text
 
 

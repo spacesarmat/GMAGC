@@ -40,3 +40,4 @@ class IndexStatus:
     families: int
     skipped: int
     transient: int
+    stale: bool = False  # библиотека изменилась с последней сборки индекса (новые/изменённые/удалённые файлы)

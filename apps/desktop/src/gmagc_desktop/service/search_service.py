@@ -16,6 +16,7 @@ from gmagc_common.support import SupportState
 from gmagc_common.updates import parse_version
 from gmagc_desktop.library.cache import update_index
 from gmagc_desktop.library.index import LibraryIndex, ProgressCallback, load_index
+from gmagc_desktop.library.scan import scan_library
 from gmagc_desktop.matcher.embedder import Embedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
@@ -69,9 +70,16 @@ class SearchService:
             save_settings(self.settings, self._settings_path)
 
     def load(self) -> IndexStatus | None:
-        """Читает настройки и кэш индекса (если библиотека выбрана и кэш совместим)."""
+        """Читает настройки и кэш индекса (если библиотека выбрана и кэш совместим).
+
+        Если основной файл индекса отсутствует или повреждён, пробует резервную копию (.previous),
+        оставленную перед прошлой перезаписью."""
         self.settings = load_settings(self._settings_path)
-        index = load_index(self._index_path) if self.settings.library_dir else None
+        index = None
+        if self.settings.library_dir:
+            index = load_index(self._index_path)
+            if index is None:
+                index = load_index(self._index_path.with_name(self._index_path.name + ".previous"))
         if index is not None and index.model_id != self._embedder.model_id:
             index = None
         self._use(index)
@@ -154,7 +162,24 @@ class SearchService:
             families=len(set(index.group_ids.tolist())),
             skipped=len(index.skipped),
             transient=len(index.transient),
+            stale=self.index_is_stale(),
         )
+
+    def index_is_stale(self) -> bool:
+        """Изменилась ли библиотека с последней сборки индекса (новые, изменённые или удалённые файлы).
+
+        Папку, которую сейчас не открыть (например, отключён диск), не считает изменившейся — настоящую
+        причину покажет сама сборка индекса, если пользователь попробует его обновить.
+        """
+        index = self._index
+        if index is None or not self.settings.library_dir:
+            return False
+        root = Path(self.settings.library_dir)
+        if not root.is_dir():
+            return False
+        current = {(f.rel_path, f.size, f.mtime_ns) for f in scan_library(root)}
+        known = {(f.rel_path, f.size, f.mtime_ns) for f in (*index.files, *index.skipped, *index.transient)}
+        return current != known
 
     def search_photo(self, photo_bgr: np.ndarray, top_n: int | None = None) -> SearchOutcome:
         with self._lock:  # индекс и папка библиотеки не меняются, пока идёт поиск
