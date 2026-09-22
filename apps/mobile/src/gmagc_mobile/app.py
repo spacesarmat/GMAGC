@@ -221,10 +221,11 @@ class MobileApp:
         self.camera_preview_area = ft.Container(
             self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
         )
-        self.camera_view = ft.Column(
+        # фиксированная высота и своя прокрутка: иначе история снимков (растёт с каждым кадром за сессию)
+        # отжимает всё больше места у камеры в той же нескроллящейся колонке — после десятка снимков
+        # превью почти исчезало (отзыв пользователя). Камере теперь всегда достаётся одна и та же доля экрана.
+        self.below_camera_controls = ft.Column(
             [
-                ft.Row([self.camera_title, self.change_pc_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                self.camera_preview_area,
                 ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
                 self.focus_button,
                 self.camera_message,
@@ -232,6 +233,16 @@ class MobileApp:
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
                 self.history_title,
                 self.history_column,
+            ],
+            spacing=6,
+            height=180,
+            scroll=ft.ScrollMode.AUTO,
+        )
+        self.camera_view = ft.Column(
+            [
+                ft.Row([self.camera_title, self.change_pc_button], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                self.camera_preview_area,
+                self.below_camera_controls,
             ],
             spacing=6,
             visible=False,
