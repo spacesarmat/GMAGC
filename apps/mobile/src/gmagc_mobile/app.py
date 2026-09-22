@@ -232,7 +232,6 @@ class MobileApp:
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
                 self.history_title,
                 self.history_column,
-                *self._support_links(),
             ],
             spacing=6,
             visible=False,
@@ -280,14 +279,26 @@ class MobileApp:
             views[0].on_confirm_pop = self.on_confirm_pop
         self.page.add(
             ft.SafeArea(
-                ft.Column(
+                ft.Stack(
                     [
-                        *([self.update_bar.container] if self.update_bar else []),
-                        self.connect_view,
-                        self.camera_view,
-                        self.results_view,
-                        self.back_hint,
-                        self.diag_text,
+                        ft.Column(
+                            [
+                                *([self.update_bar.container] if self.update_bar else []),
+                                self.connect_view,
+                                self.camera_view,
+                                self.results_view,
+                                self.diag_text,
+                            ],
+                            expand=True,
+                        ),
+                        # оверлей, а не элемент той же Column: иначе видимая подсказка отжимает высоту у камеры
+                        # (оба делят место через expand=True в одной колонке)
+                        ft.Container(
+                            self.back_hint,
+                            alignment=ft.Alignment.BOTTOM_CENTER,
+                            padding=ft.Padding.only(bottom=8),
+                            expand=True,
+                        ),
                     ],
                     expand=True,
                 ),
