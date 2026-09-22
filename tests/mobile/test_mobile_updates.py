@@ -9,7 +9,7 @@ from gmagc_mobile.app import MobileApp
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.update_bar import UpdateBar
-from gmagc_mobile.updates import KEY_ENABLED, KEY_LAST, KEY_SKIPPED, UpdateTracker
+from gmagc_mobile.updates import KEY_LAST, KEY_SKIPPED, UpdateTracker
 from tests.fakes import FakeClipboard, FakePicker, StubPage
 from tests.fakes_mobile import FakeCameraApi, FakeLauncher, FakePermission, FakePrefs, Script
 from tests.updates_stub import release_json
@@ -43,16 +43,15 @@ def test_a_newer_release_gives_a_notice_with_the_apk_link_and_records_the_check(
     assert notice.page_url.endswith("/releases/tag/v0.9.0") and prefs.data[KEY_LAST] == NOW
 
 
-def test_a_recent_check_or_a_disabled_check_does_not_touch_the_network():
+def test_a_recent_check_does_not_touch_the_network():
     def forbidden(version):
         raise AssertionError("сеть не должна вызываться")
 
     assert run(tracker(FakePrefs({KEY_LAST: NOW - 3600}), fetch=forbidden).check()) is None
-    assert run(tracker(FakePrefs({KEY_ENABLED: False}), fetch=forbidden).check()) is None
 
 
-def test_a_forced_check_ignores_the_schedule_and_the_switch():
-    prefs = FakePrefs({KEY_ENABLED: False, KEY_LAST: NOW - 60})
+def test_a_forced_check_ignores_the_schedule():
+    prefs = FakePrefs({KEY_LAST: NOW - 60})
 
     assert run(tracker(prefs).check(force=True)).version == "0.9.0"
 
@@ -86,17 +85,9 @@ def test_a_release_without_an_apk_falls_back_to_the_release_page():
     assert notice.url == notice.page_url
 
 
-def test_the_switch_defaults_to_on_and_ignores_garbage():
-    assert run(tracker(FakePrefs()).enabled()) is True
-    assert run(tracker(FakePrefs({KEY_ENABLED: "yes"})).enabled()) is True
-    update = tracker(FakePrefs())
-    run(update.set_enabled(False))
-    assert run(update.enabled()) is False
-
-
 def test_broken_stored_values_and_a_failing_storage_are_tolerated():
     assert run(tracker(FakePrefs({KEY_LAST: "yesterday", KEY_SKIPPED: 5})).check()).version == "0.9.0"
-    assert run(tracker(FakePrefs(fail=True)).enabled()) is True
+    assert run(tracker(FakePrefs(fail=True)).check()).version == "0.9.0"
 
 
 # ---- полоса на экране -------------------------------------------------------------------------------
@@ -158,18 +149,6 @@ def test_a_failing_launcher_is_reported_not_raised():
     assert "нет браузера" in bar.status.value
 
 
-def test_the_switch_persists_and_starts_from_the_saved_state():
-    prefs = FakePrefs({KEY_ENABLED: False})
-    bar, _, _ = make_bar(tracker(prefs))
-    run(bar.load())
-    assert bar.switch.value is False
-
-    bar.switch.value = True
-    run(bar.on_toggle(None))
-
-    assert prefs.data[KEY_ENABLED] is True
-
-
 # ---- встроено в экран ---------------------------------------------------------------------------------
 def make_app(update, launcher=None, check_on_start=True):
     page = StubPage()
@@ -204,26 +183,37 @@ def test_the_screen_checks_for_updates_after_start_and_shows_the_bar():
     assert app.update_bar.container.visible and "0.9.0" in app.update_bar.text.value
 
 
-def test_the_screen_does_not_check_when_switched_off_or_when_no_tracker_is_given():
-    app, _ = make_app(tracker(FakePrefs({KEY_ENABLED: False}), fetch=lambda v: pytest.fail("сеть")))
-    run(app.start())
-    assert app.update_task is None or run(_finish(app)) is None
-
+def test_the_screen_does_not_check_when_no_tracker_is_given():
     app, _ = make_app(None)
     run(app.start())
     assert app.update_bar is None
+
+
+def test_the_screen_always_checks_on_start_even_with_a_leftover_disabled_preference():
+    """На Android нет выключателя: даже старое значение gmagc.updates.enabled=False в хранилище не должно мешать."""
+
+    async def scenario():
+        app, _ = make_app(tracker(FakePrefs({"gmagc.updates.enabled": False})))
+        await app.start()
+        await app.update_task
+        return app
+
+    app = run(scenario())
+
+    assert app.update_bar.container.visible and "0.9.0" in app.update_bar.text.value
 
 
 async def _finish(app):
     return await app.update_task
 
 
-def test_the_connect_screen_has_the_switch_and_the_manual_check():
+def test_the_connect_screen_has_the_manual_check_and_no_switch_to_turn_it_off():
     app, _ = make_app(tracker(), check_on_start=False)
 
     controls = list(_walk(app.connect_view))
 
-    assert app.update_bar.switch in controls and app.update_bar.check_button in controls
+    assert app.update_bar.check_button in controls
+    assert not any(isinstance(control, ft.Switch) for control in controls)
     assert app.update_bar.container in list(_walk(_root(app)))
 
 

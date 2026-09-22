@@ -10,6 +10,7 @@ import flet as ft
 
 from gmagc_common.support import (
     AUTHOR_TELEGRAM_URL,
+    CHANNEL_URL,
     DIALOG_TEXT,
     DIALOG_TITLE,
     LATER,
@@ -44,8 +45,8 @@ class SupportPrompt:
         self.now = now
         self.delay = delay
         self.busy = busy
-        self.link = ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.on_open_link)
-        self.telegram_link = ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.on_open_telegram)
+        # ссылки-кнопки создаёт экран (MobileApp._support_links): они нужны сразу на нескольких экранах,
+        # а один и тот же контрол Flet нельзя одновременно вставить в несколько мест дерева
 
     async def _load(self) -> SupportState:
         try:
@@ -110,6 +111,9 @@ class SupportPrompt:
 
     async def on_open_telegram(self, _event) -> None:
         await self._open(AUTHOR_TELEGRAM_URL)
+
+    async def on_open_channel(self, _event) -> None:
+        await self._open(CHANNEL_URL)
 
     async def _open(self, url: str = SUPPORT_URL) -> None:
         try:

@@ -140,7 +140,7 @@ class MobileApp:
                 ft.Row([self.connect_button, self.connect_busy], spacing=12),
                 self.connect_error,
                 *self._update_controls(),
-                *([ft.Row([self.support.link, self.support.telegram_link], wrap=True)] if self.support else []),
+                *self._support_links(),
                 ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=12),
             ],
             spacing=12,
@@ -186,8 +186,7 @@ class MobileApp:
             on_scale_update=self.on_scale_update,
             expand=True,
         )
-        if hasattr(self.preview, "on_size_change"):
-            self.preview.on_size_change = self.on_preview_size
+        self.gesture.on_size_change = self.on_preview_size  # реальный размер кадра, а не виджета камеры внутри него
         # «Снять» и «Из галереи» — отдельный слой над self.gesture (не внутри него), чтобы нажатие на кнопку
         # не попадало и в обработчик касания кадра (фокус по точке)
         gallery_overlay = ft.Container(
@@ -212,6 +211,7 @@ class MobileApp:
                 self.focus_button,
                 self.camera_message,
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
+                *self._support_links(),
             ],
             spacing=6,
             visible=False,
@@ -238,6 +238,7 @@ class MobileApp:
                 ft.Text("Результаты (нажмите на карточку, чтобы скопировать путь)", size=14, weight=ft.FontWeight.BOLD),
                 self.copy_note,
                 self.results_column,
+                *self._support_links(),
             ],
             spacing=8,
             scroll=ft.ScrollMode.AUTO,
@@ -275,7 +276,22 @@ class MobileApp:
     def _update_controls(self) -> list[ft.Control]:
         if self.update_bar is None:
             return []
-        return [self.update_bar.switch, ft.Row([self.update_bar.check_button, self.update_bar.status], wrap=True)]
+        return [ft.Row([self.update_bar.check_button, self.update_bar.status], wrap=True)]
+
+    def _support_links(self) -> list[ft.Control]:
+        """Свежие кнопки на каждый вызов: один и тот же контрол Flet нельзя вставить сразу на несколько экранов."""
+        if self.support is None:
+            return []
+        return [
+            ft.Row(
+                [
+                    ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.support.on_open_link),
+                    ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.support.on_open_telegram),
+                    ft.TextButton(content=ft.Text("Канал GMAGC", size=12), on_click=self.support.on_open_channel),
+                ],
+                wrap=True,
+            )
+        ]
 
     async def start(self) -> None:
         await self._start_flow()
@@ -286,8 +302,7 @@ class MobileApp:
     async def _begin_update_check(self) -> None:
         if self.update_bar is None:
             return
-        await self.update_bar.load()
-        if self.check_on_start and self.update_bar.switch.value:
+        if self.check_on_start:  # на Android проверка обязательна: выключателя нет, только ручная кнопка
             self.update_task = asyncio.create_task(self.update_bar.startup())
 
     async def _start_flow(self) -> None:
@@ -692,7 +707,14 @@ class MobileApp:
             self._zooming = False
 
     def on_preview_size(self, event) -> None:
-        self._preview_size = (float(event.width), float(event.height))
+        """Подгоняет соотношение сторон камеры под реально доступное место, чтобы кадр не сжимался у края."""
+        width, height = float(event.width), float(event.height)
+        self._preview_size = (width, height)
+        if hasattr(self.preview, "aspect_ratio") and width > 0 and height > 0:
+            ratio = width / height
+            if self.preview.aspect_ratio != ratio:
+                self.preview.aspect_ratio = ratio
+                self.page.update()
 
     async def on_preview_tap(self, event) -> None:
         """Касание кадра наводит фокус и замер экспозиции в эту точку, на кадре мигает метка."""

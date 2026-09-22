@@ -161,3 +161,23 @@ def test_the_preview_is_wrapped_in_a_gesture_detector_with_the_handlers():
 
     assert app.gesture.on_tap_down == app.on_preview_tap and app.gesture.on_scale_update == app.on_scale_update
     assert app.gesture.on_scale_start == app.on_scale_start and isinstance(app.gesture, ft.GestureDetector)
+    assert app.gesture.on_size_change == app.on_preview_size
+
+
+def test_the_camera_fills_the_available_width_by_matching_its_aspect_ratio():
+    """Соотношение сторон камеры подгоняется под реально доступное место (кадр камеры на весь экран)."""
+    app, _ = make_running_app()
+
+    app.on_preview_size(SimpleNamespace(width=400.0, height=800.0))
+
+    assert app.preview.aspect_ratio == 0.5 and app._preview_size == (400.0, 800.0)
+
+
+def test_the_aspect_ratio_is_not_reapplied_when_the_size_does_not_change():
+    app, _ = make_running_app()
+    app.on_preview_size(SimpleNamespace(width=400.0, height=800.0))
+    updates_before = app.page.updates
+
+    app.on_preview_size(SimpleNamespace(width=400.0, height=800.0))
+
+    assert app.page.updates == updates_before

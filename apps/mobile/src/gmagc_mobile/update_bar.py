@@ -30,11 +30,7 @@ class UpdateBar:
             visible=False,
         )
         self.status = ft.Text("", size=12)
-        self.switch = ft.Switch(label="Проверять обновления", value=True, on_change=self.on_toggle)
         self.check_button = ft.TextButton(content=ft.Text("Проверить обновления", size=12), on_click=self.on_check_now)
-
-    async def load(self) -> None:
-        self.switch.value = await self.tracker.enabled()
 
     async def startup(self) -> None:
         """Фоновая проверка через delay секунд после запуска; сбой сети ничего не показывает."""
@@ -81,6 +77,3 @@ class UpdateBar:
             await self.tracker.skip(self.notice.version)
         self.container.visible = False
         self.page.update()
-
-    async def on_toggle(self, _event) -> None:
-        await self.tracker.set_enabled(bool(self.switch.value))
