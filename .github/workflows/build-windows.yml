@@ -4,8 +4,6 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
-  pull_request:
-    paths: ["apps/**", "packaging/windows/**", ".github/workflows/build-windows.yml"]
 
 env:
   # держать в синхронизации с apps/*/pyproject.toml и requirements-dev.txt
