@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -34,9 +34,11 @@ def test_supported_platforms():
 
 # ---- Windows ------------------------------------------------------------------------------------
 def test_enabling_on_windows_writes_the_quoted_exe_path_to_the_registry():
+    # PureWindowsPath, а не Path: путь Windows форматируется с обратной косой чертой независимо от того,
+    # на какой ОС реально выполняется тест (на Linux/macOS обычный Path сохранил бы прямые слэши)
     registry = FakeRegistry()
 
-    set_autostart(True, Path("C:/Apps/GMAGC/gmagc-desktop.exe"), platform="win32", registry=registry)
+    set_autostart(True, PureWindowsPath("C:/Apps/GMAGC/gmagc-desktop.exe"), platform="win32", registry=registry)
 
     assert registry.values[APP_NAME] == '"C:\\Apps\\GMAGC\\gmagc-desktop.exe"'
     assert is_autostart_enabled(platform="win32", registry=registry) is True
@@ -61,7 +63,7 @@ def test_windows_is_disabled_by_default():
 
 # ---- macOS --------------------------------------------------------------------------------------
 def test_enabling_on_macos_writes_a_launch_agent_plist(tmp_path):
-    exe = Path("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop")
+    exe = PurePosixPath("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop")
 
     set_autostart(True, exe, platform="darwin", agents_dir=tmp_path)
 
@@ -73,7 +75,8 @@ def test_enabling_on_macos_writes_a_launch_agent_plist(tmp_path):
 
 
 def test_disabling_on_macos_removes_the_plist(tmp_path):
-    set_autostart(True, Path("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop"), platform="darwin", agents_dir=tmp_path)
+    exe = PurePosixPath("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop")
+    set_autostart(True, exe, platform="darwin", agents_dir=tmp_path)
 
     set_autostart(False, Path("unused"), platform="darwin", agents_dir=tmp_path)
 
@@ -87,7 +90,7 @@ def test_disabling_on_macos_when_nothing_was_set_does_not_raise(tmp_path):
 
 def test_enabling_on_macos_creates_the_launch_agents_folder_if_missing(tmp_path):
     agents_dir = tmp_path / "Library" / "LaunchAgents"
-    exe = Path("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop")
+    exe = PurePosixPath("/Applications/GMAGC.app/Contents/MacOS/gmagc-desktop")
 
     set_autostart(True, exe, platform="darwin", agents_dir=agents_dir)
 
