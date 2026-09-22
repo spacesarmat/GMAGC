@@ -268,7 +268,16 @@ class MobileApp:
         )
 
         self.diag_text = ft.Text("", size=10, color=ft.Colors.GREY_600, selectable=True, visible=False)
-        self.back_hint = ft.Text("Нажмите «Назад» ещё раз, чтобы выйти", size=12, visible=False)
+        self.back_hint_text = ft.Text("Нажмите «Назад» ещё раз, чтобы выйти", size=12)
+        # Container сам visible=False (а не только текст внутри): иначе прозрачный expand=True слой оверлея
+        # остаётся в дереве и перехватывает касания по всему экрану, хотя визуально ничего не видно.
+        self.back_hint = ft.Container(
+            self.back_hint_text,
+            alignment=ft.Alignment.BOTTOM_CENTER,
+            padding=ft.Padding.only(bottom=8),
+            expand=True,
+            visible=False,
+        )
 
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
@@ -293,12 +302,7 @@ class MobileApp:
                         ),
                         # оверлей, а не элемент той же Column: иначе видимая подсказка отжимает высоту у камеры
                         # (оба делят место через expand=True в одной колонке)
-                        ft.Container(
-                            self.back_hint,
-                            alignment=ft.Alignment.BOTTOM_CENTER,
-                            padding=ft.Padding.only(bottom=8),
-                            expand=True,
-                        ),
+                        self.back_hint,
                     ],
                     expand=True,
                 ),
