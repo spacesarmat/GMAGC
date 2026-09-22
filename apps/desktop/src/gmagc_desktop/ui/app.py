@@ -118,6 +118,7 @@ class DesktopApp:
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
         self.page.services.extend([self.picker, self.clipboard])
+        self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
             self.server_switch.value = True
             self._start_server()
@@ -177,6 +178,7 @@ class DesktopApp:
                 *([self.support.link, self.support.telegram_link, self.support.channel_link] if self.support else []),
             ],
             spacing=12,
+            wrap=True,  # длинный текст (проверка ядра, статус обновления) переносится, а не прячет остальное за краем
         )
         self.page.add(
             ft.SafeArea(
@@ -355,6 +357,13 @@ class DesktopApp:
         files = await self.picker.pick_files(dialog_title="Фото проекции", file_type=ft.FilePickerFileType.IMAGE)
         if files and files[0].path:
             self._search_bytes_from(Path(files[0].path))
+
+    async def on_key(self, event) -> None:
+        """Ctrl+V — вставить фото из буфера, F5 — обновить индекс: горячие клавиши для частой работы."""
+        if event.ctrl and event.key == "V":
+            await self.on_paste(None)
+        elif event.key == "F5":
+            await self.on_rebuild(None)
 
     async def on_paste(self, _event) -> None:
         data = await self.clipboard.get_image()
