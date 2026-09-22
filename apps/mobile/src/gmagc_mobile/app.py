@@ -29,7 +29,16 @@ from gmagc_mobile.imaging import prepare_upload
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.support import SupportPrompt
-from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
+from gmagc_mobile.texts import (
+    NO_INDEX_NOTE,
+    error_text,
+    history_text,
+    outcome_message,
+    score_text,
+    share_text,
+    status_line,
+    zoom_text,
+)
 from gmagc_mobile.update_bar import UpdateBar
 from gmagc_mobile.updates import UpdateTracker
 
@@ -37,6 +46,7 @@ MODE_SHOOT = "shoot"
 MODE_SCAN = "scan"
 ZOOM_STEP = 0.5
 MARKER_SIZE = 64
+HISTORY_LIMIT = 10  # снимков за сессию, самый новый первым; дальше старые записи забываются
 PAGE_PADDING = 12  # общий отступ страницы; кадр камеры вычитает его отрицательным полем, чтобы быть во всю ширину
 SCAN_INTERVAL = 0.4  # пауза между попытками распознать QR в потоке кадров камеры: бережёт батарею и процессор
 SCAN_HINT = (
@@ -57,6 +67,7 @@ class MobileApp:
         preview: ft.Control | None = None,
         picker=None,
         clipboard=None,
+        share=None,
         client_factory: Callable[[Connection], GmagcClient] = GmagcClient,
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
         qr_diagnose: Callable[[bytes], str] = diagnose,
@@ -81,6 +92,7 @@ class MobileApp:
         self.preview = preview if preview is not None else camera.camera
         self.picker = picker or ft.FilePicker()
         self.clipboard = clipboard or ft.Clipboard()
+        self.share = share or ft.Share()
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.qr_diagnose = qr_diagnose
@@ -181,6 +193,10 @@ class MobileApp:
         self.retry_button = ft.Button("Повторить", on_click=self.on_retry, visible=False)
         self.busy_ring = ft.ProgressRing(visible=False, width=24, height=24)
         self._retry_data: bytes | None = None
+        self.history: list[tuple[bytes, MatchResponse]] = []  # снимки этой сессии, самый новый первым
+        self._current_response: MatchResponse | None = None  # для кнопки «Поделиться» на экране результатов
+        self.history_title = ft.Text("Прошлые снимки", size=14, weight=ft.FontWeight.BOLD, visible=False)
+        self.history_column = ft.Column(spacing=0)
         self.gesture = ft.GestureDetector(
             content=ft.Stack([self.preview, self.marker], expand=True),
             on_tap_down=self.on_preview_tap,
@@ -214,6 +230,8 @@ class MobileApp:
                 self.camera_message,
                 self.retry_button,
                 ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
+                self.history_title,
+                self.history_column,
                 *self._support_links(),
             ],
             spacing=6,
@@ -229,9 +247,10 @@ class MobileApp:
         self.copy_note = ft.Text("", size=12, visible=False, selectable=True)
         self.results_column = ft.Column(spacing=8)
         self.again_button = ft.Button("Снять ещё", on_click=self.on_again)
+        self.share_button = ft.TextButton(content=ft.Text("Поделиться"), on_click=self.on_share)
         self.results_view = ft.Column(
             [
-                self.again_button,
+                ft.Row([self.again_button, self.share_button], spacing=8, wrap=True),
                 self.results_banner,
                 ft.Row(
                     [self.results_photo, self.results_projection],
@@ -628,7 +647,35 @@ class MobileApp:
             self._offer_retry(data, message or "Ошибка поиска")
             return
         self._retry_data = None
+        self._remember_history(data, response)
         await self._show_results(data, response)
+
+    def _remember_history(self, photo: bytes, response: MatchResponse) -> None:
+        """Добавляет успешный поиск в историю этой сессии (самый новый первым, не больше HISTORY_LIMIT)."""
+        self.history.insert(0, (photo, response))
+        del self.history[HISTORY_LIMIT:]
+        self.history_title.visible = bool(self.history)
+        self.history_column.controls = [
+            ft.TextButton(
+                content=ft.Text(history_text(item), size=12), data=(entry_photo, item), on_click=self.on_history_click
+            )
+            for entry_photo, item in self.history
+        ]
+
+    async def on_history_click(self, event) -> None:
+        """Открывает прошлый результат заново, не отправляя фото на ПК повторно."""
+        photo, response = event.control.data
+        await self._show_results(photo, response)
+
+    async def on_share(self, _event) -> None:
+        if self._current_response is None:
+            return
+        try:
+            await self.share.share_text(share_text(self._current_response), subject="GMAGC")
+        except Exception:  # noqa: BLE001 - на телефоне может не быть приложения, куда поделиться
+            self.copy_note.value = "Не удалось поделиться"
+            self.copy_note.visible = True
+            self.page.update()
 
     def _offer_retry(self, data: bytes, message: str) -> None:
         """Запоминает неотправленное фото и предлагает отправить его ещё раз без повторной съёмки."""
@@ -643,6 +690,7 @@ class MobileApp:
         await self._search(self._retry_data)
 
     async def _show_results(self, photo: bytes, response: MatchResponse) -> None:
+        self._current_response = response
         banner = outcome_message(response.outcome)
         self.results_banner_text.value = banner or ""
         self.results_banner.bgcolor = ft.Colors.RED_100 if response.outcome == OUTCOME_NO_PROJECTION else ft.Colors.AMBER_100
@@ -806,7 +854,7 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
         prefs=prefs,
         **services,
     )
-    page.services.extend([prefs, permission, app.picker, app.clipboard, launcher])
+    page.services.extend([prefs, permission, app.picker, app.clipboard, app.share, launcher])
     app.build()
     await app.start()
     return app

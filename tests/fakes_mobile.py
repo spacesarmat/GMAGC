@@ -107,6 +107,19 @@ def frame_event(width=300, height=300, encoded_format="jpeg", data=b"JPEG-frame"
     return SimpleNamespace(width=width, height=height, format=None, encoded_format=encoded_format, bytes=data)
 
 
+class FakeShare:
+    """Замена ft.Share: запоминает вызовы share_text, не открывает системное окно."""
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.texts = []
+
+    async def share_text(self, text, **kwargs):
+        if self.fail:
+            raise RuntimeError("нет приложения для отправки")
+        self.texts.append(text)
+
+
 class FakePermission:
     def __init__(self, status=ph.PermissionStatus.GRANTED):
         self.status = status

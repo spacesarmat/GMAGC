@@ -15,14 +15,22 @@ from gmagc_mobile.client import ClientError
 from gmagc_mobile.qr import QrImageError, QrUnavailable
 from gmagc_mobile.store import KEY_CODE, KEY_HOST, KEY_PORT, ConnectionStore
 from tests.fakes import FakeClipboard, FakePicker, StubPage, texts, walk
-from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, Script, frame_event, sample_response
+from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, FakeShare, Script, frame_event, sample_response
 
 PC = Connection("192.168.1.121", 8765, "ZBZ36YNK")
 STORED = {KEY_HOST: "192.168.1.121", KEY_PORT: 8765, KEY_CODE: "ZBZ36YNK"}
 
 
 def make_app(
-    prefs=None, script=None, camera_api=None, permission=None, qr_reader=None, frame_reader=None, picker=None, clipboard=None
+    prefs=None,
+    script=None,
+    camera_api=None,
+    permission=None,
+    qr_reader=None,
+    frame_reader=None,
+    picker=None,
+    clipboard=None,
+    share=None,
 ):
     script = script or Script()
     prefs = prefs if prefs is not None else FakePrefs()
@@ -36,6 +44,7 @@ def make_app(
         preview=ft.Container(),
         picker=picker or FakePicker(),
         clipboard=clipboard or FakeClipboard(),
+        share=share or FakeShare(),
         client_factory=script.factory,
         qr_reader=qr_reader or (lambda data: None),
         frame_reader=frame_reader or (lambda width, height, encoded_format, data: None),
@@ -524,6 +533,73 @@ def test_clicking_a_card_and_the_copy_button_copy_the_path_as_is():
     assert app.copy_note.visible and "C:\\gobos\\vendor\\a.png" in app.copy_note.value
 
 
+def test_a_successful_search_is_added_to_the_history_and_can_be_revisited():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED))
+
+    shoot(app)
+    assert app.history_title.visible is True and len(app.history_column.controls) == 1
+    assert any("a.png" in t and "91.2%" in t for t in texts(app.history_column.controls[0]))
+
+    run(app.on_again(None))
+    shoot(app)
+    assert len(app.history_column.controls) == 2
+
+    entry = app.history_column.controls[0]
+    run(entry.on_click(SimpleNamespace(control=entry)))
+
+    assert views(app) == ["results"] and len(app.results_column.controls) == 2
+
+
+def test_history_keeps_only_the_last_ten_entries():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED))
+
+    for _ in range(12):
+        run(app.on_again(None))
+        shoot(app)
+
+    assert len(app.history_column.controls) == 10
+
+
+def test_revisiting_a_history_entry_does_not_duplicate_it():
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED))
+    shoot(app)
+    entry = app.history_column.controls[0]
+
+    run(entry.on_click(SimpleNamespace(control=entry)))
+
+    assert len(app.history_column.controls) == 1
+
+
+def test_a_no_projection_result_is_labelled_in_the_history():
+    script = Script()
+    script.match_result = sample_response("no_projection", results=[])
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+
+    assert any("не найдена" in t for t in texts(app.history_column.controls[0]))
+
+
+def test_share_sends_a_text_summary_of_the_top_result():
+    share = FakeShare()
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), share=share)
+
+    shoot(app)
+    run(app.on_share(None))
+
+    assert share.texts and "a.png" in share.texts[0] and "C:\\gobos\\vendor\\a.png" in share.texts[0]
+
+
+def test_a_failed_share_is_reported_without_raising():
+    share = FakeShare(fail=True)
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), share=share)
+
+    shoot(app)
+    run(app.on_share(None))
+
+    assert "Не удалось поделиться" in app.copy_note.value
+
+
 def test_the_gallery_photo_is_prepared_and_sent(tmp_path):
     photo = tmp_path / "shot.jpg"
     photo.write_bytes(b"gallery-bytes")
@@ -594,7 +670,7 @@ def test_build_page_wires_services_and_starts(monkeypatch):
     )
 
     assert page.title == f"{NAME} {VERSION}" and script.connections == [PC] and views(app) == ["camera"]
-    assert len(page.services) == 5  # хранилище, разрешение, выбор файла, буфер обмена, загрузчик ссылок
+    assert len(page.services) == 6  # хранилище, разрешение, выбор файла, буфер обмена, «поделиться», загрузчик ссылок
 
 
 def build_on(platform, web=False):
