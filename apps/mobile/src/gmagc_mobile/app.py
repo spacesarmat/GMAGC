@@ -22,7 +22,7 @@ from gmagc_common.protocol import (
     parse_address,
     parse_link,
 )
-from gmagc_common.theme import SEED_COLOR
+from gmagc_common.theme import SEED_COLOR, score_band
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
@@ -57,6 +57,23 @@ SCAN_HINT_MANUAL = (
     "Автосканирование недоступно на этом телефоне. Наведите камеру на QR-код в приложении на ПК "
     "(приближение и касание для фокуса помогают) и нажмите «Считать QR»"
 )
+
+_BADGE_COLORS = {
+    "good": (ft.Colors.GREEN_100, ft.Colors.GREEN_900),
+    "low": (ft.Colors.AMBER_100, ft.Colors.AMBER_900),
+    "bad": (ft.Colors.RED_100, ft.Colors.RED_900),
+}
+
+
+def _score_badge(score: float) -> ft.Container:
+    """Цветной бейдж оценки на карточке результата: зелёный/жёлтый/красный по порогу совпадения."""
+    bgcolor, color = _BADGE_COLORS[score_band(score)]
+    return ft.Container(
+        ft.Text(score_text(score), size=12, weight=ft.FontWeight.BOLD, color=color),
+        bgcolor=bgcolor,
+        border_radius=12,
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+    )
 
 
 class MobileApp:
@@ -739,9 +756,8 @@ class MobileApp:
 
     def _result_card(self, item: ResultItem) -> ft.Card:
         details: list[ft.Control] = [
-            ft.Text(item.name, weight=ft.FontWeight.BOLD),
+            ft.Row([ft.Text(item.name, weight=ft.FontWeight.BOLD, expand=True), _score_badge(item.score)]),
             ft.Text(item.path, size=12, selectable=False),
-            ft.Text(score_text(item.score)),
         ]
         if item.copies:
             details.append(ft.Text(f"ещё {len(item.copies)} файлов", tooltip="\n".join(item.copies)))
