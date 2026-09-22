@@ -1,3 +1,5 @@
+import time
+
 from gmagc_desktop.server import network
 
 
@@ -22,6 +24,23 @@ def test_no_network_gives_an_empty_list(monkeypatch):
     monkeypatch.setattr(network, "_all_addresses", lambda: [])
 
     assert network.lan_addresses() == []
+
+
+def test_a_slow_hostname_lookup_does_not_block_past_the_timeout(monkeypatch):
+    """На некоторых системах (macOS, имя хоста оканчивается на .local) резолв через mDNS может
+    подвисать на десятки секунд — этот список лишь дополняет основной адрес, ждать его нельзя."""
+
+    def slow_getaddrinfo(*_args, **_kwargs):
+        time.sleep(5)
+        return [(None, None, None, None, ("10.0.0.9", 0))]
+
+    monkeypatch.setattr(network.socket, "getaddrinfo", slow_getaddrinfo)
+    monkeypatch.setattr(network, "HOSTNAME_LOOKUP_TIMEOUT", 0.05)
+
+    started = time.monotonic()
+    result = network._all_addresses()
+
+    assert result == [] and time.monotonic() - started < 1.0
 
 
 def test_real_lookup_returns_only_ipv4_strings():
