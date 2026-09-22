@@ -31,10 +31,13 @@ def make_app(tmp_path, **services):
     services.setdefault("server", FakeServer())  # настоящий сервер в тестах экрана не запускаем
     services.setdefault("updates", None)  # проверку обновлений в тестах отключаем
     services.setdefault("support", False)  # окно поддержки автора в тестах экрана не показываем
-    # настоящие ft.FilePicker()/ft.Clipboard() — сервисы Flet, обращающиеся к системе за пределами
-    # запущенного приложения; в тестах экрана не нужны и на macOS-раннере CI заметно подвисают
-    services.setdefault("picker", FakePicker())
-    services.setdefault("clipboard", FakeClipboard())
+    services.setdefault("picker", FakePicker())  # настоящий ft.FilePicker() тестам не нужен
+    services.setdefault("clipboard", FakeClipboard())  # настоящий ft.Clipboard() тестам не нужен
+    # server_enabled=True по умолчанию (сервер стартует вместе с приложением) — без этой подмены
+    # build() дёргает настоящий lan_addresses() -> socket.getaddrinfo(socket.gethostname(), ...);
+    # на macOS-раннере CI имя хоста оканчивается на .local, и его резолв через mDNS виснет
+    # на 30+ секунд (найдено по трассировке зависшего теста, см. историю коммитов).
+    services.setdefault("addresses", lambda: [])
     page = StubPage()
     app = build_page(page, service=SearchService(tmp_path / "data"), **services)
     return app, page
