@@ -87,7 +87,7 @@ $env:PYTHONPATH = "apps\desktop\src"    # bash: export PYTHONPATH=apps/desktop/s
 
 ## Сборки (Windows, macOS, Android)
 
-Сборки делает GitHub Actions: по тегу `v*` (например `v0.2.0`) в релиз попадают `GMAGC-desktop-windows-<версия>.zip`, `GMAGC-desktop-macos-<версия>.zip`, `GMAGC-android-<версия>.apk` и файлы `.sha256`. Те же сборки запускаются на Pull Request и вручную (Actions → нужный workflow → Run workflow), артефакты лежат в запуске.
+Сборки делает GitHub Actions: по тегу `v*` (например `v0.2.0`) в релиз попадают `GMAGC-desktop-windows-<версия>.zip`, `GMAGC-Setup-<версия>.exe` (то же самое, но установщиком: ставит в `%LocalAppData%\Programs\GMAGC` без прав администратора, добавляет ярлык и запись в «Установка и удаление программ»; собирается [Inno Setup](https://jrsoftware.org/isinfo.php) из `packaging/windows/gmagc.iss`), `GMAGC-desktop-macos-<версия>.zip`, `GMAGC-android-<версия>.apk` и файлы `.sha256`. Те же сборки запускаются на Pull Request и вручную (Actions → нужный workflow → Run workflow), артефакты лежат в запуске. Автообновление всегда использует zip — устанавливать `.exe` вручную нужно только один раз.
 
 ПК-приложение ищет по фото и принимает снимки с телефона, Android-приложение снимает и отправляет их (см. выше и ниже). Приложения без подписей:
 - macOS: правый клик по приложению → «Открыть»;
