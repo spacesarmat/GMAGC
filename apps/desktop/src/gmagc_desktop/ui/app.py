@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import platform
+import urllib.parse
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +22,7 @@ from gmagc_desktop.server.network import lan_addresses
 from gmagc_desktop.server.qr import qr_png
 from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service import autostart
+from gmagc_desktop.service.logging_setup import setup_logging
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import CorrectionError, NoIndexError, PhotoError, SearchService
@@ -28,6 +32,9 @@ from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, so
 from gmagc_desktop.ui.update_bar import UpdateBar
 from gmagc_desktop.update.installer import current_executable
 from gmagc_desktop.update.manager import UpdateManager
+
+logger = logging.getLogger("gmagc.desktop")
+SUPPORT_EMAIL = "yodayodaspace@gmail.com"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
@@ -105,12 +112,15 @@ class DesktopApp:
         update_delay: float = 5.0,
         support: bool = True,
         support_delay: float = 8.0,
+        log_path: Path | None = None,
     ):
         self.page = page
         self.service = service
         self.picker = picker or ft.FilePicker()
         self.clipboard = clipboard or ft.Clipboard()
         self.reveal = reveal
+        self._open_url = open_url
+        self._log_path = log_path or (service.data_dir / "gmagc.log")
         self.check = check
         self.server = server or PhoneServer(service)
         self.server.on_request = self.on_phone_request
@@ -210,6 +220,7 @@ class DesktopApp:
             ft.PopupMenuItem(
                 content=ft.Row([ft.Text("Проверить ядро", size=13), self.check_label]), on_click=self.on_check
             ),
+            ft.PopupMenuItem(content=ft.Text("Отправить лог по почте", size=13), on_click=self.on_send_log),
         ]
         if self.update_bar is not None:
             items.append(
@@ -347,6 +358,8 @@ class DesktopApp:
         self.banner_text.value = text
         self.banner.bgcolor = ft.Colors.RED_100 if error else ft.Colors.AMBER_100
         self.banner.visible = True
+        if error:
+            logger.error(text)  # попадает в лог-файл — можно приложить письмом («Отправить лог по почте»)
         self.page.update()
 
     def _hide_banner(self) -> None:
@@ -699,6 +712,22 @@ class DesktopApp:
         self.check_label.value = head + ", " + ", ".join(f"{name}: {value}" for name, value in info["versions"].items())
         self.page.update()
 
+    def on_send_log(self, _event) -> None:
+        """Открывает почтовый клиент с готовым письмом и показывает файл лога в проводнике, чтобы приложить
+        его вручную: само приложение не может безопасно отправить почту (учётные данные никуда не вшиты)."""
+        body = (
+            f"Версия: {NAME} {VERSION}\n"
+            f"ОС: {platform.platform()}\n"
+            f"Индекс: {status_text(self.service.status())}\n\n"
+            "Опишите проблему и приложите файл лога — он открыт в проводнике/Finder.\n"
+        )
+        query = urllib.parse.urlencode({"subject": "GMAGC: лог и описание проблемы", "body": body})
+        self._open_url(f"mailto:{SUPPORT_EMAIL}?{query}")
+        if self._log_path.exists() and self._log_path.stat().st_size > 0:
+            self.reveal(str(self._log_path))
+        else:
+            self._show_banner("Файл лога пока пуст: ошибок в этой сессии не было", error=False)
+
     def _run_demo(self, library: str, photo: str) -> None:
         """Отладка: GMAGC_DEMO_LIBRARY / GMAGC_DEMO_PHOTO запускают индексацию и поиск при старте."""
         self._set_busy(True, indexing=True)
@@ -720,6 +749,7 @@ def build_page(page: ft.Page, service: SearchService | None = None, **services) 
     service = service or SearchService(data_dir())
     if "updates" not in services:  # updates=None в тестах отключает обновления
         services["updates"] = UpdateManager(service, data_dir())
+    services.setdefault("log_path", setup_logging(service.data_dir))
     app = DesktopApp(page, service, **services)
     app.build()
     return app

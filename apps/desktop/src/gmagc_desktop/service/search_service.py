@@ -66,6 +66,10 @@ class SearchService:
         self._done = 0
         self._total = 0
 
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir
+
     def _use(self, index: LibraryIndex | None) -> None:
         with self._lock:
             self._index = index

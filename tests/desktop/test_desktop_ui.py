@@ -393,6 +393,38 @@ def test_core_check_menu_item_shows_the_result(tmp_path):
     assert "ОК" in app.check_label.value and "numpy: 9.9" in app.check_label.value
 
 
+def test_the_log_file_lives_next_to_the_search_service_data_not_the_real_user_profile(tmp_path):
+    app, _ = make_app(tmp_path)
+
+    assert app._log_path == app.service.data_dir / "gmagc.log"
+    assert app._log_path.parent == tmp_path / "data"
+
+
+def test_send_log_opens_mail_with_diagnostics_and_reveals_the_log_file(tmp_path, library):
+    opened = []
+    revealed = []
+    app, _ = indexed_app(tmp_path, library, open_url=opened.append, reveal=revealed.append)
+    app._show_banner("что-то пошло не так", error=True)  # попадает в лог-файл
+
+    app.on_send_log(None)
+
+    assert len(opened) == 1
+    assert opened[0].startswith(f"mailto:{app_module.SUPPORT_EMAIL}?")
+    assert "subject=GMAGC" in opened[0]
+    assert revealed == [str(app._log_path)]
+    assert "что-то пошло не так" in app._log_path.read_text(encoding="utf-8")
+
+
+def test_send_log_shows_a_message_when_the_log_has_no_errors_yet(tmp_path):
+    opened = []
+    app, _ = make_app(tmp_path, open_url=opened.append)
+
+    app.on_send_log(None)
+
+    assert opened  # письмо всё равно открывается — лог просто не прикладываем
+    assert "пока пуст" in app.banner_text.value
+
+
 def key(k, ctrl=False, shift=False, alt=False, meta=False):
     return SimpleNamespace(key=k, ctrl=ctrl, shift=shift, alt=alt, meta=meta)
 
