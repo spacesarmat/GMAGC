@@ -88,6 +88,11 @@ def test_the_backup_folder_sits_next_to_the_app():
     assert backup_dir(Path("C:/Apps/GMAGC")) == Path("C:/Apps/GMAGC.previous")
 
 
+def test_the_macos_backup_is_hidden_and_not_indexed_as_its_own_app():
+    """.previous рядом с .app-пакетом Launchpad и Spotlight показывают как отдельное приложение."""
+    assert backup_dir(Path("/Applications/GMAGC.app")) == Path("/Applications/.GMAGC.previous")
+
+
 def test_sha256_of_a_file(tmp_path):
     path = tmp_path / "f.bin"
     path.write_bytes(b"hello")

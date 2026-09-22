@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from gmagc_common.updates import ReleaseInfo, check_due, fetch_latest, pick_assets
 from gmagc_mobile.about import VERSION
 
-KEY_ENABLED = "gmagc.updates.enabled"
 KEY_LAST = "gmagc.updates.last_check"
 KEY_SKIPPED = "gmagc.updates.skipped"
 
@@ -41,19 +40,11 @@ class UpdateTracker:
         except Exception:  # noqa: BLE001 - недоступное хранилище не должно мешать
             return None
 
-    async def enabled(self) -> bool:
-        value = await self._get(KEY_ENABLED)
-        return value if isinstance(value, bool) else True
-
-    async def set_enabled(self, enabled: bool) -> None:
-        await self._prefs.set(KEY_ENABLED, enabled)
-
     async def check(self, *, force: bool = False) -> UpdateNotice | None:
-        """Уведомление о новой версии или None. Без force учитываются выключатель, интервал и пропущенная версия."""
+        """Уведомление о новой версии или None. Без force учитываются интервал и пропущенная версия (проверка
+        на Android обязательна: в отличие от ПК, здесь нет выключателя)."""
         now = self._now()
         if not force:
-            if not await self.enabled():
-                return None
             last = await self._get(KEY_LAST)
             last = float(last) if isinstance(last, int | float) and not isinstance(last, bool) else 0.0
             if not check_due(last, now):

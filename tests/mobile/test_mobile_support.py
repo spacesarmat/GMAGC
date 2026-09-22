@@ -1,9 +1,14 @@
 import asyncio
 
-from gmagc_common.support import AUTHOR_TELEGRAM_URL, REMIND_AFTER_SECONDS, SUPPORT_URL
+import flet as ft
+
+from gmagc_common.support import AUTHOR_TELEGRAM_URL, CHANNEL_URL, REMIND_AFTER_SECONDS, SUPPORT_URL
+from gmagc_mobile.app import MobileApp
+from gmagc_mobile.camera import CameraController
+from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.support import KEY_LAST, KEY_LAUNCHES, KEY_MUTED, SupportPrompt
-from tests.fakes import StubPage
-from tests.fakes_mobile import FakeLauncher, FakePrefs
+from tests.fakes import FakeClipboard, FakePicker, StubPage, walk
+from tests.fakes_mobile import FakeCameraApi, FakeLauncher, FakePermission, FakePrefs, Script
 
 NOW = 1_800_000_000.0
 
@@ -85,3 +90,70 @@ def test_the_telegram_link_opens_the_authors_account():
     run(prompt.on_open_telegram(None))
 
     assert launcher.opened == [AUTHOR_TELEGRAM_URL]
+
+
+def test_the_channel_link_opens_the_gmagc_channel():
+    prompt, _, launcher, _ = make()
+
+    run(prompt.on_open_channel(None))
+
+    assert launcher.opened == [CHANNEL_URL] and CHANNEL_URL == "https://t.me/gmagclight"
+
+
+# ---- встроено в экран (ссылки нужны сразу на трёх экранах) ------------------------------------------
+def make_app(support_flag=True):
+    page = StubPage()
+    prefs = FakePrefs()
+    launcher = FakeLauncher()
+    app = MobileApp(
+        page,
+        ConnectionStore(prefs),
+        CameraController(FakeCameraApi(), FakePermission(), settle_seconds=0, retry_seconds=0),
+        preview=ft.Container(),
+        picker=FakePicker(),
+        clipboard=FakeClipboard(),
+        client_factory=Script().factory,
+        marker_seconds=0,
+        mount_seconds=0,
+        support=support_flag,
+        launcher=launcher,
+        prefs=prefs,
+        tracker=None,
+    )
+    app.build()
+    return app, launcher
+
+
+def link_texts(view):
+    return [c.content.value for c in walk(view) if isinstance(c, ft.TextButton) and isinstance(c.content, ft.Text)]
+
+
+def test_support_links_appear_on_the_connect_camera_and_results_screens():
+    app, _ = make_app()
+
+    for view in (app.connect_view, app.camera_view, app.results_view):
+        texts = link_texts(view)
+        assert "Поддержать автора" in texts and "Telegram автора" in texts and "Канал GMAGC" in texts
+
+
+def test_each_screens_channel_link_button_is_its_own_control_and_opens_the_channel():
+    """Один и тот же контрол Flet нельзя вставить сразу в несколько мест дерева — на каждом экране своя кнопка."""
+    app, launcher = make_app()
+
+    def channel_button(view):
+        return next(c for c in walk(view) if isinstance(c, ft.TextButton) and c.content.value == "Канал GMAGC")
+
+    camera_button, results_button = channel_button(app.camera_view), channel_button(app.results_view)
+    assert camera_button is not results_button
+
+    run(results_button.on_click(None))
+
+    assert launcher.opened == [CHANNEL_URL]
+
+
+def test_no_support_links_when_support_is_disabled():
+    app, _ = make_app(support_flag=False)
+
+    for view in (app.connect_view, app.camera_view, app.results_view):
+        labels = {"Поддержать автора", "Telegram автора", "Канал GMAGC"}
+        assert not labels & set(link_texts(view))

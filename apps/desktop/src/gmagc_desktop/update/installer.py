@@ -74,6 +74,12 @@ def is_writable(path: Path) -> bool:
 
 
 def backup_dir(target: Path) -> Path:
+    """Папка/пакет рядом с приложением для резервной копии перед обновлением.
+
+    На macOS резерв не должен сам оканчиваться на .app: иначе Launchpad и Spotlight показывают его как отдельное
+    приложение. Убираем расширение и прячем точкой в начале имени (скрытый файл, как и на Windows он не мешает)."""
+    if target.suffix == ".app":
+        return target.with_name(f".{target.stem}.previous")
     return target.with_name(target.name + ".previous")
 
 

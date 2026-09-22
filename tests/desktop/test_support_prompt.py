@@ -1,4 +1,4 @@
-from gmagc_common.support import AUTHOR_TELEGRAM_URL, FIRST_ASK_LAUNCH, REMIND_AFTER_SECONDS, SUPPORT_URL
+from gmagc_common.support import AUTHOR_TELEGRAM_URL, CHANNEL_URL, FIRST_ASK_LAUNCH, REMIND_AFTER_SECONDS, SUPPORT_URL
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_desktop.service.settings import Settings, load_settings, save_settings
 from gmagc_desktop.ui.support import SupportPrompt
@@ -110,3 +110,11 @@ def test_the_telegram_link_opens_the_authors_account(tmp_path):
     prompt.on_open_telegram(None)
 
     assert opened == [AUTHOR_TELEGRAM_URL] and AUTHOR_TELEGRAM_URL == "https://t.me/Andy_bum"
+
+
+def test_the_channel_link_opens_the_gmagc_channel(tmp_path):
+    prompt, _, _, opened = make(tmp_path, launches=1)
+
+    prompt.on_open_channel(None)
+
+    assert opened == [CHANNEL_URL] and CHANNEL_URL == "https://t.me/gmagclight"
