@@ -28,6 +28,17 @@ def test_update_index_builds_saves_and_reuses_the_cache(library, tmp_path):
     assert len(second) == 6 and second.model_id == first.model_id
 
 
+def test_update_index_keeps_the_previous_cache_as_a_backup_before_overwriting(library, tmp_path):
+    path = tmp_path / "cache" / "index.npz"
+    backup = path.with_name("index.npz.previous")
+
+    update_index(library, PixelEmbedder(), path)
+    assert not backup.exists()  # первая сборка: старого индекса ещё нет, резервировать нечего
+
+    update_index(library, PixelEmbedder(), path)
+    assert backup.exists() and backup.stat().st_size > 0  # второй раз: прежний файл сохранён как резерв
+
+
 def test_cancelled_update_saves_nothing(library, tmp_path):
     path = tmp_path / "cache" / "index.npz"
 
