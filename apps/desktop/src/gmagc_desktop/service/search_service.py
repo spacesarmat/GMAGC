@@ -23,8 +23,11 @@ from gmagc_desktop.matcher.pipeline import normalize_photo
 from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Match, Searcher
 from gmagc_desktop.matcher.thumbnail import thumbnail_png
 from gmagc_desktop.service.access import generate_code
+from gmagc_desktop.service.corrections import Correction, load_corrections, new_correction, save_corrections
 from gmagc_desktop.service.results import LOW_CONFIDENCE_SCORE, IndexStatus, Outcome, Result, SearchOutcome
 from gmagc_desktop.service.settings import Settings, load_settings, save_settings, settings_from_json, settings_to_json
+
+CORRECTION_SCORE = 0.95  # оценка, с которой показывается результат, продвинутый исправлением пользователя
 
 THUMBNAIL_SIZE = 96
 PROJECTION_SIZE = 160
@@ -39,6 +42,10 @@ class NoIndexError(RuntimeError):
     """Индекса нет: библиотека не выбрана или индекс не построен."""
 
 
+class CorrectionError(ValueError):
+    """Указанный «верный» файл не в библиотеке или не входит в текущий индекс — исправление не сохранено."""
+
+
 def _elapsed_ms(started: float) -> float:
     return (time.perf_counter() - started) * 1000.0
 
@@ -49,6 +56,8 @@ class SearchService:
         self._embedder = embedder or PixelEmbedder()
         self._settings_path = self._data_dir / "settings.json"
         self._index_path = self._data_dir / "index.npz"
+        self._corrections_path = self._data_dir / "corrections.json"
+        self._corrections: list[Correction] = []
         self.settings = Settings()
         self._index: LibraryIndex | None = None
         self._searcher: Searcher | None = None
@@ -83,15 +92,19 @@ class SearchService:
         if index is not None and index.model_id != self._embedder.model_id:
             index = None
         self._use(index)
+        self._corrections = load_corrections(self._corrections_path)
         return self.status()
 
     def set_library(self, path: str | Path) -> None:
-        """Запоминает папку библиотеки; индекс другой папки сбрасывается вместе с кэшем."""
+        """Запоминает папку библиотеки; индекс и исправления другой папки сбрасываются вместе с кэшем
+        (пути в исправлениях относительны конкретной библиотеки — для другой они не имеют смысла)."""
         path = str(path)
         with self._lock:
             if path != self.settings.library_dir:
                 self._use(None)
                 self._index_path.unlink(missing_ok=True)
+                self._corrections = []
+                self._corrections_path.unlink(missing_ok=True)
             self._update_settings(library_dir=path)
 
     def build_index(
@@ -202,6 +215,51 @@ class SearchService:
         known = {(f.rel_path, f.size, f.mtime_ns) for f in (*index.files, *index.skipped, *index.transient)}
         return current != known
 
+    def add_correction(self, wrong_rel_path: str, correct_full_path: str) -> None:
+        """Запоминает: показанный `wrong_rel_path` неверен, правильный файл — `correct_full_path` (внутри
+        библиотеки и текущего индекса). Впредь, если `wrong_rel_path` снова окажется среди результатов
+        похожего запроса, верный файл будет показан первым — без переобучения модели."""
+        with self._lock:
+            index = self._index
+            if index is None or not self.settings.library_dir:
+                raise CorrectionError("индекс не построен")
+            root = Path(self.settings.library_dir).resolve()
+            try:
+                rel = str(Path(correct_full_path).resolve().relative_to(root)).replace("\\", "/")
+            except ValueError:
+                raise CorrectionError("выбранный файл не в папке библиотеки") from None
+            if not any(f.rel_path == rel for f in index.files):
+                raise CorrectionError("выбранный файл не входит в текущий индекс: обновите его и попробуйте снова")
+            self._corrections.append(new_correction(wrong_rel_path, rel))
+            save_corrections(self._corrections, self._corrections_path)
+
+    def _apply_corrections(self, results: tuple[Result, ...], index: LibraryIndex) -> tuple[Result, ...]:
+        if not self._corrections:
+            return results
+        shown = {r.rel_path for r in results}
+        promoted: list[Result] = []
+        promoted_paths: set[str] = set()
+        for correction in self._corrections:
+            if correction.wrong_rel_path not in shown or correction.correct_rel_path in promoted_paths:
+                continue  # неверный файл не всплыл в этом поиске — исправление сейчас не нужно
+            fixed = self._lookup_result(index, correction.correct_rel_path)
+            if fixed is not None:
+                promoted.append(fixed)
+                promoted_paths.add(correction.correct_rel_path)
+        if not promoted:
+            return results
+        combined = promoted + [r for r in results if r.rel_path not in promoted_paths]
+        return tuple(replace(r, rank=i) for i, r in enumerate(combined, start=1))
+
+    def _lookup_result(self, index: LibraryIndex, rel_path: str) -> Result | None:
+        for i, file in enumerate(index.files):
+            if file.rel_path == rel_path:
+                group = int(index.group_ids[i])
+                members = tuple(j for j, g in enumerate(index.group_ids.tolist()) if g == group)
+                match = Match(i, CORRECTION_SCORE, CORRECTION_SCORE, CORRECTION_SCORE, 0.0, False, members)
+                return self._result(index, 0, match)
+        return None
+
     def search_photo(self, photo_bgr: np.ndarray, top_n: int | None = None) -> SearchOutcome:
         with self._lock:  # индекс и папка библиотеки не меняются, пока идёт поиск
             return self._search(photo_bgr, top_n)
@@ -216,6 +274,7 @@ class SearchService:
             return SearchOutcome(Outcome.NO_PROJECTION, took_ms=_elapsed_ms(started))
         matches = searcher.search(normalized, top_n=top_n or self.settings.top_n)
         results = tuple(self._result(index, rank, match) for rank, match in enumerate(matches, start=1))
+        results = self._apply_corrections(results, index)
         confident = bool(results) and results[0].score >= LOW_CONFIDENCE_SCORE
         return SearchOutcome(
             Outcome.FOUND if confident else Outcome.LOW_CONFIDENCE,

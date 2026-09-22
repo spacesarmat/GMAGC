@@ -8,7 +8,7 @@ from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound
 from gmagc_desktop.matcher.synthetic import simulate_photo
 from gmagc_desktop.service import search_service
 from gmagc_desktop.service.results import Outcome
-from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
+from gmagc_desktop.service.search_service import CorrectionError, NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import Settings, settings_to_json
 from tests.fixtures import shape_images, write_library
 
@@ -247,3 +247,65 @@ def test_a_vanished_library_file_gets_a_blank_thumbnail(service, library):
     outcome = service.search_photo(simulate_photo(shape_images()["gobo"], np.random.default_rng(3)))
 
     assert any(r.name == "gobo.png" and r.thumbnail_png == search_service.BLANK_THUMBNAIL for r in outcome.results)
+
+
+# ---- обучение на исправлениях -----------------------------------------------------------------------
+def test_add_correction_rejects_a_file_outside_the_library(service, tmp_path):
+    outside = tmp_path / "elsewhere.png"
+    outside.write_bytes(b"whatever, only the path matters here")
+
+    with pytest.raises(CorrectionError):
+        service.add_correction("vendor_b/ell.png", str(outside))
+
+
+def test_add_correction_rejects_a_file_not_in_the_current_index(service, library):
+    with pytest.raises(CorrectionError):
+        service.add_correction("vendor_b/ell.png", str(library / "vendor_a" / "missing.png"))
+
+
+def test_a_correction_promotes_the_correct_file_when_the_wrong_one_resurfaces(service, library):
+    # первый результат по фото-эллу — vendor_b/ell.png; учим, что на самом деле нужен vendor_c/gobo.png
+    wrong = service.search_photo(ell_photo()).results[0].rel_path
+    assert wrong == "vendor_b/ell.png"
+
+    service.add_correction(wrong, str(library / "vendor_c" / "gobo.png"))
+    outcome = service.search_photo(ell_photo())
+
+    assert outcome.results[0].rel_path == "vendor_c/gobo.png"
+    assert outcome.results[0].score >= 0.9
+    assert any(r.rel_path == "vendor_b/ell.png" for r in outcome.results)  # старый результат остаётся ниже, не исчезает
+
+
+def test_a_correction_does_not_affect_searches_where_the_wrong_file_never_shows_up(service, library):
+    # top_n=1 имитирует настоящую библиотеку: там неверный файл (эллы) обычно не попал бы в результаты
+    # запроса на совсем другую форму (кольцо) — в этой тестовой библиотеке из 5 файлов иначе не проверить
+    service.add_correction("vendor_b/ell.png", str(library / "vendor_c" / "gobo.png"))
+
+    outcome = service.search_photo(simulate_photo(shape_images()["ring"], np.random.default_rng(9)), top_n=1)
+
+    assert outcome.results[0].rel_path == "vendor_a/ring.png"
+
+
+def test_corrections_persist_across_reload(tmp_path, library):
+    service = SearchService(tmp_path / "data")
+    service.load()
+    service.set_library(library)
+    service.build_index()
+    wrong = service.search_photo(ell_photo()).results[0].rel_path
+    service.add_correction(wrong, str(library / "vendor_c" / "gobo.png"))
+
+    reloaded = SearchService(tmp_path / "data")
+    reloaded.load()
+    outcome = reloaded.search_photo(ell_photo())
+
+    assert outcome.results[0].rel_path == "vendor_c/gobo.png"
+
+
+def test_changing_the_library_drops_stale_corrections_too(service, tmp_path, library):
+    service.add_correction("vendor_b/ell.png", str(library / "vendor_c" / "gobo.png"))
+    other = tmp_path / "other"
+    other.mkdir()
+
+    service.set_library(other)
+
+    assert service._corrections == []  # noqa: SLF001 - пути были относительны прежней библиотеки

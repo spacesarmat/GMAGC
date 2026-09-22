@@ -261,6 +261,41 @@ def test_rebuild_without_a_library_and_photo_without_an_index_ask_for_a_folder(t
     assert "Сначала выберите папку" in app.banner_text.value
 
 
+def _report_wrong_button(app):
+    return next(
+        c for c in walk(app.results_column) if isinstance(c, ft.IconButton) and c.tooltip and "не то" in c.tooltip
+    )
+
+
+def test_reporting_a_wrong_result_learns_and_immediately_refreshes_results(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    assert app.results_column.controls[0].content.data.endswith("ell.png")
+
+    button = _report_wrong_button(app)
+    app.picker.files = [str(library / "vendor_c" / "gobo.png")]
+
+    asyncio.run(app.on_report_wrong(SimpleNamespace(control=button)))
+
+    assert "Запомнено" in app.banner_text.value
+    assert app.results_column.controls[0].content.data.endswith("gobo.png")
+
+
+def test_reporting_a_wrong_result_shows_an_error_for_a_file_outside_the_library(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    button = _report_wrong_button(app)
+    app.picker.files = [str(tmp_path / "outside.png")]
+
+    asyncio.run(app.on_report_wrong(SimpleNamespace(control=button)))
+
+    assert app.banner.visible and "не в папке библиотеки" in app.banner_text.value
+
+
 def test_indexing_errors_and_cancel_are_shown_not_raised(tmp_path, library, monkeypatch):
     app, _ = indexed_app(tmp_path, library)
 

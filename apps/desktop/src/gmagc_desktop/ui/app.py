@@ -21,7 +21,7 @@ from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service import autostart
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
-from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
+from gmagc_desktop.service.search_service import CorrectionError, NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import data_dir
 from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
@@ -129,6 +129,7 @@ class DesktopApp:
         self.history: list[RequestRecord] = []
         self._busy = False
         self._cancel = False
+        self._last_query_photo: bytes | None = None  # для повтора поиска сразу после «Это не то»
 
         self.splash = ft.Container(
             ft.Image(src="logo.svg", width=140, height=140, fit=ft.BoxFit.CONTAIN),
@@ -599,6 +600,7 @@ class DesktopApp:
             self._set_busy(False)
 
     def _show_photo(self, data: bytes) -> None:
+        self._last_query_photo = data
         self.photo_holder.controls = [
             ft.Text("Фото"),
             ft.Image(src=data, width=260, height=200, fit=ft.BoxFit.CONTAIN),
@@ -643,6 +645,12 @@ class DesktopApp:
                                     tooltip="Показать в папке",
                                     on_click=lambda _event, path=result.full_path: self.reveal(path),
                                 ),
+                                ft.IconButton(
+                                    icon=ft.Icons.THUMB_DOWN_OUTLINED,
+                                    tooltip="Это не то — указать верный файл",
+                                    data=result,
+                                    on_click=self.on_report_wrong,
+                                ),
                             ],
                             horizontal_alignment=ft.CrossAxisAlignment.END,
                             spacing=4,
@@ -668,6 +676,21 @@ class DesktopApp:
         self.copy_label.value = f"Путь скопирован: {absolute}"
         self.copy_label.visible = True
         self.page.update()
+
+    async def on_report_wrong(self, event) -> None:
+        """«Это не то»: пользователь указывает верный файл — учитывается при похожих запросах впредь."""
+        result: Result = event.control.data
+        files = await self.picker.pick_files(dialog_title="Выберите верный файл", file_type=ft.FilePickerFileType.IMAGE)
+        if not files or not files[0].path:
+            return
+        try:
+            self.service.add_correction(result.rel_path, files[0].path)
+        except CorrectionError as error:
+            self._show_banner(str(error), error=True)
+            return
+        self._show_banner("Запомнено: при похожих запросах теперь будет показан верный файл", error=False)
+        if self._last_query_photo is not None:
+            self._start_search(self._last_query_photo)
 
     # ---- прочее ------------------------------------------------------------
     def on_check(self, _event) -> None:
