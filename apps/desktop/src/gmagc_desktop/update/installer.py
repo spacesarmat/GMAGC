@@ -203,7 +203,10 @@ def stage(zip_path: Path, staging_dir: Path, platform: str) -> Path:
 
 
 def windows_script(*, pid: int, staged: str, target: str, backup: str, exe: str, log: str) -> str:
-    """Пакетный файл: ждёт выхода приложения, копирует прежнюю версию в резерв, ставит новую, при сбое возвращает резерв."""
+    """Пакетный файл: ждёт выхода приложения, переименовывает прежнюю версию в резерв и новую версию — на её
+    место. Переименование папки на одном диске — мгновенная операция (в отличие от покопирования файл за
+    файлом через robocopy, которую легко прервать на середине, оставив папку в смешанном состоянии), при
+    сбое возвращает резерв."""
 
     def value(text: str) -> str:
         return text.replace("%", "%%")  # процент в пути иначе разворачивается cmd
@@ -225,15 +228,15 @@ def windows_script(*, pid: int, staged: str, target: str, backup: str, exe: str,
         "  goto wait",
         ")",
         'if exist "%BAK%" rmdir /s /q "%BAK%"',
-        'robocopy "%DST%" "%BAK%" /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1',
-        "if errorlevel 8 goto restore",
-        'robocopy "%SRC%" "%DST%" /E /R:3 /W:2 /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1',
-        "if errorlevel 8 goto restore",
+        'move "%DST%" "%BAK%" >> "%LOG%" 2>&1',
+        "if errorlevel 1 goto launch",
+        'move "%SRC%" "%DST%" >> "%LOG%" 2>&1',
+        "if errorlevel 1 goto restore",
         'echo updated >> "%LOG%"',
         "goto launch",
         ":restore",
         'echo update failed, restoring the previous version >> "%LOG%"',
-        'robocopy "%BAK%" "%DST%" /E /R:3 /W:2 /NFL /NDL /NJH /NJS /NP >> "%LOG%" 2>&1',
+        'move "%BAK%" "%DST%" >> "%LOG%" 2>&1',
         ":launch",
         'start "" "%EXE%"',
         'rmdir /s /q "%SRC%" 2>nul',
@@ -254,7 +257,7 @@ def macos_script(*, pid: int, staged: str, target: str, backup: str, log: str) -
         'while kill -0 "$PID" 2>/dev/null; do sleep 1; done',
         'rm -rf "$BAK"',
         'if ! mv "$DST" "$BAK"; then echo "cannot move the old version" >> "$LOG"; open "$DST"; exit 1; fi',
-        'if ! ditto "$SRC" "$DST" >> "$LOG" 2>&1; then',
+        'if ! mv "$SRC" "$DST" >> "$LOG" 2>&1; then',
         '  echo "update failed, restoring the previous version" >> "$LOG"',
         '  rm -rf "$DST"; mv "$BAK" "$DST"',
         "fi",
