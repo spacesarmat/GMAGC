@@ -151,6 +151,18 @@ def test_the_exit_hint_is_hidden_when_going_back_a_screen():
     assert views_shown(app) == ["camera"] and not app.back_hint.visible
 
 
+def test_the_hint_overlays_the_screen_instead_of_shrinking_the_camera_view():
+    """Раньше подсказка была элементом той же Column, где camera_view тоже expand=True: появляясь, она отжимала
+    высоту у окна камеры. Теперь это отдельный слой Stack, а не соседний по потоку элемент."""
+    app, _, _, _ = make(STORED)
+
+    stack = app.page.added[0].content  # SafeArea -> Stack
+    assert isinstance(stack, ft.Stack)
+    flow_column = stack.controls[0]
+    assert app.back_hint not in flow_column.controls
+    assert app.camera_view in flow_column.controls
+
+
 def test_a_page_without_views_does_not_break_the_build():
     class Bare(StubPage):
         def __init__(self):
