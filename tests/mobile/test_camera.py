@@ -5,7 +5,7 @@ import flet_permission_handler as ph
 import pytest
 
 from gmagc_mobile.camera import CameraController
-from tests.fakes_mobile import FakeCameraApi, FakePermission, cam
+from tests.fakes_mobile import FakeCameraApi, FakePermission, cam, frame_event
 
 
 def make(api=None, permission=None):
@@ -179,6 +179,62 @@ def test_pause_and_resume_only_touch_a_ready_camera_and_never_raise():
     asyncio.run(controller.pause())
     asyncio.run(controller.resume())
     assert api.calls[-2:] == [("pause",), ("resume",)]
+
+
+def test_scanning_starts_the_frame_stream_and_wires_the_callback():
+    controller, api = started(FakeCameraApi(streaming=True))
+    seen = []
+
+    async def on_frame(event):
+        seen.append(event)
+
+    assert asyncio.run(controller.start_scanning(on_frame)) is True
+    assert api.stream_started == 1 and api.on_stream_image is on_frame
+
+    asyncio.run(api.on_stream_image(frame_event(width=10, height=10)))
+    assert seen and seen[0].width == 10
+
+    asyncio.run(controller.stop_scanning())
+    assert api.stream_stopped == 1 and api.on_stream_image is None
+
+
+def test_scanning_is_refused_when_the_camera_does_not_support_it():
+    controller, api = started(FakeCameraApi(streaming=False))
+
+    started_ok = asyncio.run(controller.start_scanning(lambda event: None))
+
+    assert started_ok is False and api.stream_started == 0
+
+
+def test_scanning_is_refused_when_the_camera_is_not_ready():
+    idle, api = make(FakeCameraApi(streaming=True))
+
+    assert asyncio.run(idle.start_scanning(lambda event: None)) is False and api.stream_started == 0
+
+
+def test_a_plugin_that_lacks_streaming_support_falls_back_gracefully():
+    """Старые версии плагина без нужных методов: сканирование тихо недоступно, а не падение экрана."""
+
+    class NoStreamingApi(FakeCameraApi):
+        async def supports_image_streaming(self):
+            raise AttributeError("no such method")
+
+    controller, _ = started(NoStreamingApi())
+
+    assert asyncio.run(controller.start_scanning(lambda event: None)) is False
+
+
+def test_a_failure_starting_the_stream_is_reported_and_scanning_stays_off():
+    controller, api = started(FakeCameraApi(streaming=True, stream_fail="дым пошёл"))
+
+    assert asyncio.run(controller.start_scanning(lambda event: None)) is False
+    assert "дым пошёл" in controller.error
+
+
+def test_stopping_scanning_that_never_started_does_nothing():
+    controller, api = started()
+    asyncio.run(controller.stop_scanning())
+    assert api.stream_stopped == 0
 
 
 def test_an_unsupported_platform_reports_it_without_touching_the_camera():

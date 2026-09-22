@@ -94,6 +94,40 @@ def test_a_qr_photographed_with_moire_is_still_read_after_preprocessing():
     assert qr.decode_qr(noisy.getvalue()) == LINK
 
 
+def gray_frame(link=LINK, size=(400, 400), qr_side=300):
+    """Похоже на кадр потока камеры в сыром формате (NV21/YUV420): яркостная плоскость + произвольная «цветность»."""
+    code = Image.open(io.BytesIO(qr_png(link))).convert("L").resize((qr_side, qr_side), Image.NEAREST)
+    canvas = Image.new("L", size, 200)
+    canvas.paste(code, ((size[0] - qr_side) // 2, (size[1] - qr_side) // 2))
+    y_plane = canvas.tobytes()
+    chroma = bytes(len(y_plane) // 2)  # NV21: за яркостью следует плоскость цветности, для чтения QR она не нужна
+    return size[0], size[1], y_plane + chroma
+
+
+@needs_zbar
+def test_a_jpeg_stream_frame_is_read_like_a_photo():
+    width, height, jpeg = 1280, 720, camera_shot()
+
+    assert qr.decode_frame(width, height, "jpeg", jpeg) == LINK
+    assert qr.connection_from_frame(width, height, "jpeg", jpeg) == Connection("192.168.1.121", 8765, "ZBZ36YNK")
+
+
+@needs_zbar
+def test_a_raw_stream_frame_is_read_from_its_luma_plane():
+    width, height, raw = gray_frame()
+
+    assert qr.decode_frame(width, height, "nv21", raw) == LINK
+    assert qr.connection_from_frame(width, height, "yuv420", raw) == Connection("192.168.1.121", 8765, "ZBZ36YNK")
+
+
+@needs_zbar
+def test_a_truncated_raw_frame_is_reported_as_a_frame_error():
+    with pytest.raises(qr.QrImageError) as error:
+        qr.decode_frame(100, 100, "nv21", b"too short")
+
+    assert "кадр" in str(error.value)
+
+
 def test_the_shot_description_names_the_format_size_and_dimensions():
     jpeg = io.BytesIO()
     Image.new("RGB", (64, 48), (10, 20, 30)).save(jpeg, "JPEG")

@@ -26,7 +26,7 @@ from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
-from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_qr, diagnose
+from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.support import SupportPrompt
 from gmagc_mobile.texts import NO_INDEX_NOTE, error_text, outcome_message, score_text, status_line, zoom_text
@@ -38,9 +38,13 @@ MODE_SCAN = "scan"
 ZOOM_STEP = 0.5
 MARKER_SIZE = 64
 PAGE_PADDING = 12  # общий отступ страницы; кадр камеры вычитает его отрицательным полем, чтобы быть во всю ширину
+SCAN_INTERVAL = 0.4  # пауза между попытками распознать QR в потоке кадров камеры: бережёт батарею и процессор
 SCAN_HINT = (
-    "Наведите камеру на QR-код в приложении на ПК (приближение и касание для фокуса помогают) "
-    "и нажмите «Считать QR»"
+    "Наведите камеру на QR-код в приложении на ПК — считается автоматически (приближение и касание для фокуса помогают)"
+)
+SCAN_HINT_MANUAL = (
+    "Автосканирование недоступно на этом телефоне. Наведите камеру на QR-код в приложении на ПК "
+    "(приближение и касание для фокуса помогают) и нажмите «Считать QR»"
 )
 
 
@@ -56,6 +60,8 @@ class MobileApp:
         client_factory: Callable[[Connection], GmagcClient] = GmagcClient,
         qr_reader: Callable[[bytes], Connection | None] = connection_from_qr,
         qr_diagnose: Callable[[bytes], str] = diagnose,
+        frame_reader: Callable[[int, int, str, bytes], Connection | None] = connection_from_frame,
+        scan_interval: float = SCAN_INTERVAL,
         marker_seconds: float = 1.5,
         mount_seconds: float = 0.3,
         clock: Callable[[], float] = time.monotonic,
@@ -78,6 +84,10 @@ class MobileApp:
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.qr_diagnose = qr_diagnose
+        self.frame_reader = frame_reader
+        self.scan_interval = scan_interval  # пауза между попытками распознать QR в потоке кадров
+        self._scan_busy = False
+        self._scan_last = -1e9
         self.marker_seconds = marker_seconds
         self.mount_seconds = mount_seconds  # пауза, чтобы виджет камеры успел появиться на экране до запуска камеры
         self._clock = clock
@@ -331,7 +341,8 @@ class MobileApp:
         scanning = mode == MODE_SCAN
         self.camera_title.value = SCAN_HINT if scanning else self.status_text
         self.capture_button.visible = self.gallery_button.visible = not scanning
-        self.scan_now_button.visible = self.cancel_scan_button.visible = scanning
+        self.scan_now_button.visible = False  # включится в _start_auto_scan, если автопоток недоступен на телефоне
+        self.cancel_scan_button.visible = scanning
         self.change_pc_button.visible = not scanning
         self.camera_message.value = note or ""
         self.camera_message.visible = bool(note)
@@ -434,6 +445,45 @@ class MobileApp:
     async def on_scan_qr(self, _event) -> None:
         self._show_camera(MODE_SCAN)
         await self._ensure_camera()
+        await self._start_auto_scan()
+
+    async def _start_auto_scan(self) -> None:
+        """Пробует читать QR из потока кадров камеры без нажатия кнопки; если телефон это не умеет — ручная кнопка."""
+        self._scan_busy = False
+        self._scan_last = -1e9
+        started = self.camera.ready and await self.camera.start_scanning(self._on_scan_frame)
+        self.scan_now_button.visible = not started
+        if not started:
+            self.camera_title.value = SCAN_HINT_MANUAL
+        self.page.update()
+
+    async def _on_scan_frame(self, event) -> None:
+        """Вызывается на каждый кадр потока камеры, пока идёт сканирование; не чаще scan_interval и не параллельно."""
+        now = self._clock()
+        if self._scan_busy or now - self._scan_last < self.scan_interval:
+            return
+        self._scan_busy = True
+        self._scan_last = now
+        connection = None
+        try:
+            connection = await asyncio.to_thread(
+                self.frame_reader, event.width, event.height, event.encoded_format, event.bytes
+            )
+        except QrUnavailable:
+            await self.camera.stop_scanning()
+            self.scan_now_button.visible = True
+            self.camera_title.value = SCAN_HINT_MANUAL
+            self._camera_note("Автоматическое чтение QR недоступно на этом телефоне: введите адрес и код вручную.")
+        except QrImageError:
+            pass  # нечитаемый кадр — обычное дело на видео с камеры, просто ждём следующий
+        except Exception:  # noqa: BLE001 - поток не должен падать экран, просто пробуем следующий кадр
+            pass
+        finally:
+            self._scan_busy = False
+        if connection is None:
+            return
+        await self.camera.stop_scanning()
+        await self._connect(connection, announce=True)
 
     # ---- кнопка «Назад» ------------------------------------------------------
     async def on_confirm_pop(self, event) -> None:
@@ -456,6 +506,7 @@ class MobileApp:
             await self.on_again(None)
             return False
         if self.camera_view.visible and self.mode == MODE_SCAN:
+            await self.camera.stop_scanning()
             self._show_connect()
             return False
         now = self._clock()
@@ -468,6 +519,7 @@ class MobileApp:
         return False
 
     async def on_cancel_scan(self, _event) -> None:
+        await self.camera.stop_scanning()
         self._show_connect()
 
     async def on_scan_now(self, _event) -> None:

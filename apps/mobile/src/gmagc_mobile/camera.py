@@ -36,6 +36,7 @@ class CameraController:
         self.max_zoom = 1.0
         self.zoom = 1.0
         self.focus_locked = False
+        self._scanning = False
 
     async def start(self) -> bool:
         """Просит разрешение и включает заднюю камеру; причину неудачи кладёт в error.
@@ -74,6 +75,7 @@ class CameraController:
     def invalidate(self) -> None:
         """Помечает камеру неготовой: Flet убирает виджет камеры со скрытым экраном вместе с её контроллером."""
         self.ready = False
+        self._scanning = False  # старый плагин камеры уже выброшен вместе с виджетом, поток на нём не остановить
 
     async def restart(self) -> bool:
         self.invalidate()
@@ -131,6 +133,36 @@ class CameraController:
             return self.focus_locked
         self.focus_locked = target
         return target
+
+    async def start_scanning(self, on_frame) -> bool:
+        """Запускает поток кадров камеры для автосканирования QR; on_frame(event) вызывается на каждый кадр
+        (event: width, height, encoded_format, bytes — как flet_camera.CameraImageEvent).
+
+        False — поток недоступен на этом телефоне или камера не готова: вызывающий откатывается на снимок по кнопке.
+        """
+        if not self.ready:
+            return False
+        try:
+            if not await self.camera.supports_image_streaming():
+                return False
+            self.camera.on_stream_image = on_frame
+            await self.camera.start_image_stream()
+        except Exception as error:  # noqa: BLE001 - экран остаётся рабочим, просто без автосканирования
+            self.camera.on_stream_image = None
+            self.error = f"Поток камеры недоступен: {error}"
+            return False
+        self._scanning = True
+        return True
+
+    async def stop_scanning(self) -> None:
+        if not self._scanning:
+            return
+        self._scanning = False
+        self.camera.on_stream_image = None
+        try:
+            await self.camera.stop_image_stream()
+        except Exception:  # noqa: BLE001 - остановка не должна ронять экран
+            pass
 
     async def take_picture(self) -> bytes:
         if not self.ready:
