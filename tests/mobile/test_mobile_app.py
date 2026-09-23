@@ -844,13 +844,15 @@ def test_the_camera_control_is_used_only_on_supported_platforms():
         assert app.camera.supported is True and isinstance(app.preview, fc.Camera), platform
 
 
-def test_the_camera_preview_spans_the_full_width_beyond_the_page_padding():
+def test_the_camera_preview_spans_the_full_screen_beyond_the_page_padding():
+    """И по ширине, и по высоте — камера должна доходить до всех краёв экрана (отзыв пользователя:
+    после того как убрали строку диагностики снизу, кадр всё равно не доходил до верха и низа)."""
     app, page, _, _, _ = start()
 
     assert page.padding == PAGE_PADDING
     margin = app.camera_preview_area.margin
     assert margin.left == -PAGE_PADDING and margin.right == -PAGE_PADDING
-    assert margin.top == 0 and margin.bottom == 0
+    assert margin.top == -PAGE_PADDING and margin.bottom == -PAGE_PADDING
 
 
 def test_the_shutter_and_gallery_buttons_float_over_the_preview_outside_the_tap_focus_area():

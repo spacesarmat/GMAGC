@@ -330,10 +330,10 @@ class MobileApp:
             for left in (True, False)
         ]
         self.camera_stage = ft.Stack([self.gesture, *corners], expand=True)
-        # отрицательное поле компенсирует отступ страницы, чтобы кадр камеры доходил до краёв экрана
-        self.camera_preview_area = ft.Container(
-            self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
-        )
+        # отрицательное поле со всех сторон компенсирует отступ страницы, чтобы кадр камеры доходил
+        # до краёв экрана целиком (а не только по бокам) — плавающие кнопки поверх позиционируются
+        # относительно исходных границ Stack, так что сами не съезжают к краю вместе с картинкой
+        self.camera_preview_area = ft.Container(self.camera_stage, margin=ft.Margin.all(-PAGE_PADDING), expand=True)
         top_row = ft.Row(
             [
                 ft.Row(
