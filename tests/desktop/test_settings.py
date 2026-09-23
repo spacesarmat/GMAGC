@@ -33,12 +33,10 @@ def test_settings_from_json_falls_back_to_defaults_on_bad_text():
     assert settings_from_json("[1, 2]") == Settings()
 
 
-def test_theme_and_text_size_default_to_off_and_reject_non_boolean_values():
-    assert settings_from_json("{}") == Settings(dark_theme=False, large_text=False)
-    assert settings_from_json('{"dark_theme": true, "large_text": true}') == Settings(
-        dark_theme=True, large_text=True
-    )
-    assert settings_from_json('{"dark_theme": "yes"}') == Settings(dark_theme=False)
+def test_large_text_defaults_to_off_and_rejects_non_boolean_values():
+    assert settings_from_json("{}") == Settings(large_text=False)
+    assert settings_from_json('{"large_text": true}') == Settings(large_text=True)
+    assert settings_from_json('{"large_text": "yes"}') == Settings(large_text=False)
 
 
 def test_settings_to_json_roundtrips_through_settings_from_json():
