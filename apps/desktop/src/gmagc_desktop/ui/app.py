@@ -412,12 +412,14 @@ class DesktopApp:
                             spacing=12,
                             alignment=ft.MainAxisAlignment.CENTER,
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                            scroll=ft.ScrollMode.AUTO,
                         ),
                         border=ft.Border.all(1, DESKTOP_STRONG),
                         bgcolor=DESKTOP_BG,
                         expand=True,
                         padding=14,
                         alignment=ft.Alignment.CENTER,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE,
                     ),
                     ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
                 ],
@@ -428,6 +430,7 @@ class DesktopApp:
             bgcolor=DESKTOP_PANEL,
             border=ft.Border.all(1, DESKTOP_LINE),
             width=360,
+            clip_behavior=ft.ClipBehavior.HARD_EDGE,
         )
         results_panel = ft.Container(
             ft.Column(
@@ -456,7 +459,7 @@ class DesktopApp:
                     [source_panel, results_panel],
                     spacing=14,
                     expand=True,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
+                    vertical_alignment=ft.CrossAxisAlignment.STRETCH,
                 ),
             ],
             spacing=16,
@@ -515,8 +518,10 @@ class DesktopApp:
 
     def _settings_row(self, label: str, button_text: str, on_click) -> ft.Row:
         return ft.Row(
-            [ft.Text(label, size=13), ft.TextButton(content=ft.Text(button_text), on_click=on_click)],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            [
+                ft.Text(label, size=13, expand=True),
+                ft.TextButton(content=ft.Text(button_text), on_click=on_click),
+            ]
         )
 
     def _build_settings_view(self) -> ft.Column:
@@ -535,10 +540,7 @@ class DesktopApp:
             items += [
                 ft.Divider(color=DESKTOP_LINE),
                 self.update_bar.switch,
-                ft.Row(
-                    [ft.Text("Проверить сейчас", size=13), self.update_bar.check_button],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
+                ft.Row([ft.Text("Проверить сейчас", size=13, expand=True), self.update_bar.check_button]),
                 self.update_bar.status,
             ]
         items += [
@@ -922,7 +924,7 @@ class DesktopApp:
         self._last_query_photo = data
         self.photo_holder.controls = [
             ft.Text("Фото", size=11, color=DESKTOP_MUTED),
-            ft.Image(src=data, width=260, height=200, fit=ft.BoxFit.CONTAIN),
+            ft.Image(src=data, width=150, height=110, fit=ft.BoxFit.CONTAIN),
         ]
         self.photo_holder.visible = True
         self.projection_holder.visible = False
@@ -941,7 +943,7 @@ class DesktopApp:
         if outcome.projection_png:
             self.projection_holder.controls = [
                 ft.Text("Найденная проекция", size=11, color=DESKTOP_MUTED),
-                ft.Image(src=outcome.projection_png, width=160, height=160, fit=ft.BoxFit.CONTAIN),
+                ft.Image(src=outcome.projection_png, width=75, height=75, fit=ft.BoxFit.CONTAIN),
             ]
         self.projection_holder.visible = bool(outcome.projection_png)
         self.results_column.controls = [self._result_card(result) for result in outcome.results]
