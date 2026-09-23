@@ -10,7 +10,9 @@ import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 
+import cv2
 import flet as ft
+import numpy as np
 
 from gmagc_common.protocol import build_link, format_code
 from gmagc_common.theme import (
@@ -27,6 +29,7 @@ from gmagc_common.theme import (
 )
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
+from gmagc_desktop.matcher.adjust import apply_adjustments
 from gmagc_desktop.selfcheck import run_core_check
 from gmagc_desktop.server.api import RequestRecord
 from gmagc_desktop.server.network import lan_addresses
@@ -56,6 +59,10 @@ ONBOARDING_HINT = (
 )
 HISTORY_LIMIT = 10
 
+BRIGHTNESS_RANGE = (-80.0, 80.0)
+CONTRAST_RANGE = (0.5, 2.0)
+EXPOSURE_RANGE = (-2.0, 2.0)
+
 _VIEW_NAMES = ("search", "phone", "library", "settings")
 _SCREEN_LABELS = {"search": "Поиск гобо", "phone": "Телефон", "library": "Библиотека", "settings": "Настройки"}
 
@@ -65,6 +72,10 @@ _BADGE_COLORS = {
     "low": (ft.Colors.AMBER_100, ft.Colors.AMBER_900),
     "bad": (ft.Colors.RED_100, ft.Colors.RED_900),
 }
+
+
+def _signed(value: float, decimals: int) -> str:
+    return f"{value:+.{decimals}f}" if value else f"{value:.{decimals}f}"
 
 
 def _score_badge(score: float) -> ft.Container:
@@ -179,6 +190,12 @@ class DesktopApp:
         self._last_query_photo: bytes | None = None  # для повтора поиска сразу после «Это не то»
         self._last_search_ms: float | None = None
         self._last_score: float | None = None
+        self._adjust_brightness = 0.0
+        self._adjust_contrast = 1.0
+        self._adjust_exposure = 0.0
+        self._proj_adjust_brightness = 0.0
+        self._proj_adjust_contrast = 1.0
+        self._proj_adjust_exposure = 0.0
 
         self.splash = ft.Container(
             ft.Image(src="logo.svg", width=140, height=140, fit=ft.BoxFit.CONTAIN),
@@ -235,6 +252,92 @@ class DesktopApp:
         self.source_label = ft.Text("", visible=False, size=11, color=DESKTOP_MUTED)
         self.photo_holder = ft.Column(visible=False, spacing=4)
         self.projection_holder = ft.Column(visible=False, spacing=4)
+        self.adjust_brightness_label = ft.Text("Яркость: 0", size=11, color=DESKTOP_MUTED)
+        self.adjust_brightness_slider = ft.Slider(
+            min=BRIGHTNESS_RANGE[0],
+            max=BRIGHTNESS_RANGE[1],
+            value=0.0,
+            divisions=32,
+            on_change=self.on_adjust_change,
+            on_change_end=self.on_adjust_commit,
+        )
+        self.adjust_contrast_label = ft.Text("Контраст: 1.0×", size=11, color=DESKTOP_MUTED)
+        self.adjust_contrast_slider = ft.Slider(
+            min=CONTRAST_RANGE[0],
+            max=CONTRAST_RANGE[1],
+            value=1.0,
+            divisions=15,
+            on_change=self.on_adjust_change,
+            on_change_end=self.on_adjust_commit,
+        )
+        self.adjust_exposure_label = ft.Text("Экспозиция: 0 EV", size=11, color=DESKTOP_MUTED)
+        self.adjust_exposure_slider = ft.Slider(
+            min=EXPOSURE_RANGE[0],
+            max=EXPOSURE_RANGE[1],
+            value=0.0,
+            divisions=40,
+            on_change=self.on_adjust_change,
+            on_change_end=self.on_adjust_commit,
+        )
+        self.adjust_reset_button = ft.TextButton(content=ft.Text("Сбросить"), on_click=self.on_reset_adjustments)
+        self.adjust_panel = ft.Column(
+            [
+                ft.Text("Поправка фото", size=12, weight=ft.FontWeight.W_600),
+                self.adjust_brightness_label,
+                self.adjust_brightness_slider,
+                self.adjust_contrast_label,
+                self.adjust_contrast_slider,
+                self.adjust_exposure_label,
+                self.adjust_exposure_slider,
+                self.adjust_reset_button,
+            ],
+            spacing=2,
+            visible=False,
+        )
+        self.proj_adjust_brightness_label = ft.Text("Яркость: 0", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_brightness_slider = ft.Slider(
+            min=BRIGHTNESS_RANGE[0],
+            max=BRIGHTNESS_RANGE[1],
+            value=0.0,
+            divisions=32,
+            on_change=self.on_proj_adjust_change,
+            on_change_end=self.on_proj_adjust_commit,
+        )
+        self.proj_adjust_contrast_label = ft.Text("Контраст: 1.0×", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_contrast_slider = ft.Slider(
+            min=CONTRAST_RANGE[0],
+            max=CONTRAST_RANGE[1],
+            value=1.0,
+            divisions=15,
+            on_change=self.on_proj_adjust_change,
+            on_change_end=self.on_proj_adjust_commit,
+        )
+        self.proj_adjust_exposure_label = ft.Text("Экспозиция: 0 EV", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_exposure_slider = ft.Slider(
+            min=EXPOSURE_RANGE[0],
+            max=EXPOSURE_RANGE[1],
+            value=0.0,
+            divisions=40,
+            on_change=self.on_proj_adjust_change,
+            on_change_end=self.on_proj_adjust_commit,
+        )
+        self.proj_adjust_reset_button = ft.TextButton(
+            content=ft.Text("Сбросить"), on_click=self.on_reset_proj_adjustments
+        )
+        self.proj_adjust_panel = ft.Column(
+            [
+                ft.Text("Поправка найденной проекции", size=12, weight=ft.FontWeight.W_600),
+                self.proj_adjust_brightness_label,
+                self.proj_adjust_brightness_slider,
+                self.proj_adjust_contrast_label,
+                self.proj_adjust_contrast_slider,
+                self.proj_adjust_exposure_label,
+                self.proj_adjust_exposure_slider,
+                self.proj_adjust_reset_button,
+            ],
+            spacing=2,
+            visible=False,
+        )
         # GridView (не Row с wrap=True) — переносит карточки по строкам в реально доступной ширине панели,
         # а не только визуально «внутри себя» без учёта родителя (проверено скриншотом: с Row карточки
         # обрезались по правому краю панели вместо переноса)
@@ -412,19 +515,20 @@ class DesktopApp:
                             spacing=12,
                             alignment=ft.MainAxisAlignment.CENTER,
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                            scroll=ft.ScrollMode.AUTO,
                         ),
                         border=ft.Border.all(1, DESKTOP_STRONG),
                         bgcolor=DESKTOP_BG,
-                        expand=True,
                         padding=14,
                         alignment=ft.Alignment.CENTER,
                         clip_behavior=ft.ClipBehavior.HARD_EDGE,
                     ),
                     ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
+                    self.adjust_panel,
+                    self.proj_adjust_panel,
                 ],
                 spacing=10,
                 expand=True,
+                scroll=ft.ScrollMode.AUTO,
             ),
             padding=14,
             bgcolor=DESKTOP_PANEL,
@@ -752,6 +856,8 @@ class DesktopApp:
         self._hide_banner()
         self.source_label.value = source_text(record.time, record.client)
         self.source_label.visible = True
+        self._last_query_photo = record.photo
+        self._reset_all_adjustments()
         self._show_photo(record.photo)
         self._show_outcome(record.outcome)
         self._show("search")  # результат с телефона должен быть сразу виден, на каком бы экране ни были
@@ -902,13 +1008,15 @@ class DesktopApp:
             return
         self._hide_banner()
         self.source_label.visible = False
+        self._last_query_photo = data
+        self._reset_all_adjustments()
         self._show_photo(data)
         self._set_busy(True)
         self.page.run_thread(lambda: self._search_worker(data))
 
-    def _search_worker(self, data: bytes) -> None:
+    def _run_search_and_show(self, run: Callable[[], SearchOutcome]) -> None:
         try:
-            outcome = self.service.search_image_bytes(data)
+            outcome = run()
         except NoIndexError:
             self._show_banner(NO_LIBRARY_HINT, error=True)
         except PhotoError as error:
@@ -920,18 +1028,134 @@ class DesktopApp:
         finally:
             self._set_busy(False)
 
+    def _search_worker(self, data: bytes) -> None:
+        self._run_search_and_show(
+            lambda: self.service.search_image_bytes(
+                data,
+                projection_brightness=self._proj_adjust_brightness,
+                projection_contrast=self._proj_adjust_contrast,
+                projection_exposure=self._proj_adjust_exposure,
+            )
+        )
+
+    def _search_worker_array(self, photo_bgr: np.ndarray) -> None:
+        self._run_search_and_show(
+            lambda: self.service.search_photo(
+                photo_bgr,
+                projection_brightness=self._proj_adjust_brightness,
+                projection_contrast=self._proj_adjust_contrast,
+                projection_exposure=self._proj_adjust_exposure,
+            )
+        )
+
     def _show_photo(self, data: bytes) -> None:
-        self._last_query_photo = data
         self.photo_holder.controls = [
             ft.Text("Фото", size=11, color=DESKTOP_MUTED),
             ft.Image(src=data, width=150, height=110, fit=ft.BoxFit.CONTAIN),
         ]
         self.photo_holder.visible = True
+        self.adjust_panel.visible = True
         self.projection_holder.visible = False
         self.results_column.controls = []
         self._update_results_summary()
         self.copy_label.visible = False
         self.page.update()
+
+    def _reset_adjustments(self) -> None:
+        self._adjust_brightness = 0.0
+        self._adjust_contrast = 1.0
+        self._adjust_exposure = 0.0
+        self.adjust_brightness_slider.value = 0.0
+        self.adjust_contrast_slider.value = 1.0
+        self.adjust_exposure_slider.value = 0.0
+        self._update_adjustment_labels()
+
+    def _reset_projection_adjustments(self) -> None:
+        self._proj_adjust_brightness = 0.0
+        self._proj_adjust_contrast = 1.0
+        self._proj_adjust_exposure = 0.0
+        self.proj_adjust_brightness_slider.value = 0.0
+        self.proj_adjust_contrast_slider.value = 1.0
+        self.proj_adjust_exposure_slider.value = 0.0
+        self._update_projection_adjustment_labels()
+
+    def _reset_all_adjustments(self) -> None:
+        self._reset_adjustments()
+        self._reset_projection_adjustments()
+
+    def _update_adjustment_labels(self) -> None:
+        self.adjust_brightness_label.value = f"Яркость: {_signed(self._adjust_brightness, 0)}"
+        self.adjust_contrast_label.value = f"Контраст: {self._adjust_contrast:.1f}×"
+        self.adjust_exposure_label.value = f"Экспозиция: {_signed(self._adjust_exposure, 1)} EV"
+
+    def _update_projection_adjustment_labels(self) -> None:
+        self.proj_adjust_brightness_label.value = f"Яркость: {_signed(self._proj_adjust_brightness, 0)}"
+        self.proj_adjust_contrast_label.value = f"Контраст: {self._proj_adjust_contrast:.1f}×"
+        self.proj_adjust_exposure_label.value = f"Экспозиция: {_signed(self._proj_adjust_exposure, 1)} EV"
+
+    def _decode_last_query_photo(self) -> np.ndarray | None:
+        if self._last_query_photo is None:
+            return None
+        return cv2.imdecode(np.frombuffer(self._last_query_photo, np.uint8), cv2.IMREAD_COLOR)
+
+    def _current_photo_array(self) -> np.ndarray | None:
+        """Оригинальное фото с уже применённой поправкой яркости/контраста/экспозиции фото (не проекции)."""
+        photo = self._decode_last_query_photo()
+        if photo is None:
+            return None
+        if self._adjust_brightness or self._adjust_contrast != 1.0 or self._adjust_exposure:
+            return apply_adjustments(
+                photo,
+                brightness=self._adjust_brightness,
+                contrast=self._adjust_contrast,
+                exposure=self._adjust_exposure,
+            )
+        return photo
+
+    def _rerun_search_with_adjustments(self) -> None:
+        if self._busy:
+            return
+        photo = self._current_photo_array()
+        if photo is None:
+            return
+        ok, encoded = cv2.imencode(".png", photo)
+        self._show_photo(bytes(encoded) if ok else self._last_query_photo)
+        self._set_busy(True)
+        self.page.run_thread(lambda: self._search_worker_array(photo))
+
+    def on_adjust_change(self, _event) -> None:
+        self._adjust_brightness = self.adjust_brightness_slider.value
+        self._adjust_contrast = self.adjust_contrast_slider.value
+        self._adjust_exposure = self.adjust_exposure_slider.value
+        self._update_adjustment_labels()
+        self.page.update()
+
+    def on_adjust_commit(self, _event) -> None:
+        """Ползунок фото отпущен: пересчитываем поправку и запускаем поиск снова по тому же фото."""
+        self.on_adjust_change(_event)
+        self._rerun_search_with_adjustments()
+
+    def on_reset_adjustments(self, _event) -> None:
+        self._reset_adjustments()
+        self.page.update()
+        self._rerun_search_with_adjustments()
+
+    def on_proj_adjust_change(self, _event) -> None:
+        self._proj_adjust_brightness = self.proj_adjust_brightness_slider.value
+        self._proj_adjust_contrast = self.proj_adjust_contrast_slider.value
+        self._proj_adjust_exposure = self.proj_adjust_exposure_slider.value
+        self._update_projection_adjustment_labels()
+        self.page.update()
+
+    def on_proj_adjust_commit(self, _event) -> None:
+        """Ползунок проекции отпущен: та же поправка фото, но с новыми параметрами проекции."""
+        self.on_proj_adjust_change(_event)
+        self._rerun_search_with_adjustments()
+
+    def on_reset_proj_adjustments(self, _event) -> None:
+        self._reset_projection_adjustments()
+        self.page.update()
+        self._rerun_search_with_adjustments()
 
     def _show_outcome(self, outcome: SearchOutcome) -> None:
         self._last_search_ms = outcome.took_ms
@@ -946,6 +1170,7 @@ class DesktopApp:
                 ft.Image(src=outcome.projection_png, width=75, height=75, fit=ft.BoxFit.CONTAIN),
             ]
         self.projection_holder.visible = bool(outcome.projection_png)
+        self.proj_adjust_panel.visible = bool(outcome.projection_png)
         self.results_column.controls = [self._result_card(result) for result in outcome.results]
         self._update_results_summary()
         self.page.update()
@@ -1066,6 +1291,8 @@ class DesktopApp:
         self._index_worker()
         self._set_busy(True)
         data = Path(photo).read_bytes()
+        self._last_query_photo = data
+        self._reset_all_adjustments()
         self._show_photo(data)
         self._search_worker(data)
 

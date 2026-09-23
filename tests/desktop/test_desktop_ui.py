@@ -326,6 +326,158 @@ def test_picked_photo_shows_the_photo_the_projection_and_result_cards(tmp_path, 
     assert not app.pick_photo_button.disabled
 
 
+def test_the_adjustment_panel_appears_once_a_photo_is_shown_with_neutral_sliders(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    assert not app.adjust_panel.visible
+
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+
+    assert app.adjust_panel.visible
+    assert app.adjust_brightness_slider.value == 0.0
+    assert app.adjust_contrast_slider.value == 1.0
+    assert app.adjust_exposure_slider.value == 0.0
+
+
+def test_moving_a_slider_updates_its_label_without_searching_yet(tmp_path, library, monkeypatch):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    calls = []
+    monkeypatch.setattr(app.service, "search_photo", lambda *a, **k: calls.append(a))
+
+    app.adjust_brightness_slider.value = 40.0
+    app.on_adjust_change(None)
+
+    assert app.adjust_brightness_label.value == "Яркость: +40"
+    assert calls == []
+
+
+def test_releasing_the_slider_reruns_search_with_the_adjusted_photo(tmp_path, library, monkeypatch):
+    from gmagc_desktop.service.search_service import SearchService
+
+    app, _ = indexed_app(tmp_path, library)
+    original = ell_photo()
+    photo = save_photo(tmp_path / "p.png", original)
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+
+    captured = []
+    real_search_photo = SearchService.search_photo
+
+    def spy(self, photo_bgr, top_n=None, **kwargs):
+        captured.append(photo_bgr)
+        return real_search_photo(self, photo_bgr, top_n, **kwargs)
+
+    monkeypatch.setattr(SearchService, "search_photo", spy)
+
+    app.adjust_brightness_slider.value = 40.0
+    app.on_adjust_commit(None)
+
+    assert len(captured) == 1
+    assert captured[0].mean() > original.astype(float).mean()
+
+
+def test_reset_restores_neutral_sliders_and_the_original_top_result(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    original_top = app.results_column.controls[0].data
+    app.adjust_brightness_slider.value = 40.0
+    app.on_adjust_commit(None)
+
+    app.on_reset_adjustments(None)
+
+    assert app.adjust_brightness_slider.value == 0.0
+    assert app.adjust_brightness_label.value == "Яркость: 0"
+    assert app.adjust_contrast_slider.value == 1.0
+    assert app.adjust_exposure_slider.value == 0.0
+    assert app.results_column.controls[0].data == original_top
+
+
+def test_a_new_photo_resets_previously_adjusted_sliders(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    app.adjust_brightness_slider.value = 40.0
+    app.on_adjust_commit(None)
+    assert app.adjust_brightness_slider.value == 40.0
+
+    photo2 = save_photo(tmp_path / "p2.png", ell_photo())
+    app.picker.files = [str(photo2)]
+    asyncio.run(app.on_pick_photo(None))
+
+    assert app.adjust_brightness_slider.value == 0.0
+    assert app.adjust_brightness_label.value == "Яркость: 0"
+
+
+def test_the_projection_adjustment_panel_appears_once_a_projection_is_found(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    assert not app.proj_adjust_panel.visible
+
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+
+    assert app.proj_adjust_panel.visible
+    assert app.proj_adjust_brightness_slider.value == 0.0
+
+
+def test_the_projection_adjustment_panel_stays_hidden_when_no_projection_is_found(tmp_path, library):
+    flat = save_photo(tmp_path / "flat.png", np.full((480, 640, 3), 90, np.uint8))
+    app, _ = indexed_app(tmp_path, library)
+    app.picker.files = [str(flat)]
+
+    asyncio.run(app.on_pick_photo(None))
+
+    assert not app.proj_adjust_panel.visible
+
+
+def test_releasing_the_projection_slider_reruns_search_with_new_projection_adjustment(tmp_path, library, monkeypatch):
+    from gmagc_desktop.service.search_service import SearchService
+
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+
+    captured = []
+    real_search_photo = SearchService.search_photo
+
+    def spy(self, photo_bgr, top_n=None, **kwargs):
+        captured.append(kwargs)
+        return real_search_photo(self, photo_bgr, top_n, **kwargs)
+
+    monkeypatch.setattr(SearchService, "search_photo", spy)
+
+    app.proj_adjust_contrast_slider.value = 1.8
+    app.on_proj_adjust_commit(None)
+
+    assert len(captured) == 1
+    assert captured[0]["projection_contrast"] == 1.8
+    assert captured[0]["projection_brightness"] == 0.0
+
+
+def test_resetting_projection_adjustments_does_not_touch_photo_adjustments(tmp_path, library):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    app.adjust_brightness_slider.value = 30.0
+    app.on_adjust_commit(None)
+    app.proj_adjust_contrast_slider.value = 1.7
+    app.on_proj_adjust_commit(None)
+
+    app.on_reset_proj_adjustments(None)
+
+    assert app.proj_adjust_contrast_slider.value == 1.0
+    assert app.adjust_brightness_slider.value == 30.0  # поправка фото не сбрасывается
+
+
 def test_the_score_badge_colour_follows_the_match_confidence(tmp_path):
     from gmagc_desktop.service.results import Result
 
