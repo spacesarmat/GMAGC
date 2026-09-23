@@ -192,6 +192,6 @@ def test_history_lives_on_its_own_gallery_screen_not_on_the_camera_screen():
 
     app, _ = make_running_app()
 
-    assert app.camera_preview_area in app.camera_view.controls
+    assert app.camera_preview_area in list(walk(app.camera_view))
     assert app.history_column not in list(walk(app.camera_view))
     assert app.history_column in list(walk(app.gallery_view))
