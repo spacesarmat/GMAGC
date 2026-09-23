@@ -48,7 +48,7 @@ from gmagc_desktop.service.search_service import (
     PhotoError,
     SearchService,
 )
-from gmagc_desktop.service.settings import data_dir
+from gmagc_desktop.service.settings import RESULTS_COUNT_CHOICES, data_dir
 from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
 from gmagc_desktop.ui.update_bar import UpdateBar
@@ -361,6 +361,13 @@ class DesktopApp:
         self.autostart_switch = ft.Switch(
             label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
         )
+        self.results_count_dropdown = ft.Dropdown(
+            label="Число результатов поиска",
+            value="50",
+            options=[ft.DropdownOption(key=str(n), text=str(n)) for n in RESULTS_COUNT_CHOICES],
+            on_select=self.on_results_count_change,
+            width=240,
+        )
 
         # ---- сервер для телефона -----------------------------------------------
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
@@ -640,6 +647,7 @@ class DesktopApp:
         items: list[ft.Control] = [self.large_text_switch]
         if autostart.is_supported():
             items.append(self.autostart_switch)
+        items.append(self.results_count_dropdown)
         items += [
             ft.Divider(color=DESKTOP_LINE),
             self._settings_row("Экспорт настроек", "Экспорт…", self.on_export_settings),
@@ -705,6 +713,7 @@ class DesktopApp:
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
         self.large_text_switch.value = self.service.settings.large_text
+        self.results_count_dropdown.value = str(self.service.settings.results_count)
         self._apply_theme()
         if autostart.is_supported():
             self.autostart_switch.value = autostart.is_autostart_enabled()
@@ -939,6 +948,9 @@ class DesktopApp:
         self.service.set_large_text(bool(self.large_text_switch.value))
         self._apply_theme()
 
+    def on_results_count_change(self, _event) -> None:
+        self.service.set_results_count(int(self.results_count_dropdown.value))
+
     def on_toggle_autostart(self, _event) -> None:
         target = bool(self.autostart_switch.value)
         exe = current_executable()
@@ -1040,6 +1052,7 @@ class DesktopApp:
         self._run_search_and_show(
             lambda: self.service.search_image_bytes(
                 data,
+                top_n=self.service.settings.results_count,
                 projection_brightness=self._proj_adjust_brightness,
                 projection_contrast=self._proj_adjust_contrast,
                 projection_exposure=self._proj_adjust_exposure,
@@ -1050,6 +1063,7 @@ class DesktopApp:
         self._run_search_and_show(
             lambda: self.service.search_photo(
                 photo_bgr,
+                top_n=self.service.settings.results_count,
                 projection_brightness=self._proj_adjust_brightness,
                 projection_contrast=self._proj_adjust_contrast,
                 projection_exposure=self._proj_adjust_exposure,

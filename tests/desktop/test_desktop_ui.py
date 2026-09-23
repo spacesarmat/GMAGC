@@ -140,6 +140,38 @@ def test_both_theme_variants_use_the_desktop_accent_colour():
     assert _theme(True).color_scheme_seed == DESKTOP_ACCENT
 
 
+def test_the_results_count_dropdown_shows_the_setting_and_saves_a_new_choice(tmp_path):
+    app, page = make_app(tmp_path)
+    assert app.results_count_dropdown.value == "50"
+    assert app.results_count_dropdown in list(walk(app.settings_view))
+
+    app.results_count_dropdown.value = "100"
+    app.on_results_count_change(None)
+
+    assert app.service.settings.results_count == 100
+
+
+def test_desktop_searches_ask_for_the_chosen_number_of_results(tmp_path, library, monkeypatch):
+    from gmagc_desktop.service.search_service import SearchService
+
+    app, _ = indexed_app(tmp_path, library)
+    app.results_count_dropdown.value = "20"
+    app.on_results_count_change(None)
+    captured = []
+    real_search_photo = SearchService.search_photo
+
+    def spy(self, photo_bgr, top_n=None, **kwargs):
+        captured.append(top_n)
+        return real_search_photo(self, photo_bgr, top_n, **kwargs)
+
+    monkeypatch.setattr(SearchService, "search_photo", spy)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+
+    assert captured == [20]
+
+
 def test_toggling_large_text_updates_the_page_and_persists(tmp_path):
     app, page = make_app(tmp_path)
 

@@ -160,6 +160,9 @@ class SearchService:
     def set_large_text(self, enabled: bool) -> None:
         self._update_settings(large_text=enabled)
 
+    def set_results_count(self, count: int) -> None:
+        self._update_settings(results_count=count)
+
     def mark_update_checked(self, when: float) -> None:
         self._update_settings(last_update_check=float(when))
 
