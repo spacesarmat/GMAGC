@@ -169,6 +169,22 @@ def test_flat_photo_has_no_projection(service):
     assert outcome.kind is Outcome.NO_PROJECTION and outcome.results == ()
 
 
+def test_projection_adjustments_are_applied_after_detection_and_change_the_thumbnail(service):
+    baseline = service.search_photo(ell_photo())
+    adjusted = service.search_photo(ell_photo(), projection_brightness=60.0)
+
+    assert adjusted.projection_png != baseline.projection_png
+
+
+def test_neutral_projection_adjustments_do_not_change_the_outcome(service):
+    baseline = service.search_photo(ell_photo())
+    neutral = service.search_photo(
+        ell_photo(), projection_brightness=0.0, projection_contrast=1.0, projection_exposure=0.0
+    )
+
+    assert neutral.projection_png == baseline.projection_png
+
+
 def test_search_without_an_index_raises(tmp_path):
     service = SearchService(tmp_path / "data")
     service.load()

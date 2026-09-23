@@ -17,6 +17,7 @@ from gmagc_common.updates import parse_version
 from gmagc_desktop.library.cache import update_index
 from gmagc_desktop.library.index import LibraryIndex, ProgressCallback, load_index
 from gmagc_desktop.library.scan import scan_library
+from gmagc_desktop.matcher.adjust import apply_adjustments
 from gmagc_desktop.matcher.embedder import Embedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
@@ -261,11 +262,26 @@ class SearchService:
                 return self._result(index, 0, match)
         return None
 
-    def search_photo(self, photo_bgr: np.ndarray, top_n: int | None = None) -> SearchOutcome:
+    def search_photo(
+        self,
+        photo_bgr: np.ndarray,
+        top_n: int | None = None,
+        *,
+        projection_brightness: float = 0.0,
+        projection_contrast: float = 1.0,
+        projection_exposure: float = 0.0,
+    ) -> SearchOutcome:
         with self._lock:  # индекс и папка библиотеки не меняются, пока идёт поиск
-            return self._search(photo_bgr, top_n)
+            return self._search(photo_bgr, top_n, projection_brightness, projection_contrast, projection_exposure)
 
-    def _search(self, photo_bgr: np.ndarray, top_n: int | None) -> SearchOutcome:
+    def _search(
+        self,
+        photo_bgr: np.ndarray,
+        top_n: int | None,
+        projection_brightness: float = 0.0,
+        projection_contrast: float = 1.0,
+        projection_exposure: float = 0.0,
+    ) -> SearchOutcome:
         searcher, index = self._searcher, self._index
         if searcher is None or index is None:
             raise NoIndexError("индекс не построен")
@@ -273,6 +289,13 @@ class SearchService:
         normalized = normalize_photo(photo_bgr)
         if normalized is None:
             return SearchOutcome(Outcome.NO_PROJECTION, took_ms=_elapsed_ms(started))
+        if projection_brightness or projection_contrast != 1.0 or projection_exposure:
+            normalized = apply_adjustments(
+                normalized,
+                brightness=projection_brightness,
+                contrast=projection_contrast,
+                exposure=projection_exposure,
+            )
         matches = searcher.search(normalized, top_n=top_n or self.settings.top_n)
         results = tuple(self._result(index, rank, match) for rank, match in enumerate(matches, start=1))
         results = self._apply_corrections(results, index)
@@ -291,11 +314,25 @@ class SearchService:
             raise PhotoError(str(error)) from error
         return self.search_photo(photo)
 
-    def search_image_bytes(self, data: bytes, top_n: int | None = None) -> SearchOutcome:
+    def search_image_bytes(
+        self,
+        data: bytes,
+        top_n: int | None = None,
+        *,
+        projection_brightness: float = 0.0,
+        projection_contrast: float = 1.0,
+        projection_exposure: float = 0.0,
+    ) -> SearchOutcome:
         photo = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
         if photo is None:
             raise PhotoError("не удалось прочитать изображение")
-        return self.search_photo(photo, top_n)
+        return self.search_photo(
+            photo,
+            top_n,
+            projection_brightness=projection_brightness,
+            projection_contrast=projection_contrast,
+            projection_exposure=projection_exposure,
+        )
 
     def _result(self, index: LibraryIndex, rank: int, match: Match) -> Result:
         rel_path = index.files[match.index].rel_path
