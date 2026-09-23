@@ -159,7 +159,7 @@ def test_a_stored_connection_is_restored_and_opens_the_camera():
 
     assert script.connections == [PC] and views(app) == ["camera"]
     assert app.address_field.value == "192.168.1.121:8765" and app.camera.ready
-    assert app.camera_title.value == "Подключено: 192.168.1.121:8765 · 11\u00a0178 файлов"
+    assert app.wifi_icon.icon == ft.Icons.WIFI and app.wifi_icon.color == ft.Colors.GREEN_400
     assert camera_api.calls[0][0] == "initialize"
 
 
@@ -225,7 +225,7 @@ def test_a_pc_without_an_index_connects_with_a_note():
 
     connect_manually(app)
 
-    assert views(app) == ["camera"] and "не построен" in app.camera_title.value
+    assert views(app) == ["camera"]
     assert app.camera_message.visible and "индекс" in app.camera_message.value
 
 
@@ -778,16 +778,15 @@ def test_the_camera_preview_spans_the_full_width_beyond_the_page_padding():
     assert margin.top == 0 and margin.bottom == 0
 
 
-def test_the_shutter_and_gallery_buttons_sit_below_the_preview_outside_the_tap_focus_area():
+def test_the_shutter_and_gallery_buttons_float_over_the_preview_outside_the_tap_focus_area():
     app, _, _, _, _ = start()
 
     # предпросмотр и метка фокуса остаются под обработчиком касания, кнопки съёмки в него не входят —
     # чтобы нажатие на кнопку не попадало и в обработчик касания кадра (фокус по точке)
     assert app.gesture.content.controls == [app.preview, app.marker]
-    below_preview = [c for c in app.camera_view.controls if c is not app.camera_preview_area]
-    assert not any(app.capture_button in getattr(c, "controls", []) for c in [app.gesture, *app.camera_stage.controls])
-    assert any(app.capture_button in list(walk(row)) for row in below_preview)
-    assert any(app.gallery_button in list(walk(row)) for row in below_preview)
+    assert app.capture_button not in list(walk(app.gesture)) and app.capture_button not in list(walk(app.camera_stage))
+    assert app.gallery_button not in list(walk(app.gesture)) and app.gallery_button not in list(walk(app.camera_stage))
+    assert app.capture_button in list(walk(app.camera_view)) and app.gallery_button in list(walk(app.camera_view))
     assert isinstance(app.capture_button, ft.FloatingActionButton)
 
 

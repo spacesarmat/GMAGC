@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import time
 from collections.abc import Callable
@@ -37,7 +38,6 @@ from gmagc_mobile.texts import (
     outcome_message,
     score_text,
     share_text,
-    status_line,
     zoom_text,
 )
 from gmagc_mobile.update_bar import UpdateBar
@@ -107,6 +107,21 @@ def _back_row(title: str, on_back) -> ft.Row:
     return ft.Row([back_button, ft.Text(title, size=20, weight=ft.FontWeight.BOLD)])
 
 
+OVERLAY_BUTTON_BGCOLOR = ft.Colors.with_opacity(0.35, ft.Colors.BLACK)  # тёмная подложка для кнопок поверх кадра камеры
+
+
+def _camera_icon_button(icon, tooltip: str, on_click, *, disabled: bool = False) -> ft.IconButton:
+    """Кнопка поверх превью камеры: полупрозрачная тёмная подложка, чтобы значок был виден на любом фоне."""
+    return ft.IconButton(
+        icon=icon,
+        icon_color=ft.Colors.WHITE,
+        bgcolor=OVERLAY_BUTTON_BGCOLOR,
+        tooltip=tooltip,
+        on_click=on_click,
+        disabled=disabled,
+    )
+
+
 class MobileApp:
     def __init__(
         self,
@@ -170,7 +185,6 @@ class MobileApp:
         self.client: GmagcClient | None = None
         self._return_view = "connect"  # куда вернуться со вложенного экрана (Настройки/О программе/Помощь/Галерея)
         self.mode = MODE_SHOOT
-        self.status_text = ""
         self.last_error = ""
         self._busy = False
         self._preview_size = (0.0, 0.0)
@@ -219,9 +233,10 @@ class MobileApp:
             expand=True,
         )
 
-        # камера
-        self.camera_title = ft.Text("", size=14, expand=True)  # переносится на несколько строк, значок остаётся виден
-        self.connection_dot = ft.Icon(ft.Icons.CIRCLE, size=10, color=ft.Colors.GREEN_400)
+        # камера — полноэкранный оверлей по референсу дизайна: превью на весь экран, элементы управления
+        # плавают поверх него (Stack), а не делят с ним место в колонке
+        self.camera_title = ft.Text("", size=13, color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER, visible=False)
+        self.wifi_icon = ft.Icon(ft.Icons.WIFI_OFF, color=ft.Colors.RED_400, size=20)
         self.marker = ft.Container(
             width=MARKER_SIZE,
             height=MARKER_SIZE,
@@ -231,14 +246,22 @@ class MobileApp:
             top=0,
             visible=False,
         )
-        self.zoom_slider = ft.Slider(min=1, max=2, value=1, disabled=True, on_change=self.on_zoom_slider, expand=True)
-        self.zoom_label = ft.Text("×1.0")
-        self.zoom_out_button = ft.IconButton(icon=ft.Icons.ZOOM_OUT, disabled=True, on_click=self.on_zoom_out)
-        self.zoom_in_button = ft.IconButton(icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in)
-        self.focus_text = ft.Text("Фокус: авто")
-        self.focus_button = ft.TextButton(content=self.focus_text, on_click=self.on_focus_lock)
-        self.capture_title = ft.Text("СФОТОГРАФИРОВАТЬ", size=13, weight=ft.FontWeight.BOLD)
-        self.capture_subtitle = ft.Text("Готово к съёмке", size=11, color=ft.Colors.GREY_500)
+        # слайдер разворачивается на 90° (стандартный приём Flet/Flutter для вертикальных слайдеров);
+        # свой width/height становятся визуальными height/width уже ПОСЛЕ поворота
+        self.zoom_slider = ft.Slider(
+            min=1, max=2, value=1, disabled=True, on_change=self.on_zoom_slider, width=150, rotate=-math.pi / 2
+        )
+        self.zoom_label = ft.Text("×1.0", size=12, color=ft.Colors.WHITE)
+        self.zoom_out_button = ft.IconButton(
+            icon=ft.Icons.ZOOM_OUT, disabled=True, on_click=self.on_zoom_out, icon_color=ft.Colors.WHITE
+        )
+        self.zoom_in_button = ft.IconButton(
+            icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in, icon_color=ft.Colors.WHITE
+        )
+        self.focus_text = ft.Text("Фокус: авто")  # хранит состояние; на экране виден только значок (его tooltip)
+        self.focus_button = _camera_icon_button(ft.Icons.CENTER_FOCUS_WEAK, self.focus_text.value, self.on_focus_lock)
+        self.capture_title = ft.Text("СФОТОГРАФИРОВАТЬ", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
+        self.capture_subtitle = ft.Text("Готово к съёмке", size=11, color=ft.Colors.GREY_300)
         self.capture_button = ft.FloatingActionButton(
             icon=ft.Icons.CAMERA_ALT,
             tooltip="Снять",
@@ -246,11 +269,20 @@ class MobileApp:
             foreground_color=ft.Colors.BLACK,
             on_click=self.on_capture,
         )
-        self.gallery_button = ft.IconButton(icon=ft.Icons.PHOTO_LIBRARY, tooltip="Выбрать фото", on_click=self.on_gallery)
+        # заголовок и подпись переключаются вместе с самой кнопкой — иначе при сканировании QR (кнопка
+        # съёмки скрыта) подписи «СФОТОГРАФИРОВАТЬ»/«Готово к съёмке» зависали бы без кнопки под ними
+        self.capture_group = ft.Column(
+            [self.capture_title, self.capture_button, self.capture_subtitle],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=2,
+        )
+        self.gallery_button = _camera_icon_button(ft.Icons.PHOTO_LIBRARY, "Выбрать фото", self.on_gallery)
         self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
         self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
         self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
-        self.camera_message = ft.Text("", visible=False, selectable=True)
+        self.camera_message = ft.Text(
+            "", visible=False, selectable=True, color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER
+        )
         self.retry_button = ft.Button("Повторить", on_click=self.on_retry, visible=False)
         self.busy_ring = ft.ProgressRing(visible=False, width=24, height=24)
         self._retry_data: bytes | None = None
@@ -292,51 +324,67 @@ class MobileApp:
         self.camera_preview_area = ft.Container(
             self.camera_stage, margin=ft.Margin.symmetric(horizontal=-PAGE_PADDING), expand=True
         )
-        self.below_camera_controls = ft.Column(
+        top_row = ft.Row(
             [
-                ft.Row([self.zoom_out_button, self.zoom_slider, self.zoom_in_button, self.zoom_label]),
-                self.focus_button,
-                self.camera_message,
-                self.retry_button,
-                ft.Row([self.scan_now_button, self.cancel_scan_button, self.busy_ring], spacing=8, wrap=True),
+                ft.Row(
+                    [
+                        _camera_icon_button(ft.Icons.PHOTO_LIBRARY, "Галерея", self.on_open_gallery),
+                        _camera_icon_button(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
+                        _camera_icon_button(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
+                    ],
+                    spacing=4,
+                ),
+                ft.Container(self.wifi_icon, bgcolor=OVERLAY_BUTTON_BGCOLOR, border_radius=20, padding=8),
             ],
-            spacing=6,
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        )
+        zoom_column = ft.Container(
+            ft.Column(
+                [self.zoom_in_button, self.zoom_slider, self.zoom_out_button, self.zoom_label],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=2,
+            ),
+            bgcolor=OVERLAY_BUTTON_BGCOLOR,
+            border_radius=24,
+            padding=ft.Padding.symmetric(vertical=8, horizontal=4),
+            width=56,
+            height=230,
+            alignment=ft.Alignment.CENTER,
+        )
+        capture_slot = ft.Column(
+            [self.capture_group], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+        bottom_row = ft.Row(
+            [self.focus_button, capture_slot, self.gallery_button],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        scan_row = ft.Row(
+            [self.scan_now_button, self.cancel_scan_button, self.busy_ring],
+            spacing=8,
+            wrap=True,
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
+        note_column = ft.Column(
+            [self.camera_message, self.retry_button, scan_row],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8,
         )
         self.camera_view = ft.Column(
             [
-                ft.Row(
+                ft.Stack(
                     [
-                        ft.Column([ft.Text(NAME, size=18, weight=ft.FontWeight.BOLD), self.camera_title], spacing=0),
-                        self.connection_dot,
+                        self.camera_preview_area,
+                        ft.Container(top_row, top=36, left=12, right=12),
+                        ft.Container(self.camera_title, top=88, left=16, right=16),
+                        ft.Container(zoom_column, right=8, top=140),
+                        ft.Container(note_column, left=16, right=16, bottom=110),
+                        ft.Container(bottom_row, left=8, right=8, bottom=20),
                     ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
-                self.camera_preview_area,
-                ft.Row(
-                    [
-                        self.gallery_button,
-                        ft.Column(
-                            [self.capture_button, self.capture_title, self.capture_subtitle],
-                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                            spacing=2,
-                            expand=True,
-                        ),
-                        ft.Container(width=48),  # уравновешивает gallery_button, кнопка съёмки остаётся по центру
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                self.below_camera_controls,
-                ft.Divider(),
-                _nav_row(
-                    [
-                        _nav_item(ft.Icons.PHOTO_LIBRARY, "Галерея", self.on_open_gallery),
-                        _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
-                        _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
-                    ]
-                ),
+                    expand=True,
+                )
             ],
-            spacing=6,
+            spacing=0,
             visible=False,
             expand=True,
         )
@@ -571,12 +619,18 @@ class MobileApp:
     def _show_camera(self, mode: str, note: str | None = None) -> None:
         self.mode = mode
         scanning = mode == MODE_SCAN
-        self.camera_title.value = SCAN_HINT if scanning else self.status_text
-        self.capture_button.visible = self.gallery_button.visible = not scanning
+        self.camera_title.value = SCAN_HINT if scanning else ""
+        self.camera_title.visible = scanning
+        # заголовок и подпись съёмки прячутся вместе с кнопкой — иначе при сканировании они бы зависли
+        # без кнопки под ними (кнопка скрыта, надписи «СФОТОГРАФИРОВАТЬ»/«Готово к съёмке» — нет)
+        self.capture_button.visible = self.capture_title.visible = self.capture_subtitle.visible = not scanning
+        self.gallery_button.visible = not scanning
         self.scan_now_button.visible = False  # включится в _start_auto_scan, если автопоток недоступен на телефоне
         self.cancel_scan_button.visible = scanning
         self.camera_message.value = note or ""
         self.camera_message.visible = bool(note)
+        self.wifi_icon.icon = ft.Icons.WIFI if self.connection is not None else ft.Icons.WIFI_OFF
+        self.wifi_icon.color = ft.Colors.GREEN_400 if self.connection is not None else ft.Colors.RED_400
         self._show("camera")
 
     def _camera_note(self, text: str) -> None:
@@ -645,7 +699,6 @@ class MobileApp:
         await self.store.save(connection)
         self._fill(connection)
         self._clear_diag()
-        self.status_text = status_line(connection, status)
         self._set_busy(False)
         self._show_camera(MODE_SHOOT, note=None if status.indexed else NO_INDEX_NOTE)
         if announce:  # по QR подключение происходит без ручного ввода: коротко подтвердить, что оно удалось
@@ -1007,6 +1060,8 @@ class MobileApp:
     async def on_focus_lock(self, _event) -> None:
         locked = await self.camera.toggle_focus_lock()
         self.focus_text.value = "Фокус: зафиксирован" if locked else "Фокус: авто"
+        self.focus_button.icon = ft.Icons.CENTER_FOCUS_STRONG if locked else ft.Icons.CENTER_FOCUS_WEAK
+        self.focus_button.tooltip = self.focus_text.value
         self.page.update()
 
 
