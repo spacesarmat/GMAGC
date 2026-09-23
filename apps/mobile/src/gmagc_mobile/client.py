@@ -47,7 +47,7 @@ class ClientError(Exception):
 
 
 class GmagcClient:
-    def __init__(self, connection: Connection, timeout: float = 10.0, match_timeout: float = 60.0):
+    def __init__(self, connection: Connection, timeout: float = 10.0, match_timeout: float = 15.0):
         self.connection = connection
         self._timeout = timeout
         self._match_timeout = match_timeout

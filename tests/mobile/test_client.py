@@ -92,6 +92,14 @@ def test_five_wrong_codes_lead_to_the_rate_limit_with_a_wait_time(running):
     assert error.value.kind == RATE_LIMITED and 1 <= error.value.retry_after <= 30
 
 
+def test_the_default_match_timeout_is_short_enough_to_not_freeze_the_ui():
+    """60с (прежнее значение) держало кнопку «Назад» замороженной почти минуту при обрыве связи
+    с полуоткрытым TCP-соединением (сервер выключен, но RST ещё не пришёл) — реальный отзыв пользователя."""
+    client = GmagcClient(Connection("127.0.0.1", 1, "AAAA-AAAA"))
+
+    assert client._match_timeout <= 20.0  # noqa: SLF001 - проверяем именно значение по умолчанию
+
+
 def test_match_returns_the_parsed_response(running, photo_jpeg):
     response = make_client(running).match(photo_jpeg)
 

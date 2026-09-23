@@ -139,6 +139,15 @@ def test_the_theme_uses_the_shared_brand_seed_and_is_always_dark():
     assert page.theme_mode == ft.ThemeMode.DARK
 
 
+def test_the_scrollbar_is_styled_to_match_the_accent_colour():
+    from gmagc_common.theme import MOBILE_ACCENT_COLOR
+
+    _, page, _, _, _ = make_app()
+
+    scrollbar = page.theme.scrollbar_theme
+    assert scrollbar is not None and MOBILE_ACCENT_COLOR in scrollbar.thumb_color
+
+
 def test_the_score_badge_colour_follows_the_match_confidence():
     from gmagc_common.protocol import ResultItem
 
@@ -447,6 +456,72 @@ def test_a_search_error_stays_on_the_camera_with_a_message():
 
     assert views(app) == ["camera"] and "Нет связи с ПК" in app.camera_message.value
     assert not app.capture_button.disabled and "Нет связи" in app.diag_text.value
+
+
+def test_the_wifi_icon_turns_red_on_an_unreachable_error_and_green_again_on_success():
+    """Раньше значок оставался зелёным сколько угодно после того, как сервер на ПК уже выключили —
+    обновлялся только при заходе на экран камеры, а не по факту неудачного запроса (отзыв пользователя)."""
+    script = Script()
+    script.match_result = ClientError(client.UNREACHABLE, "TimeoutError: timed out")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+    assert app.wifi_icon.icon == ft.Icons.WIFI
+
+    shoot(app)
+    assert app.wifi_icon.icon == ft.Icons.WIFI_OFF and app.wifi_icon.color == ft.Colors.RED_400
+
+    script.match_result = sample_response()
+    run(app.on_retry(None))
+    assert app.wifi_icon.icon == ft.Icons.WIFI and app.wifi_icon.color == ft.Colors.GREEN_400
+
+
+def test_a_server_error_other_than_unreachable_keeps_the_wifi_icon_green():
+    """NO_INDEX и подобные означают, что ПК ответил — связь есть, значок гасить незачем."""
+    script = Script()
+    script.match_result = ClientError(client.NO_INDEX, "индекс не построен")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+
+    assert app.wifi_icon.icon == ft.Icons.WIFI
+
+
+def test_the_diag_line_is_hidden_on_the_camera_screen_but_shown_elsewhere():
+    """Экран камеры должен быть во весь экран без технической информации внизу (отзыв пользователя)."""
+    script = Script()
+    script.match_result = ClientError(client.UNREACHABLE, "TimeoutError: timed out")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+
+    shoot(app)
+
+    assert views(app) == ["camera"] and app.diag_text.visible is False
+    assert "Нет связи" in app.diag_text.value  # текст всё равно запомнен, просто не показан здесь
+
+    run(app.on_change_pc(None))
+    assert views(app) == ["connect"]
+
+
+def test_a_late_result_after_leaving_the_camera_is_kept_in_history_without_jumping_screens():
+    """«Назад» с камеры теперь работает сразу, не дожидаясь ответа (см. test_mobile_back_button.py) —
+    если ответ придёт позже, экран не должен неожиданно переключиться на «Результаты»."""
+    script = Script()
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+    app._show_connect()  # noqa: SLF001 - имитирует уход «Назад» до того, как пришёл ответ
+
+    run(app._search(b"JPEG-shot"))  # noqa: SLF001 - ответ приходит уже после ухода с камеры
+
+    assert views(app) == ["connect"]
+    assert len(app.history) == 1  # снимок всё равно попал в историю
+
+
+def test_a_late_failure_after_leaving_the_camera_still_updates_the_error_log():
+    script = Script()
+    script.match_result = ClientError(client.UNREACHABLE, "TimeoutError: timed out")
+    app, _, _, _, _ = start(prefs=FakePrefs(STORED), script=script)
+    app._show_connect()  # noqa: SLF001 - имитирует уход «Назад» до того, как пришёл ответ
+
+    run(app._search(b"JPEG-shot"))  # noqa: SLF001
+
+    assert views(app) == ["connect"] and app.diag_text.visible and "Нет связи" in app.diag_text.value
 
 
 def test_a_search_error_offers_a_retry_that_resends_the_same_photo_without_reshooting():

@@ -130,14 +130,25 @@ def test_the_connect_screen_also_asks_for_a_second_press():
     assert views_shown(app) == ["connect"] and view.decisions == [False, True]
 
 
-def test_back_while_busy_never_exits_and_does_not_navigate():
+def test_back_from_the_camera_works_even_while_a_request_is_still_pending():
+    """Раньше «Назад» с камеры блокировался, пока self._busy не сбросится — а при недоступном ПК запрос
+    мог висеть до истечения таймаута (реальный отзыв пользователя: «Назад» не реагировала минуту)."""
     app, view, _, _ = make(STORED)
-    app._busy = True  # noqa: SLF001 - идёт отправка или подключение
+    app._busy = True  # noqa: SLF001 - идёт отправка фото или подключение
+
+    press_back(app, view)
+
+    assert view.decisions == [False] and views_shown(app) == ["connect"]
+
+
+def test_back_while_busy_never_exits_the_app_outside_the_camera():
+    app, view, _, _ = make()  # экран подключения — некуда возвращаться, кроме выхода
+    app._busy = True  # noqa: SLF001 - идёт подключение
 
     press_back(app, view)
     press_back(app, view)
 
-    assert view.decisions == [False, False] and views_shown(app) == ["camera"]
+    assert view.decisions == [False, False] and views_shown(app) == ["connect"]
 
 
 def test_the_hint_overlays_the_screen_instead_of_shrinking_the_camera_view():
