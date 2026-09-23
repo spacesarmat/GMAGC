@@ -1,4 +1,4 @@
-"""Экран ПК-приложения: библиотека, индекс, поиск по фото, сервер для телефона."""
+"""Экран ПК-приложения: боковая навигация (Поиск/Телефон/Библиотека/Настройки), поиск по фото, сервер телефона."""
 
 from __future__ import annotations
 
@@ -13,7 +13,18 @@ from pathlib import Path
 import flet as ft
 
 from gmagc_common.protocol import build_link, format_code
-from gmagc_common.theme import SEED_COLOR, score_band
+from gmagc_common.theme import (
+    DESKTOP_ACCENT,
+    DESKTOP_BG,
+    DESKTOP_DIM,
+    DESKTOP_LINE,
+    DESKTOP_MUTED,
+    DESKTOP_OK,
+    DESKTOP_PANEL,
+    DESKTOP_PANEL2,
+    DESKTOP_STRONG,
+    score_band,
+)
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.selfcheck import run_core_check
@@ -40,10 +51,13 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
 PHONE_HINT = "Телефон и ПК должны быть в одной сети Wi-Fi. При первом запуске разрешите доступ в брандмауэре Windows."
 ONBOARDING_HINT = (
-    "Добро пожаловать! Сначала выберите папку библиотеки гобо и постройте индекс — после этого можно искать "
-    "по фото (файл или буфер обмена) или подключить телефон по Wi-Fi (код и QR — в блоке «Телефон»)."
+    "Добро пожаловать! Откройте экран «Библиотека» слева, чтобы выбрать папку гобо и построить индекс — "
+    "после этого можно искать по фото (файл или буфер обмена) или подключить телефон на экране «Телефон»."
 )
 HISTORY_LIMIT = 10
+
+_VIEW_NAMES = ("search", "phone", "library", "settings")
+_SCREEN_LABELS = {"search": "Поиск гобо", "phone": "Телефон", "library": "Библиотека", "settings": "Настройки"}
 
 
 _BADGE_COLORS = {
@@ -57,28 +71,51 @@ def _score_badge(score: float) -> ft.Container:
     """Цветной бейдж оценки на карточке результата: зелёный/жёлтый/красный по порогу совпадения."""
     bgcolor, color = _BADGE_COLORS[score_band(score)]
     return ft.Container(
-        ft.Text(score_text(score), size=12, weight=ft.FontWeight.BOLD, color=color),
+        ft.Text(score_text(score), size=11, weight=ft.FontWeight.BOLD, color=color),
         bgcolor=bgcolor,
-        border_radius=12,
-        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+        border_radius=10,
+        padding=ft.Padding.symmetric(horizontal=7, vertical=2),
     )
 
 
-def _section_card(controls: list[ft.Control]) -> ft.Card:
-    """Приподнятая карточка-секция левой колонки («Библиотека», «Телефон», «Вид»)."""
-    return ft.Card(ft.Container(ft.Column(controls, spacing=8), padding=12))
+def _panel(controls: list[ft.Control], *, width: int | None = None, expand: bool | int = False) -> ft.Container:
+    """Плоская панель-секция без тени (в отличие от Material-карточки) — «Библиотека», «Телефон» и т.п."""
+    return ft.Container(
+        ft.Column(controls, spacing=10),
+        padding=16,
+        bgcolor=DESKTOP_PANEL,
+        border=ft.Border.all(1, DESKTOP_LINE),
+        border_radius=2,
+        width=width,
+        expand=expand,
+    )
+
+
+def _nav_item(icon: str, label: str, on_click) -> ft.Container:
+    """Пункт боковой навигации; активный/неактивный вид переключает DesktopApp._show()."""
+    return ft.Container(
+        ft.Row([ft.Icon(icon, size=18), ft.Text(label, size=13, expand=True)], spacing=10),
+        padding=ft.Padding.symmetric(horizontal=10, vertical=11),
+        border_radius=2,
+        on_click=on_click,
+    )
 
 
 def _theme(large_text: bool) -> ft.Theme:
-    """Обычная тема или увеличенная (крупнее шрифт по умолчанию и просторнее элементы) — для тёмных залов.
+    """Тёмная палитра ПК-приложения по макету пользователя (боковая панель, бирюзовый акцент) — светлой темы нет.
 
-    Затрагивает текст без явно заданного размера (многие подписи в этом приложении задают свой размер
-    напрямую и увеличенным текстом не становятся крупнее)."""
+    large_text увеличивает шрифт без явно заданного размера — для тёмных залов; часть подписей
+    задаёт свой размер напрямую и крупным текстом не увеличивается."""
+    base = {
+        "use_material3": True,
+        "color_scheme_seed": DESKTOP_ACCENT,
+        "scaffold_bgcolor": DESKTOP_BG,
+        "card_bgcolor": DESKTOP_PANEL,
+    }
     if not large_text:
-        return ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
+        return ft.Theme(**base)
     return ft.Theme(
-        use_material3=True,
-        color_scheme_seed=SEED_COLOR,
+        **base,
         visual_density=ft.VisualDensity.COMFORTABLE,
         text_theme=ft.TextTheme(
             body_small=ft.TextStyle(size=14),
@@ -140,6 +177,8 @@ class DesktopApp:
         self._busy = False
         self._cancel = False
         self._last_query_photo: bytes | None = None  # для повтора поиска сразу после «Это не то»
+        self._last_search_ms: float | None = None
+        self._last_score: float | None = None
 
         self.splash = ft.Container(
             ft.Image(src="logo.svg", width=140, height=140, fit=ft.BoxFit.CONTAIN),
@@ -147,17 +186,39 @@ class DesktopApp:
             expand=True,
             bgcolor=ft.Colors.with_opacity(0.92, ft.Colors.BLACK),
         )
+
+        # ---- навигация -----------------------------------------------------------
+        self.current_view = "search"
+        self.breadcrumb = ft.Text("GMAGC / Поиск гобо", size=12, color=DESKTOP_MUTED)
+        self._nav_containers: dict[str, ft.Container] = {}
+
+        # ---- метрики и статус-строка ------------------------------------------------
+        self.metric_files = ft.Text("0", size=13)
+        self.metric_time = ft.Text("—", size=13)
+        self.metric_score = ft.Text("—", size=13)
+        self.statusbar_index = ft.Text("INDEX: NOT BUILT", size=9, color=DESKTOP_DIM)
+
+        # ---- подсказка при первом запуске -------------------------------------------
         self.onboarding_text = ft.Text(ONBOARDING_HINT, size=13)
         self.onboarding_dismiss_button = ft.TextButton(
             content=ft.Text("Понятно", size=12), on_click=self.on_dismiss_onboarding
         )
+        self.onboarding_goto_library_button = ft.TextButton(
+            content=ft.Text("Перейти в «Библиотека»", size=12), on_click=lambda _e: self._show("library")
+        )
         self.onboarding_hint = ft.Container(
-            ft.Column([self.onboarding_text, self.onboarding_dismiss_button], spacing=2),
-            padding=10,
-            border_radius=6,
-            bgcolor=ft.Colors.BLUE_50,
+            ft.Column(
+                [self.onboarding_text, ft.Row([self.onboarding_goto_library_button, self.onboarding_dismiss_button])],
+                spacing=2,
+            ),
+            padding=12,
+            border_radius=2,
+            bgcolor=DESKTOP_PANEL2,
+            border=ft.Border.all(1, DESKTOP_LINE),
             visible=False,
         )
+
+        # ---- библиотека ------------------------------------------------------------
         self.library_text = ft.Text("не выбрана", selectable=True)
         self.status_label = ft.Text("Индекс не построен")
         self.progress = ft.ProgressBar(value=0, visible=False)
@@ -165,27 +226,32 @@ class DesktopApp:
         self.choose_folder_button = ft.Button("Выбрать папку…", on_click=self.on_choose_folder)
         self.rebuild_button = ft.Button("Обновить индекс", on_click=self.on_rebuild)
         self.cancel_button = ft.Button("Отмена", on_click=self.on_cancel, visible=False)
+
+        # ---- поиск -------------------------------------------------------------
         self.pick_photo_button = ft.Button("Выбрать фото…", on_click=self.on_pick_photo)
         self.paste_button = ft.Button("Вставить из буфера", on_click=self.on_paste)
         self.banner_text = ft.Text(color=ft.Colors.BLACK)
-        self.banner = ft.Container(self.banner_text, padding=10, border_radius=6, visible=False)
-        self.source_label = ft.Text("", visible=False)
+        self.banner = ft.Container(self.banner_text, padding=10, border_radius=2, visible=False)
+        self.source_label = ft.Text("", visible=False, size=11, color=DESKTOP_MUTED)
         self.photo_holder = ft.Column(visible=False, spacing=4)
         self.projection_holder = ft.Column(visible=False, spacing=4)
-        self.results_column = ft.Column(spacing=8)
+        # GridView (не Row с wrap=True) — переносит карточки по строкам в реально доступной ширине панели,
+        # а не только визуально «внутри себя» без учёта родителя (проверено скриншотом: с Row карточки
+        # обрезались по правому краю панели вместо переноса)
+        self.results_column = ft.GridView(
+            max_extent=200, spacing=10, run_spacing=10, child_aspect_ratio=0.8, expand=True
+        )
+        self.results_summary = ft.Text("", size=11, color=DESKTOP_DIM)
         self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
-        self.check_label = ft.Text("", size=12)
-        self.dark_theme_item = ft.PopupMenuItem(
-            content=ft.Text("Тёмная тема"), checked=False, on_click=self.on_toggle_dark_theme
-        )
-        self.large_text_item = ft.PopupMenuItem(
-            content=ft.Text("Крупный текст"), checked=False, on_click=self.on_toggle_large_text
-        )
-        self.autostart_item = ft.PopupMenuItem(
-            content=ft.Text("Автозапуск при включении компьютера"), checked=False, on_click=self.on_toggle_autostart
-        )
-        self.menu_button = ft.PopupMenuButton(icon=ft.Icons.MENU, tooltip="Настройки и поддержка")
 
+        # ---- настройки ---------------------------------------------------------
+        self.check_label = ft.Text("", size=12)
+        self.large_text_switch = ft.Switch(label="Крупный текст", value=False, on_change=self.on_toggle_large_text)
+        self.autostart_switch = ft.Switch(
+            label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
+        )
+
+        # ---- сервер для телефона -----------------------------------------------
         self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
         self.server_status = ft.Text("Выключен")
         self.qr_holder = ft.Column(visible=False)
@@ -210,40 +276,312 @@ class DesktopApp:
         self.page.update()
         self._finish_build()
 
-    def _build_appbar(self) -> ft.AppBar:
-        items: list[ft.PopupMenuItem] = [
-            self.dark_theme_item,
-            self.large_text_item,
-            *([self.autostart_item] if autostart.is_supported() else []),
-            ft.PopupMenuItem(content=ft.Text("Экспорт настроек", size=13), on_click=self.on_export_settings),
-            ft.PopupMenuItem(content=ft.Text("Импорт настроек", size=13), on_click=self.on_import_settings),
-            ft.PopupMenuItem(
-                content=ft.Row([ft.Text("Проверить ядро", size=13), self.check_label]), on_click=self.on_check
+    def _metric(self, label: str, value: ft.Text) -> ft.Column:
+        return ft.Column(
+            [value, ft.Text(label.upper(), size=9, color=DESKTOP_DIM)],
+            spacing=2,
+        )
+
+    def _build_sidebar(self) -> ft.Container:
+        nav_specs = [
+            (ft.Icons.SEARCH, "Поиск гобо", "search"),
+            (ft.Icons.SMARTPHONE, "Телефон", "phone"),
+            (ft.Icons.FOLDER_OUTLINED, "Библиотека", "library"),
+        ]
+        nav_items = []
+        for icon, label, name in nav_specs:
+            item = _nav_item(icon, label, lambda _e, n=name: self._show(n))
+            self._nav_containers[name] = item
+            nav_items.append(item)
+        settings_item = _nav_item(ft.Icons.SETTINGS_OUTLINED, "Настройки", lambda _e: self._show("settings"))
+        self._nav_containers["settings"] = settings_item
+
+        return ft.Container(
+            ft.Column(
+                [
+                    ft.Container(
+                        ft.Row(
+                            [
+                                ft.Image(src="logo.svg", width=28, height=28, fit=ft.BoxFit.CONTAIN),
+                                ft.Text(NAME, size=16, weight=ft.FontWeight.W_800),
+                            ],
+                            spacing=10,
+                        ),
+                        padding=ft.Padding.symmetric(horizontal=18, vertical=0),
+                        height=64,
+                        alignment=ft.Alignment.CENTER_LEFT,
+                    ),
+                    ft.Container(height=1, bgcolor=DESKTOP_LINE),
+                    ft.Container(
+                        ft.Column(
+                            [ft.Text("РАБОЧАЯ ОБЛАСТЬ", size=9, color=DESKTOP_DIM), *nav_items],
+                            spacing=6,
+                        ),
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=14),
+                    ),
+                    ft.Container(height=40),
+                    ft.Container(
+                        ft.Column([ft.Text("СИСТЕМА", size=9, color=DESKTOP_DIM), settings_item], spacing=6),
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                    ),
+                    ft.Container(height=1, bgcolor=DESKTOP_LINE),
+                    ft.Container(
+                        ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Icon(ft.Icons.CIRCLE, size=7, color=DESKTOP_OK),
+                                        ft.Text("Система готова", size=11, color=DESKTOP_MUTED),
+                                    ],
+                                    spacing=7,
+                                ),
+                                ft.Row(
+                                    [
+                                        ft.Text(AUTHOR, size=10, color=DESKTOP_DIM),
+                                        ft.Text(f"v{VERSION}", size=10, color=DESKTOP_DIM),
+                                    ],
+                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                ),
+                            ],
+                            spacing=10,
+                        ),
+                        padding=16,
+                    ),
+                ],
+                spacing=0,
             ),
-            ft.PopupMenuItem(content=ft.Text("Отправить лог по почте", size=13), on_click=self.on_send_log),
+            width=224,
+            bgcolor=DESKTOP_BG,
+        )
+
+    def _build_topbar(self) -> ft.Container:
+        return ft.Container(
+            self.breadcrumb, padding=ft.Padding.symmetric(horizontal=22, vertical=0), height=48,
+            alignment=ft.Alignment.CENTER_LEFT,
+        )
+
+    def _build_statusbar(self) -> ft.Container:
+        return ft.Container(
+            ft.Row(
+                [
+                    ft.Text("OFFLINE MODE", size=9, color=DESKTOP_DIM),
+                    self.statusbar_index,
+                    ft.Text(f"DEVICE: {platform.system().upper() or 'DESKTOP'}", size=9, color=DESKTOP_DIM),
+                    ft.Text(f"PYTHON {platform.python_version()}", size=9, color=DESKTOP_DIM),
+                    ft.Text("FLET", size=9, color=DESKTOP_DIM),
+                ],
+                spacing=16,
+            ),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=0),
+            height=30,
+        )
+
+    def _build_search_view(self) -> ft.Column:
+        heading = ft.Row(
+            [
+                ft.Column(
+                    [
+                        ft.Text("Поиск по изображению", size=22, weight=ft.FontWeight.BOLD),
+                        ft.Text(
+                            "Загрузите фотографию проекции, чтобы найти совпадение в библиотеке.",
+                            size=11,
+                            color=DESKTOP_MUTED,
+                        ),
+                    ],
+                    spacing=4,
+                ),
+                ft.Row(
+                    [
+                        self._metric("гобо в базе", self.metric_files),
+                        self._metric("время поиска", self.metric_time),
+                        self._metric("совпадение", self.metric_score),
+                    ],
+                    spacing=22,
+                ),
+            ],
+            spacing=40,
+        )
+        source_panel = ft.Container(
+            ft.Column(
+                [
+                    ft.Text("Исходное изображение", size=12, weight=ft.FontWeight.W_600),
+                    self.source_label,
+                    ft.Container(
+                        ft.Column(
+                            [self.photo_holder, self.projection_holder],
+                            spacing=12,
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        border=ft.Border.all(1, DESKTOP_STRONG),
+                        bgcolor=DESKTOP_BG,
+                        expand=True,
+                        padding=14,
+                        alignment=ft.Alignment.CENTER,
+                    ),
+                    ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
+                ],
+                spacing=10,
+                expand=True,
+            ),
+            padding=14,
+            bgcolor=DESKTOP_PANEL,
+            border=ft.Border.all(1, DESKTOP_LINE),
+            width=360,
+        )
+        results_panel = ft.Container(
+            ft.Column(
+                [
+                    ft.Row(
+                        [ft.Text("Результаты", size=12, weight=ft.FontWeight.W_600), self.results_summary],
+                        spacing=10,
+                    ),
+                    self.banner,
+                    self.copy_label,
+                    ft.Container(self.results_column, expand=True),
+                ],
+                spacing=10,
+                expand=True,
+            ),
+            padding=14,
+            bgcolor=DESKTOP_PANEL2,
+            border=ft.Border.all(1, DESKTOP_LINE),
+            expand=True,
+        )
+        return ft.Column(
+            [
+                self.onboarding_hint,
+                heading,
+                ft.Row(
+                    [source_panel, results_panel],
+                    spacing=14,
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+            ],
+            spacing=16,
+            expand=True,
+            visible=False,
+        )
+
+    def _build_phone_view(self) -> ft.Column:
+        connection_card = _panel(
+            [
+                ft.Text("Параметры подключения", size=14, weight=ft.FontWeight.BOLD),
+                self.server_switch,
+                self.server_status,
+                self.code_text,
+                self.code_row,
+                self.phone_note,
+                self.addresses_text,
+                ft.Text(PHONE_HINT, size=12, color=DESKTOP_MUTED),
+            ],
+            expand=True,
+        )
+        qr_card = _panel(
+            [ft.Text("QR-код подключения", size=14, weight=ft.FontWeight.BOLD), self.qr_holder], width=280
+        )
+        history_card = _panel([self.history_title, self.history_column])
+        return ft.Column(
+            [
+                ft.Text("Подключение телефона", size=22, weight=ft.FontWeight.BOLD),
+                ft.Row([connection_card, qr_card], spacing=14, vertical_alignment=ft.CrossAxisAlignment.START),
+                history_card,
+            ],
+            spacing=16,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            visible=False,
+        )
+
+    def _build_library_view(self) -> ft.Column:
+        card = _panel(
+            [
+                ft.Text("Текущая библиотека", size=14, weight=ft.FontWeight.BOLD),
+                self.library_text,
+                ft.Row([self.choose_folder_button, self.rebuild_button], spacing=8),
+                self.status_label,
+                self.progress,
+                self.progress_label,
+                self.cancel_button,
+            ]
+        )
+        return ft.Column(
+            [ft.Text("Библиотека гобо", size=22, weight=ft.FontWeight.BOLD), card],
+            spacing=16,
+            expand=True,
+            visible=False,
+        )
+
+    def _settings_row(self, label: str, button_text: str, on_click) -> ft.Row:
+        return ft.Row(
+            [ft.Text(label, size=13), ft.TextButton(content=ft.Text(button_text), on_click=on_click)],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        )
+
+    def _build_settings_view(self) -> ft.Column:
+        items: list[ft.Control] = [self.large_text_switch]
+        if autostart.is_supported():
+            items.append(self.autostart_switch)
+        items += [
+            ft.Divider(color=DESKTOP_LINE),
+            self._settings_row("Экспорт настроек", "Экспорт…", self.on_export_settings),
+            self._settings_row("Импорт настроек", "Импорт…", self.on_import_settings),
+            ft.Divider(color=DESKTOP_LINE),
+            self._settings_row("Проверить ядро", "Проверить", self.on_check),
+            self.check_label,
         ]
         if self.update_bar is not None:
-            items.append(
-                ft.PopupMenuItem(
-                    content=ft.Row([ft.Text("Проверить обновления", size=13), self.update_bar.status]),
-                    on_click=self.update_bar.on_check,
-                )
-            )
+            items += [
+                ft.Divider(color=DESKTOP_LINE),
+                self.update_bar.switch,
+                ft.Row(
+                    [ft.Text("Проверить сейчас", size=13), self.update_bar.check_button],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                self.update_bar.status,
+            ]
+        items += [
+            ft.Divider(color=DESKTOP_LINE),
+            self._settings_row("Диагностика", "Отправить лог по почте", self.on_send_log),
+        ]
         if self.support is not None:
             items += [
-                ft.PopupMenuItem(content=ft.Text("Поддержать автора", size=13), on_click=self.support.on_open_link),
-                ft.PopupMenuItem(
-                    content=ft.Text("Telegram автора", size=13), on_click=self.support.on_open_telegram
-                ),
-                ft.PopupMenuItem(content=ft.Text("Канал GMAGC", size=13), on_click=self.support.on_open_channel),
+                ft.Divider(color=DESKTOP_LINE),
+                self.support.link,
+                self.support.telegram_link,
+                self.support.channel_link,
             ]
-        self.menu_button.items = items
-        return ft.AppBar(
-            leading=ft.Image(src="logo.svg", width=30, height=30, fit=ft.BoxFit.CONTAIN),
-            leading_width=48,
-            title=ft.Text(f"{NAME} — {AUTHOR}"),
-            actions=[self.menu_button],
+        card = _panel(items)
+        return ft.Column(
+            [ft.Text("Настройки", size=22, weight=ft.FontWeight.BOLD), card],
+            spacing=16,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            visible=False,
         )
+
+    def _show(self, name: str) -> None:
+        self.current_view = name
+        for view_name in _VIEW_NAMES:
+            getattr(self, f"{view_name}_view").visible = view_name == name
+        for nav_name, container in self._nav_containers.items():
+            container.bgcolor = DESKTOP_PANEL2 if nav_name == name else None
+        self.breadcrumb.value = f"GMAGC / {_SCREEN_LABELS[name]}"
+        self.page.update()
+
+    def _update_metrics(self) -> None:
+        status = self.service.status()
+        self.metric_files.value = f"{status.files:,}".replace(",", " ") if status else "0"
+        self.metric_time.value = f"{self._last_search_ms:.0f} ms" if self._last_search_ms is not None else "—"
+        self.metric_score.value = score_text(self._last_score) if self._last_score is not None else "—"
+
+    def _update_statusbar(self) -> None:
+        self.statusbar_index.value = f"INDEX: {'READY' if self.service.status() else 'NOT BUILT'}"
+
+    def _update_results_summary(self) -> None:
+        count = len(self.results_column.controls)
+        self.results_summary.value = f"{count} результатов" if count else ""
 
     def _finish_build(self) -> None:
         status = self.service.load()
@@ -252,88 +590,57 @@ class DesktopApp:
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
-        self.dark_theme_item.checked = self.service.settings.dark_theme
-        self.large_text_item.checked = self.service.settings.large_text
+        self.large_text_switch.value = self.service.settings.large_text
         self._apply_theme()
         if autostart.is_supported():
-            self.autostart_item.checked = autostart.is_autostart_enabled()
+            self.autostart_switch.value = autostart.is_autostart_enabled()
         self.page.services.extend([self.picker, self.clipboard])
         self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
             self.server_switch.value = True
             self._start_server()
+        self._update_metrics()
+        self._update_statusbar()
 
-        library_card = _section_card(
-            [
-                ft.Text("Библиотека", size=18, weight=ft.FontWeight.BOLD),
-                self.library_text,
-                self.choose_folder_button,
-                self.rebuild_button,
-                self.status_label,
-                self.progress,
-                self.progress_label,
-                self.cancel_button,
-            ]
-        )
-        phone_card = _section_card(
-            [
-                ft.Text("Телефон", size=18, weight=ft.FontWeight.BOLD),
-                self.server_switch,
-                self.server_status,
-                self.qr_holder,
-                self.code_text,
-                self.code_row,
-                self.phone_note,
-                self.addresses_text,
-                ft.Text(PHONE_HINT, size=12),
-                self.history_title,
-                self.history_column,
-                *([self.update_bar.switch] if self.update_bar else []),
-            ]
-        )
-        left = ft.Column([phone_card], spacing=12, width=320, scroll=ft.ScrollMode.AUTO)
-        right = ft.Column(
-            [
-                self.onboarding_hint,
-                library_card,
-                ft.Divider(),
-                ft.Row([self.pick_photo_button, self.paste_button], spacing=8),
-                self.source_label,
-                self.banner,
-                ft.Row(
-                    [self.photo_holder, self.projection_holder],
-                    spacing=16,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
-                ft.Text("Результаты", size=18, weight=ft.FontWeight.BOLD),
-                self.copy_label,
-                self.results_column,
-            ],
-            spacing=10,
-            expand=True,
-            scroll=ft.ScrollMode.AUTO,
-        )
-        views = getattr(self.page, "views", None)
-        if views:
-            views[0].appbar = self._build_appbar()
+        self.search_view = self._build_search_view()
+        self.phone_view = self._build_phone_view()
+        self.library_view = self._build_library_view()
+        self.settings_view = self._build_settings_view()
+
         self.page.clean()
         self.page.add(
             ft.SafeArea(
-                ft.Column(
+                ft.Row(
                     [
-                        *([self.update_bar.container] if self.update_bar else []),
-                        ft.Row(
-                            [left, ft.VerticalDivider(), right],
+                        self._build_sidebar(),
+                        ft.Container(width=1, bgcolor=DESKTOP_LINE),
+                        ft.Column(
+                            [
+                                *([self.update_bar.container] if self.update_bar else []),
+                                self._build_topbar(),
+                                ft.Container(height=1, bgcolor=DESKTOP_LINE),
+                                ft.Container(
+                                    ft.Column(
+                                        [self.search_view, self.phone_view, self.library_view, self.settings_view],
+                                        expand=True,
+                                    ),
+                                    padding=24,
+                                    expand=True,
+                                ),
+                                ft.Container(height=1, bgcolor=DESKTOP_LINE),
+                                self._build_statusbar(),
+                            ],
                             expand=True,
-                            vertical_alignment=ft.CrossAxisAlignment.START,
+                            spacing=0,
                         ),
                     ],
                     expand=True,
+                    spacing=0,
                 ),
                 expand=True,
             )
         )
-        self.page.update()
+        self._show("search")
         if self.update_bar is not None:
             self.update_bar.start()
         if self.support is not None:
@@ -393,7 +700,7 @@ class DesktopApp:
             code = self.service.ensure_access_code()
             self.server_status.value = f"Работает: {host}:{port}"
             self.qr_holder.controls = [
-                ft.Image(src=self.qr(build_link(host, port, code)), width=240, height=240, fit=ft.BoxFit.CONTAIN)
+                ft.Image(src=self.qr(build_link(host, port, code)), width=220, height=220, fit=ft.BoxFit.CONTAIN)
             ]
             self.code_text.value = f"Код: {format_code(code)}"
             self.addresses_text.value = "Другие адреса ПК: " + ", ".join(addresses[1:])
@@ -445,6 +752,7 @@ class DesktopApp:
         self.source_label.visible = True
         self._show_photo(record.photo)
         self._show_outcome(record.outcome)
+        self._show("search")  # результат с телефона должен быть сразу виден, на каком бы экране ни были
 
     def on_dismiss_onboarding(self, _event) -> None:
         self.onboarding_hint.visible = False
@@ -489,6 +797,8 @@ class DesktopApp:
             self._show_banner(f"Ошибка индексации: {error}", error=True)
         finally:
             self.status_label.value = status_text(self.service.status())
+            self._update_metrics()
+            self._update_statusbar()
             self._set_busy(False)
 
     def _on_progress(self, done: int, total: int) -> None:
@@ -506,28 +816,22 @@ class DesktopApp:
         theme = _theme(self.service.settings.large_text)
         self.page.theme = theme
         self.page.dark_theme = theme
-        self.page.theme_mode = ft.ThemeMode.DARK if self.service.settings.dark_theme else ft.ThemeMode.LIGHT
+        self.page.theme_mode = ft.ThemeMode.DARK
         self.page.update()
 
-    def on_toggle_dark_theme(self, _event) -> None:
-        self.dark_theme_item.checked = not self.dark_theme_item.checked
-        self.service.set_dark_theme(bool(self.dark_theme_item.checked))
-        self._apply_theme()
-
     def on_toggle_large_text(self, _event) -> None:
-        self.large_text_item.checked = not self.large_text_item.checked
-        self.service.set_large_text(bool(self.large_text_item.checked))
+        self.service.set_large_text(bool(self.large_text_switch.value))
         self._apply_theme()
 
     def on_toggle_autostart(self, _event) -> None:
-        target = not self.autostart_item.checked
+        target = bool(self.autostart_switch.value)
         exe = current_executable()
         if exe is None:
-            self.autostart_item.checked = False
+            self.autostart_switch.value = False
             self._show_banner("Не удалось определить путь к приложению", error=True)
+            self.page.update()
             return
         autostart.set_autostart(target, exe)
-        self.autostart_item.checked = target
         self.page.update()
 
     async def on_key(self, event) -> None:
@@ -562,6 +866,8 @@ class DesktopApp:
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
             self.update_bar.switch.value = self.service.settings.check_updates
+        self._update_metrics()
+        self._update_statusbar()
         self._show_banner(
             "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.",
             error=False,
@@ -615,68 +921,89 @@ class DesktopApp:
     def _show_photo(self, data: bytes) -> None:
         self._last_query_photo = data
         self.photo_holder.controls = [
-            ft.Text("Фото"),
+            ft.Text("Фото", size=11, color=DESKTOP_MUTED),
             ft.Image(src=data, width=260, height=200, fit=ft.BoxFit.CONTAIN),
         ]
         self.photo_holder.visible = True
         self.projection_holder.visible = False
         self.results_column.controls = []
+        self._update_results_summary()
         self.copy_label.visible = False
         self.page.update()
 
     def _show_outcome(self, outcome: SearchOutcome) -> None:
+        self._last_search_ms = outcome.took_ms
+        self._last_score = outcome.results[0].score if outcome.results else None
+        self._update_metrics()
         message = outcome_message(outcome.kind)
         if message:
             self._show_banner(message, error=outcome.kind is Outcome.NO_PROJECTION)
         if outcome.projection_png:
             self.projection_holder.controls = [
-                ft.Text("Найденная проекция"),
+                ft.Text("Найденная проекция", size=11, color=DESKTOP_MUTED),
                 ft.Image(src=outcome.projection_png, width=160, height=160, fit=ft.BoxFit.CONTAIN),
             ]
         self.projection_holder.visible = bool(outcome.projection_png)
         self.results_column.controls = [self._result_card(result) for result in outcome.results]
+        self._update_results_summary()
         self.page.update()
 
-    def _result_card(self, result: Result) -> ft.Card:
+    def _result_card(self, result: Result) -> ft.Container:
+        thumb = ft.Stack(
+            [
+                ft.Container(
+                    ft.Image(src=result.thumbnail_png, fit=ft.BoxFit.CONTAIN),
+                    alignment=ft.Alignment.CENTER,
+                    bgcolor=DESKTOP_BG,
+                    expand=True,
+                ),
+                ft.Container(ft.Text(f"{result.rank:02d}", size=9, color=DESKTOP_DIM), top=6, left=6),
+                ft.Container(_score_badge(result.score), top=6, right=6),
+            ],
+            height=110,
+        )
         details: list[ft.Control] = [
-            ft.Text(result.name, weight=ft.FontWeight.BOLD),
-            ft.Text(result.full_path, size=12),
+            ft.Text(result.name, weight=ft.FontWeight.BOLD, size=12, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(result.full_path, size=10, color=DESKTOP_MUTED, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
         ]
         if result.copies:
-            details.append(ft.Text(f"ещё {len(result.copies)} файлов", tooltip="\n".join(result.copies)))
-        return ft.Card(
-            ft.Container(
-                ft.Row(
-                    [
-                        ft.Image(src=result.thumbnail_png, width=96, height=96, fit=ft.BoxFit.CONTAIN),
-                        ft.Column(details, spacing=2, expand=True),
-                        ft.Column(
-                            [
-                                _score_badge(result.score),
-                                ft.IconButton(
-                                    icon=ft.Icons.FOLDER_OPEN,
-                                    tooltip="Показать в папке",
-                                    on_click=lambda _event, path=result.full_path: self.reveal(path),
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.THUMB_DOWN_OUTLINED,
-                                    tooltip="Это не то — указать верный файл",
-                                    data=result,
-                                    on_click=self.on_report_wrong,
-                                ),
-                            ],
-                            horizontal_alignment=ft.CrossAxisAlignment.END,
-                            spacing=4,
-                        ),
-                    ],
-                    spacing=12,
-                ),
-                padding=10,
-                ink=True,
-                data=result.full_path,
-                tooltip="Нажмите, чтобы скопировать путь к файлу",
-                on_click=self.on_card_click,
+            details.append(
+                ft.Text(f"ещё {len(result.copies)} файлов", size=9, color=DESKTOP_DIM, tooltip="\n".join(result.copies))
             )
+        actions = ft.Row(
+            [
+                ft.IconButton(
+                    icon=ft.Icons.FOLDER_OPEN,
+                    icon_size=16,
+                    tooltip="Показать в папке",
+                    on_click=lambda _event, path=result.full_path: self.reveal(path),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.THUMB_DOWN_OUTLINED,
+                    icon_size=16,
+                    tooltip="Это не то — указать верный файл",
+                    data=result,
+                    on_click=self.on_report_wrong,
+                ),
+            ],
+            spacing=0,
+        )
+        return ft.Container(
+            ft.Column(
+                [
+                    thumb,
+                    ft.Container(ft.Column(details, spacing=3), padding=ft.Padding.only(left=10, right=10, top=8)),
+                    actions,
+                ],
+                spacing=4,
+            ),
+            bgcolor=DESKTOP_PANEL,
+            border=ft.Border.all(1, DESKTOP_LINE),
+            border_radius=2,
+            ink=True,
+            data=result.full_path,
+            tooltip="Нажмите, чтобы скопировать путь к файлу",
+            on_click=self.on_card_click,
         )
 
     async def on_card_click(self, event) -> None:

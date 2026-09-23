@@ -43,7 +43,6 @@ class Settings:
     launches: int = 0
     support_last_ask: float = 0.0
     support_muted: bool = False
-    dark_theme: bool = False
     large_text: bool = False  # крупный шрифт и более контрастные цвета, для тёмных залов
 
 
@@ -82,7 +81,6 @@ def settings_from_json(text: str) -> Settings:
     launches = raw.get("launches", 0)
     support_last_ask = raw.get("support_last_ask", 0.0)
     support_muted = raw.get("support_muted", False)
-    dark_theme = raw.get("dark_theme", False)
     large_text = raw.get("large_text", False)
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
@@ -110,7 +108,6 @@ def settings_from_json(text: str) -> Settings:
             else 0.0
         ),
         support_muted=support_muted if isinstance(support_muted, bool) else False,
-        dark_theme=dark_theme if isinstance(dark_theme, bool) else False,
         large_text=large_text if isinstance(large_text, bool) else False,
     )
 
