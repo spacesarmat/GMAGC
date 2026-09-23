@@ -26,7 +26,7 @@ from gmagc_common.protocol import (
 from gmagc_common.theme import MOBILE_ACCENT_COLOR, SEED_COLOR, score_band
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
-from gmagc_mobile.client import UNAUTHORIZED, ClientError, GmagcClient
+from gmagc_mobile.client import UNAUTHORIZED, UNREACHABLE, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
@@ -207,16 +207,27 @@ class MobileApp:
         self.connect_error = ft.Text("", color=ft.Colors.RED_700, visible=False, selectable=True)
         self.connect_view = ft.Column(
             [
-                ft.Image(src="logo.svg", width=88, height=88, fit=ft.BoxFit.CONTAIN),
-                ft.Text(NAME, size=28, weight=ft.FontWeight.BOLD),
-                ft.Text("Поиск гобо по фото проекции. Подключитесь к ПК с GMAGC в той же сети Wi-Fi."),
-                self.scan_button,
-                ft.Text("или введите вручную (адрес и код показаны в приложении на ПК):", size=12),
-                self.address_field,
-                self.code_field,
-                ft.Row([self.connect_button, self.connect_busy], spacing=12),
-                self.connect_error,
-                ft.Container(expand=True),
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                ft.Image(src="logo.svg", width=56, height=56, fit=ft.BoxFit.CONTAIN),
+                                ft.Text(NAME, size=28, weight=ft.FontWeight.BOLD),
+                            ],
+                            spacing=12,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        self.address_field,
+                        self.code_field,
+                        ft.Row([self.connect_button, self.connect_busy], spacing=12, alignment=ft.MainAxisAlignment.CENTER),
+                        ft.Row([self.scan_button], alignment=ft.MainAxisAlignment.CENTER),
+                        self.connect_error,
+                    ],
+                    spacing=12,
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+                ),
                 ft.Divider(),
                 _nav_row(
                     [
@@ -228,7 +239,6 @@ class MobileApp:
                 ft.Text(f"Версия {VERSION}", size=11, color=ft.Colors.GREY_600),
             ],
             spacing=12,
-            scroll=ft.ScrollMode.AUTO,
             visible=True,
             expand=True,
         )
@@ -481,7 +491,13 @@ class MobileApp:
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
         self.page.padding = PAGE_PADDING
-        theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR)
+        scrollbar_theme = ft.ScrollbarTheme(
+            thumb_color=ft.Colors.with_opacity(0.6, MOBILE_ACCENT_COLOR),
+            track_color=ft.Colors.with_opacity(0.15, MOBILE_ACCENT_COLOR),
+            thickness=6,
+            radius=8,
+        )
+        theme = ft.Theme(use_material3=True, color_scheme_seed=SEED_COLOR, scrollbar_theme=scrollbar_theme)
         self.page.theme = theme
         self.page.dark_theme = theme
         self.page.theme_mode = ft.ThemeMode.DARK  # всегда тёмная — по одобренному референсу дизайна
@@ -578,6 +594,9 @@ class MobileApp:
             self.camera.invalidate()  # Flet убирает скрытый виджет камеры вместе с контроллером: при возврате запуск заново
         for view_name in self._VIEW_NAMES:
             getattr(self, f"{view_name}_view").visible = view_name == name
+        # на экране камеры строка последней ошибки не нужна (камера должна быть во весь экран без
+        # технической информации) — на остальных экранах, включая подключение, она остаётся
+        self.diag_text.visible = name != "camera" and bool(self.last_error)
         self.page.update()
 
     def _open_overlay(self, name: str) -> None:
@@ -603,7 +622,9 @@ class MobileApp:
     def _remember(self, text: str) -> None:
         self.last_error = text
         self.diag_text.value = f"Последняя ошибка: {text}"
-        self.diag_text.visible = True
+        # на экране камеры строка не показывается (см. _show()); тут же — на случай, если ошибка
+        # пришла уже после ухода с камеры (например, «Назад» во время долгого запроса) и нового _show() не будет
+        self.diag_text.visible = not self.camera_view.visible
 
     def _clear_diag(self) -> None:
         self.last_error = ""
@@ -629,9 +650,14 @@ class MobileApp:
         self.cancel_scan_button.visible = scanning
         self.camera_message.value = note or ""
         self.camera_message.visible = bool(note)
-        self.wifi_icon.icon = ft.Icons.WIFI if self.connection is not None else ft.Icons.WIFI_OFF
-        self.wifi_icon.color = ft.Colors.GREEN_400 if self.connection is not None else ft.Colors.RED_400
+        self._set_connectivity(self.connection is not None)
         self._show("camera")
+
+    def _set_connectivity(self, ok: bool) -> None:
+        """Значок Wi-Fi: обновляется по факту запроса, а не только при заходе на экран камеры —
+        иначе он оставался зелёным сколько угодно после того, как сервер на ПК уже выключили."""
+        self.wifi_icon.icon = ft.Icons.WIFI if ok else ft.Icons.WIFI_OFF
+        self.wifi_icon.color = ft.Colors.GREEN_400 if ok else ft.Colors.RED_400
 
     def _camera_note(self, text: str) -> None:
         self.camera_message.value = text
@@ -790,20 +816,22 @@ class MobileApp:
 
     async def _handle_back(self) -> bool:
         """True, если приложение нужно закрыть; иначе делает шаг назад (или показывает подсказку о выходе)."""
+        self.back_hint.visible = False
+        if self.camera_view.visible:
+            # с камеры «Назад» работает сразу, даже если ещё не пришёл ответ на запрос (например, сервер
+            # недоступен и «Сфотографировать» повисло) — раньше это на самом деле блокировалось self._busy
+            # и «Назад» не реагировал, пока не истечёт таймаут запроса (реальный отзыв пользователя)
+            if self.mode == MODE_SCAN:
+                await self.camera.stop_scanning()
+            self._show_connect()
+            return False
         if self._busy:
             return False  # идёт отправка или подключение: не выходим случайно
-        self.back_hint.visible = False
         if self.results_view.visible:
             await self.on_again(None)
             return False
         if any(getattr(self, f"{name}_view").visible for name in ("gallery", "settings", "about", "help")):
             self._show(self._return_view)
-            return False
-        if self.camera_view.visible:
-            # с камеры «Назад» всегда сразу на стартовый экран — без второго нажатия для выхода
-            if self.mode == MODE_SCAN:
-                await self.camera.stop_scanning()
-            self._show_connect()
             return False
         now = self._clock()
         if now - self._last_back <= self.back_seconds:
@@ -890,17 +918,23 @@ class MobileApp:
             message = f"Ошибка: {error}"
         self._set_busy(False)
         if failure is not None:
+            self._set_connectivity(failure.kind != UNREACHABLE)
             if failure.kind == UNAUTHORIZED:
                 self._show_connect(error_text(failure))
             else:
                 self._offer_retry(data, error_text(failure))
             return
         if response is None:
+            self._set_connectivity(False)  # локальная ошибка (не ClientError) — тоже похоже на обрыв связи
             self._offer_retry(data, message or "Ошибка поиска")
             return
+        self._set_connectivity(True)
         self._retry_data = None
         self._remember_history(data, response)
-        await self._show_results(data, response)
+        # пока ждали ответ, могли уйти с камеры (например, «Назад» во время долгого запроса) — тогда
+        # снимок всё равно попадёт в историю, но экран самопроизвольно на «Результаты» не переключаем
+        if self.camera_view.visible and self.mode == MODE_SHOOT:
+            await self._show_results(data, response)
 
     def _remember_history(self, photo: bytes, response: MatchResponse) -> None:
         """Добавляет успешный поиск в историю этой сессии (самый новый первым, не больше HISTORY_LIMIT)."""
