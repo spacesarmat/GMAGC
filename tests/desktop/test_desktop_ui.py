@@ -340,11 +340,12 @@ def test_the_adjustment_panel_appears_once_a_photo_is_shown_with_neutral_sliders
     assert app.adjust_exposure_slider.value == 0.0
 
 
-def test_moving_a_slider_updates_its_label_without_searching_yet(tmp_path, library, monkeypatch):
+def test_moving_a_slider_updates_the_label_and_live_preview_without_searching_yet(tmp_path, library, monkeypatch):
     app, _ = indexed_app(tmp_path, library)
     photo = save_photo(tmp_path / "p.png", ell_photo())
     app.picker.files = [str(photo)]
     asyncio.run(app.on_pick_photo(None))
+    photo_before = app.photo_holder.controls[1].src
     calls = []
     monkeypatch.setattr(app.service, "search_photo", lambda *a, **k: calls.append(a))
 
@@ -352,6 +353,28 @@ def test_moving_a_slider_updates_its_label_without_searching_yet(tmp_path, libra
     app.on_adjust_change(None)
 
     assert app.adjust_brightness_label.value == "Яркость: +40"
+    assert app.photo_holder.controls[1].src != photo_before
+    assert calls == []
+
+
+def test_moving_the_projection_slider_updates_its_own_live_preview_without_searching_yet(
+    tmp_path, library, monkeypatch
+):
+    app, _ = indexed_app(tmp_path, library)
+    photo = save_photo(tmp_path / "p.png", ell_photo())
+    app.picker.files = [str(photo)]
+    asyncio.run(app.on_pick_photo(None))
+    projection_before = app.projection_holder.controls[1].src
+    photo_before = app.photo_holder.controls[1].src
+    calls = []
+    monkeypatch.setattr(app.service, "search_photo", lambda *a, **k: calls.append(a))
+
+    app.proj_adjust_contrast_slider.value = 1.8
+    app.on_proj_adjust_change(None)
+
+    assert app.proj_adjust_contrast_label.value == "Контраст: 1.8×"
+    assert app.projection_holder.controls[1].src != projection_before
+    assert app.photo_holder.controls[1].src == photo_before  # поправка фото не менялась
     assert calls == []
 
 

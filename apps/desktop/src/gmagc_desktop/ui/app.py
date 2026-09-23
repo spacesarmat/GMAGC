@@ -30,6 +30,8 @@ from gmagc_common.theme import (
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.matcher.adjust import apply_adjustments
+from gmagc_desktop.matcher.pipeline import normalize_photo
+from gmagc_desktop.matcher.thumbnail import thumbnail_png
 from gmagc_desktop.selfcheck import run_core_check
 from gmagc_desktop.server.api import RequestRecord
 from gmagc_desktop.server.network import lan_addresses
@@ -39,7 +41,13 @@ from gmagc_desktop.service import autostart
 from gmagc_desktop.service.logging_setup import setup_logging
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
-from gmagc_desktop.service.search_service import CorrectionError, NoIndexError, PhotoError, SearchService
+from gmagc_desktop.service.search_service import (
+    PROJECTION_SIZE,
+    CorrectionError,
+    NoIndexError,
+    PhotoError,
+    SearchService,
+)
 from gmagc_desktop.service.settings import data_dir
 from gmagc_desktop.ui.support import SupportPrompt
 from gmagc_desktop.ui.texts import history_text, outcome_message, score_text, source_text, status_text
@@ -1048,18 +1056,45 @@ class DesktopApp:
             )
         )
 
-    def _show_photo(self, data: bytes) -> None:
+    def _update_photo_preview(self, data: bytes) -> None:
         self.photo_holder.controls = [
             ft.Text("Фото", size=11, color=DESKTOP_MUTED),
             ft.Image(src=data, width=150, height=110, fit=ft.BoxFit.CONTAIN),
         ]
         self.photo_holder.visible = True
+
+    def _show_photo(self, data: bytes) -> None:
+        self._update_photo_preview(data)
         self.adjust_panel.visible = True
         self.projection_holder.visible = False
         self.results_column.controls = []
         self._update_results_summary()
         self.copy_label.visible = False
         self.page.update()
+
+    def _update_live_previews(self) -> None:
+        """Пока ползунок ещё двигают: пересчитывает превью фото и проекции без запуска поиска по библиотеке."""
+        photo = self._current_photo_array()
+        if photo is None:
+            return
+        ok, encoded = cv2.imencode(".png", photo)
+        if ok:
+            self._update_photo_preview(bytes(encoded))
+        normalized = normalize_photo(photo)
+        if normalized is None:
+            return
+        if self._proj_adjust_brightness or self._proj_adjust_contrast != 1.0 or self._proj_adjust_exposure:
+            normalized = apply_adjustments(
+                normalized,
+                brightness=self._proj_adjust_brightness,
+                contrast=self._proj_adjust_contrast,
+                exposure=self._proj_adjust_exposure,
+            )
+        self.projection_holder.controls = [
+            ft.Text("Найденная проекция", size=11, color=DESKTOP_MUTED),
+            ft.Image(src=thumbnail_png(normalized, PROJECTION_SIZE), width=75, height=75, fit=ft.BoxFit.CONTAIN),
+        ]
+        self.projection_holder.visible = True
 
     def _reset_adjustments(self) -> None:
         self._adjust_brightness = 0.0
@@ -1128,6 +1163,7 @@ class DesktopApp:
         self._adjust_contrast = self.adjust_contrast_slider.value
         self._adjust_exposure = self.adjust_exposure_slider.value
         self._update_adjustment_labels()
+        self._update_live_previews()
         self.page.update()
 
     def on_adjust_commit(self, _event) -> None:
@@ -1145,6 +1181,7 @@ class DesktopApp:
         self._proj_adjust_contrast = self.proj_adjust_contrast_slider.value
         self._proj_adjust_exposure = self.proj_adjust_exposure_slider.value
         self._update_projection_adjustment_labels()
+        self._update_live_previews()
         self.page.update()
 
     def on_proj_adjust_commit(self, _event) -> None:
