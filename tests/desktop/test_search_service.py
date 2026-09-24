@@ -359,3 +359,16 @@ def test_the_service_persists_the_language_choice(tmp_path):
     assert other.settings.language == "en"
     service.set_language("klingon")
     assert service.settings.language == "auto"
+
+
+def test_the_cloud_key_is_saved_but_never_exported_and_survives_an_import(tmp_path):
+    from gmagc_desktop.service.settings import settings_from_json
+
+    service = SearchService(tmp_path / "data")
+    service.set_cloud_key("  sk-ant-secret  ")
+
+    assert service.settings.anthropic_api_key == "sk-ant-secret"
+    assert "sk-ant-secret" not in service.export_settings_json()
+    service.import_settings_json('{"anthropic_api_key": "from-file", "top_n": 5}')
+    assert service.settings.anthropic_api_key == "sk-ant-secret" and service.settings.top_n == 5
+    assert settings_from_json('{"anthropic_api_key": 5}').anthropic_api_key == ""

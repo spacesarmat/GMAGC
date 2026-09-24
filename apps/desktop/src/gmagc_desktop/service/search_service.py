@@ -162,6 +162,10 @@ class SearchService:
         """Папки для типов приборов, присланных с телефона (пустая строка — искать самому)."""
         self._update_settings(ma3_fixture_dir=ma3.strip(), ma2_fixture_dir=ma2.strip())
 
+    def set_cloud_key(self, key: str) -> None:
+        """Ключ Anthropic для облачного распознавания инструкций (пустая строка — облако выключено)."""
+        self._update_settings(anthropic_api_key=key.strip())
+
     def set_server_enabled(self, enabled: bool) -> None:
         self._update_settings(server_enabled=enabled)
 
@@ -185,12 +189,12 @@ class SearchService:
         self._update_settings(launches=state.launches, support_last_ask=state.last_ask, support_muted=state.muted)
 
     def export_settings_json(self) -> str:
-        return settings_to_json(self.settings)
+        return settings_to_json(replace(self.settings, anthropic_api_key=""))  # ключ в файл для переноса не попадает
 
     def import_settings_json(self, text: str) -> Settings:
         """Заменяет настройки импортированными. Если библиотека при этом изменилась, забывает загруженный
         индекс и его файл на диске (он собран для прежней библиотеки, а не для новой)."""
-        imported = settings_from_json(text)
+        imported = replace(settings_from_json(text), anthropic_api_key=self.settings.anthropic_api_key)
         with self._lock:
             if imported.library_dir != self.settings.library_dir:
                 self._use(None)

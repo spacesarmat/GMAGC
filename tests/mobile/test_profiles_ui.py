@@ -518,7 +518,7 @@ def make_scanning_editor(scan):
 
 
 def test_scanning_shows_the_draft_with_every_channel_checked():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
@@ -532,7 +532,7 @@ def test_scanning_shows_the_draft_with_every_channel_checked():
 
 
 def test_only_checked_channels_are_added_to_the_current_mode():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
@@ -546,7 +546,7 @@ def test_only_checked_channels_are_added_to_the_current_mode():
 
 
 def test_a_draft_mode_can_become_a_new_mode_of_the_profile():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
@@ -559,7 +559,7 @@ def test_a_draft_mode_can_become_a_new_mode_of_the_profile():
 
 
 def test_applying_with_nothing_checked_asks_to_check_something():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
@@ -575,7 +575,7 @@ def test_applying_with_nothing_checked_asks_to_check_something():
 def test_a_page_without_a_table_explains_what_to_do_and_stays_on_the_mode():
     from gmagc_common.scan_draft import ScanDraft
 
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return ScanDraft((), ("no_table",))
 
     editor = make_scanning_editor(scan)
@@ -586,7 +586,7 @@ def test_a_page_without_a_table_explains_what_to_do_and_stays_on_the_mode():
 
 
 def test_cancelling_the_file_choice_changes_nothing():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return None
 
     editor = make_scanning_editor(scan)
@@ -597,7 +597,7 @@ def test_cancelling_the_file_choice_changes_nothing():
 
 
 def test_a_pc_error_during_scanning_is_shown_and_the_button_is_usable_again():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         raise ClientError("scan_unavailable", "нет модуля")
 
     editor = make_scanning_editor(scan)
@@ -616,10 +616,72 @@ def test_scanning_without_a_connection_says_so():
 
 
 def test_back_from_the_review_screen_returns_to_the_mode_without_adding():
-    async def scan():
+    async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
     run(editor.on_scan())
 
     assert editor.go_back() and editor.screen == "mode" and editor.draft is None and not editor.mode.channels
+
+
+def test_the_cloud_button_asks_for_confirmation_and_sends_nothing_until_confirmed():
+    calls = []
+
+    async def scan(engine="local", reuse=False):
+        calls.append((engine, reuse))
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    buttons = lambda: [c.content for c in walk(editor.view) if isinstance(c, ft.OutlinedButton | ft.Button | ft.TextButton)]  # noqa: E731
+    editor.render()
+    assert "Распознать в облаке" in buttons()
+
+    run(editor.ask_cloud(False))
+
+    assert calls == [] and "Отправить в облако" in buttons() and "облако Anthropic" in shown(editor)
+    run(editor.cancel_cloud())
+    assert calls == [] and "Распознать в облаке" in buttons()
+
+    run(editor.ask_cloud(False))
+    run(editor.confirm_cloud_scan())
+    assert calls == [("cloud", False)] and editor.screen == "scan"
+
+
+def test_the_review_screen_offers_to_improve_in_the_cloud_and_reuses_the_file():
+    calls = []
+
+    async def scan(engine="local", reuse=False):
+        calls.append((engine, reuse))
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    labels = lambda: [c.content for c in walk(editor.view) if isinstance(c, ft.OutlinedButton)]  # noqa: E731
+    assert "Улучшить в облаке" in labels()
+
+    run(editor.ask_cloud(True))
+    run(editor.confirm_cloud_scan())
+
+    assert calls[-1] == ("cloud", True) and editor.screen == "scan"
+
+
+def test_a_cloud_draft_does_not_offer_the_cloud_again():
+    from dataclasses import replace as _replace
+
+    async def scan(engine="local", reuse=False):
+        return _replace(draft_with_two_modes(), engine="cloud")
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan(engine="cloud"))
+
+    assert not [c for c in walk(editor.view) if isinstance(c, ft.OutlinedButton)]
+
+
+def test_going_back_drops_a_pending_cloud_question():
+    editor = make_scanning_editor(None)
+    run(editor.ask_cloud(False))
+
+    editor.go_back()
+
+    assert editor.confirm_cloud is None

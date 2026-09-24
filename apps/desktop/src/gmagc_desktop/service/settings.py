@@ -50,6 +50,7 @@ class Settings:
     ma3_fixture_dir: str = ""  # куда класть типы приборов grandMA3 с телефона; пусто — найти папку MA3 самому
     ma2_fixture_dir: str = ""  # то же для grandMA2 (importexport)
     language: str = "auto"  # язык интерфейса: «auto» (по системе), «ru» или «en»
+    anthropic_api_key: str = ""  # ключ облачного распознавания инструкций; не экспортируется и на телефон не уходит
 
 
 def _is_int(value: object) -> bool:
@@ -92,6 +93,7 @@ def settings_from_json(text: str) -> Settings:
     ma3_fixture_dir = raw.get("ma3_fixture_dir", "")
     ma2_fixture_dir = raw.get("ma2_fixture_dir", "")
     language = raw.get("language", "auto")
+    anthropic_api_key = raw.get("anthropic_api_key", "")
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
@@ -123,6 +125,7 @@ def settings_from_json(text: str) -> Settings:
         ma3_fixture_dir=ma3_fixture_dir if isinstance(ma3_fixture_dir, str) else "",
         ma2_fixture_dir=ma2_fixture_dir if isinstance(ma2_fixture_dir, str) else "",
         language=normalize_choice(language) if isinstance(language, str) else "auto",
+        anthropic_api_key=anthropic_api_key.strip() if isinstance(anthropic_api_key, str) else "",
     )
 
 

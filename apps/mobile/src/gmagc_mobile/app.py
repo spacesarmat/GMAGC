@@ -184,6 +184,7 @@ class MobileApp:
         self.profiles_view = self.editor.view
         self.language_store = language_store or LanguageStore(prefs or MemoryPrefs())
         self.language_choice = language_choice
+        self._last_scan_file: tuple[bytes, str] | None = None  # последний файл инструкции: для повторной отправки в облако
         self.rebuilt_as: MobileApp | None = None  # новый экземпляр после смены языка (этот уже не используется)
         self.client_factory = client_factory
         self.qr_reader = qr_reader
@@ -703,10 +704,15 @@ class MobileApp:
             raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
         return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
 
-    async def _scan_instruction(self):
-        """Выбор фото или PDF инструкции и распознавание на ПК; None — файл не выбран."""
+    async def _scan_instruction(self, engine: str = "local", reuse: bool = False):
+        """Выбор фото или PDF инструкции и распознавание (на ПК или в облаке); None — файл не выбран.
+
+        reuse — взять файл, выбранный в прошлый раз (для «улучшить в облаке» без повторного выбора)."""
         if self.client is None:
             raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
+        if reuse and self._last_scan_file is not None:
+            raw, content_type = self._last_scan_file
+            return await asyncio.to_thread(self.client.scan_fixture, raw, content_type, engine)
         files = await self.picker.pick_files(
             dialog_title=t("Инструкция прибора (фото или PDF)"),
             file_type=ft.FilePickerFileType.CUSTOM,
@@ -720,7 +726,8 @@ class MobileApp:
         except (OSError, TypeError) as error:
             raise ClientError(UNREACHABLE, t("Не удалось прочитать файл: {error}", error=error)) from error
         content_type = "application/pdf" if raw[:1024].lstrip().startswith(b"%PDF") else "image/jpeg"
-        return await asyncio.to_thread(self.client.scan_fixture, raw, content_type)
+        self._last_scan_file = (raw, content_type)
+        return await asyncio.to_thread(self.client.scan_fixture, raw, content_type, engine)
 
     async def on_language_change(self, _event) -> None:
         """Выбор языка: сохраняется и применяется сразу, интерфейс собирается заново на новом языке."""

@@ -33,7 +33,7 @@ from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, parse_skip
 from gmagc_common.scan_apply import add_draft_channels
-from gmagc_common.scan_draft import WARN_NO_TABLE, DraftChannel, ScanDraft
+from gmagc_common.scan_draft import ENGINE_CLOUD, WARN_NO_TABLE, DraftChannel, ScanDraft
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.profile_store import ProfileStore
 from gmagc_mobile.texts import error_text
@@ -101,7 +101,7 @@ class ProfileEditor:
         share,
         on_exit: Callable[[], None] | None = None,
         send: Callable[[FixtureProfile], Awaitable[FixtureUploadResult]] | None = None,
-        scan: Callable[[], Awaitable[ScanDraft | None]] | None = None,
+        scan: Callable[[str, bool], Awaitable[ScanDraft | None]] | None = None,
     ):
         self.page = page
         self.store = store
@@ -110,6 +110,7 @@ class ProfileEditor:
         self.send = send  # отправка профиля на ПК; None — нет подключения к ПК
         self.scan = scan  # выбор файла инструкции и распознавание на ПК; None — нет подключения, ответ None — отмена
         self.scanning = False
+        self.confirm_cloud: bool | None = None  # ждём подтверждения отправки в облако; значение — «взять прежний файл»
         self.draft: ScanDraft | None = None
         self.draft_checked: set[tuple[int, int]] = set()  # (режим черновика, канал), отмеченные галочкой
         self.profiles: list[FixtureProfile] = []
@@ -135,6 +136,7 @@ class ProfileEditor:
     def go_back(self) -> bool:
         """Шаг назад внутри редактора. False — уже на списке, выходить должно приложение."""
         self.message = self.notice = ""
+        self.confirm_cloud = None
         if self.screen == SCREEN_SCAN:
             self.draft = None
             self.screen = SCREEN_MODE
@@ -448,9 +450,10 @@ class ProfileEditor:
         return controls
 
     # ---- автозаполнение по инструкции ----------------------------------------
-    async def on_scan(self, _event=None) -> None:
-        """Фото или PDF инструкции → распознавание на ПК → экран проверки с галочками."""
+    async def on_scan(self, _event=None, engine: str = "local", reuse: bool = False) -> None:
+        """Фото или PDF инструкции → распознавание (на ПК или в облаке) → экран проверки с галочками."""
         self.message = self.notice = ""
+        self.confirm_cloud = None
         if self.scan is None:
             self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
             self.render()
@@ -458,7 +461,7 @@ class ProfileEditor:
         self.scanning = True
         self.render()
         try:
-            draft = await self.scan()
+            draft = await self.scan(engine, reuse)
         except ClientError as error:
             self.scanning = False
             self.message = error_text(error)
@@ -476,6 +479,49 @@ class ProfileEditor:
         self.draft_checked = {(m, c) for m, mode in enumerate(draft.modes) for c in range(len(mode.channels))}
         self.screen = SCREEN_SCAN
         self.render()
+
+    async def ask_cloud(self, reuse: bool) -> None:
+        """Просит подтверждения: облачное распознавание отправляет файл инструкции за пределы вашей сети."""
+        self.confirm_cloud = reuse
+        self.render()
+
+    async def cancel_cloud(self) -> None:
+        self.confirm_cloud = None
+        self.render()
+
+    async def confirm_cloud_scan(self) -> None:
+        reuse = bool(self.confirm_cloud)
+        await self.on_scan(engine="cloud", reuse=reuse)
+
+    def _cloud_controls(self, reuse: bool) -> list[ft.Control]:
+        """Кнопка облака; после нажатия — вопрос с объяснением, что уходит и куда."""
+        if self.confirm_cloud is None:
+            title = t("Улучшить в облаке") if reuse else t("Распознать в облаке")
+            return [
+                ft.OutlinedButton(
+                    title,
+                    icon=ft.Icons.CLOUD_UPLOAD,
+                    on_click=self._async_click(self.ask_cloud, reuse),
+                    disabled=self.scanning,
+                )
+            ]
+        return [
+            ft.Text(
+                t(
+                    "Файл инструкции будет отправлен через ПК в облако Anthropic (Claude) для распознавания. "
+                    "Нужен ключ Anthropic в настройках ПК-приложения. Отправить?"
+                ),
+                size=12,
+                color=ft.Colors.AMBER_400,
+            ),
+            ft.Row(
+                [
+                    ft.Button(t("Отправить в облако"), on_click=self._async_click(self.confirm_cloud_scan)),
+                    ft.TextButton(t("Отмена"), on_click=self._async_click(self.cancel_cloud)),
+                ],
+                wrap=True,
+            ),
+        ]
 
     def _toggle_draft_channel(self, mode_index: int, channel_index: int, checked: bool) -> None:
         key = (mode_index, channel_index)
@@ -542,6 +588,10 @@ class ProfileEditor:
                 )
             )
         controls.extend(ft.Text(warning_text(code), size=12, color=ft.Colors.AMBER_400) for code in self.draft.warnings)
+        if self.draft.engine != ENGINE_CLOUD:
+            controls.extend(self._cloud_controls(reuse=True))
+        if self.scanning:
+            controls.append(ft.Text(t("Распознаю инструкцию на ПК, это может занять минуту…"), size=12))
         return controls
 
     def _on_draft_check(self, mode_index: int, channel_index: int, event) -> None:
@@ -614,6 +664,7 @@ class ProfileEditor:
                 disabled=self.scanning,
             )
         )
+        controls.extend(self._cloud_controls(reuse=False))
         if self.scanning:
             controls.append(ft.Text(t("Распознаю инструкцию на ПК, это может занять минуту…"), size=12))
         controls.append(

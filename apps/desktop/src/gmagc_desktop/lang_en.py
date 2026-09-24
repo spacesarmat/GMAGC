@@ -202,6 +202,10 @@ EN = {
     "индекс не построен": "the index is not built",
     "не удалось прочитать изображение": "could not read the image",
     "путь вне библиотеки: {rel_path}": "path outside the library: {rel_path}",
+    "Ключ Anthropic для облачного распознавания инструкций": "Anthropic key for cloud manual recognition",
+    "Необязательно. Файл уходит в облако только по кнопке на телефоне и после подтверждения.": (
+        "Optional. A file goes to the cloud only when you press the button on the phone and confirm."
+    ),
 }
 
 register("en", EN)

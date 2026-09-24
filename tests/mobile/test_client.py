@@ -284,3 +284,20 @@ def test_scan_fixture_rejects_a_reply_that_is_not_a_draft():
             GmagcClient(connection).scan_fixture(b"photo")
 
     assert error.value.kind == "protocol"
+
+
+def test_scan_fixture_passes_the_chosen_engine_to_the_pc(running):
+    seen = []
+
+    class Recorder:
+        def scan(self, data):
+            seen.append("cloud")
+            from gmagc_common.scan_draft import ScanDraft
+
+            return ScanDraft((), ("no_table",), "cloud")
+
+    running.server._context.cloud = Recorder()
+
+    draft = make_client(running).scan_fixture(b"photo", engine="cloud")
+
+    assert seen == ["cloud"] and draft.engine == "cloud"

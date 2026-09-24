@@ -836,3 +836,13 @@ def test_the_whole_desktop_interface_is_in_english_after_switching_the_language(
     assert new.library_text.value == "not chosen" and new.status_label.value == "Index not built"
     assert "Export settings" in everything and "Check the core" in everything
     assert new.pick_photo_button.content == "Choose a photo…" or "Choose a photo…" in everything
+
+
+def test_the_cloud_key_field_saves_the_key_and_starts_from_the_saved_one(tmp_path):
+    app, _ = make_app(tmp_path)
+    assert app.cloud_key_field in list(walk(app.settings_view)) and app.cloud_key_field.password
+
+    app.cloud_key_field.value = " sk-ant-x "
+    app.on_cloud_key_change(None)
+
+    assert app.service.settings.anthropic_api_key == "sk-ant-x"
