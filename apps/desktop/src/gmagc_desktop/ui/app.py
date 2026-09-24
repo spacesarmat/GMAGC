@@ -38,6 +38,7 @@ from gmagc_desktop.server.network import lan_addresses
 from gmagc_desktop.server.qr import qr_png
 from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service import autostart
+from gmagc_desktop.service.fixture_export import default_ma2_dir, default_ma3_dir
 from gmagc_desktop.service.logging_setup import setup_logging
 from gmagc_desktop.service.results import Outcome, Result, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
@@ -361,6 +362,19 @@ class DesktopApp:
         self.autostart_switch = ft.Switch(
             label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
         )
+        # папки для типов приборов, присланных с телефона: пусто — приложение ищет папки grandMA само
+        self.ma3_dir_field = ft.TextField(
+            label="Папка типов приборов grandMA3",
+            on_blur=self.on_fixture_dirs_change,
+            on_submit=self.on_fixture_dirs_change,
+            width=520,
+        )
+        self.ma2_dir_field = ft.TextField(
+            label="Папка типов приборов grandMA2 (importexport)",
+            on_blur=self.on_fixture_dirs_change,
+            on_submit=self.on_fixture_dirs_change,
+            width=520,
+        )
         self.results_count_dropdown = ft.Dropdown(
             label="Число результатов поиска",
             value="50",
@@ -648,6 +662,7 @@ class DesktopApp:
         if autostart.is_supported():
             items.append(self.autostart_switch)
         items.append(self.results_count_dropdown)
+        items += [ft.Divider(color=DESKTOP_LINE), self.ma3_dir_field, self.ma2_dir_field]
         items += [
             ft.Divider(color=DESKTOP_LINE),
             self._settings_row("Экспорт настроек", "Экспорт…", self.on_export_settings),
@@ -714,6 +729,10 @@ class DesktopApp:
             self.update_bar.switch.value = self.service.settings.check_updates
         self.large_text_switch.value = self.service.settings.large_text
         self.results_count_dropdown.value = str(self.service.settings.results_count)
+        self.ma3_dir_field.value = self.service.settings.ma3_fixture_dir
+        self.ma2_dir_field.value = self.service.settings.ma2_fixture_dir
+        self.ma3_dir_field.hint_text = self._fixture_hint(default_ma3_dir())
+        self.ma2_dir_field.hint_text = self._fixture_hint(default_ma2_dir())
         self._apply_theme()
         if autostart.is_supported():
             self.autostart_switch.value = autostart.is_autostart_enabled()
@@ -947,6 +966,13 @@ class DesktopApp:
     def on_toggle_large_text(self, _event) -> None:
         self.service.set_large_text(bool(self.large_text_switch.value))
         self._apply_theme()
+
+    @staticmethod
+    def _fixture_hint(found) -> str:
+        return f"по умолчанию: {found}" if found else "папка не найдена, укажите её"
+
+    def on_fixture_dirs_change(self, _event) -> None:
+        self.service.set_fixture_dirs(self.ma3_dir_field.value or "", self.ma2_dir_field.value or "")
 
     def on_results_count_change(self, _event) -> None:
         self.service.set_results_count(int(self.results_count_dropdown.value))

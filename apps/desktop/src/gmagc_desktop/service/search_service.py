@@ -151,6 +151,10 @@ class SearchService:
             self._update_settings(access_code=generate_code())
             return self.settings.access_code
 
+    def set_fixture_dirs(self, ma3: str, ma2: str) -> None:
+        """Папки для типов приборов, присланных с телефона (пустая строка — искать самому)."""
+        self._update_settings(ma3_fixture_dir=ma3.strip(), ma2_fixture_dir=ma2.strip())
+
     def set_server_enabled(self, enabled: bool) -> None:
         self._update_settings(server_enabled=enabled)
 

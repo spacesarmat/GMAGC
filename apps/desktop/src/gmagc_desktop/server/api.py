@@ -1,4 +1,4 @@
-"""HTTP-API для телефона: /api/health, /api/status, /api/match."""
+"""HTTP-API для телефона: /api/health, /api/status, /api/match, /api/fixtures."""
 
 from __future__ import annotations
 
@@ -11,11 +11,14 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 
+from gmagc_common.fixtures import ProfileError, profile_from_dict
+from gmagc_common.ma3_export import ExportError
 from gmagc_common.protocol import (
     API_VERSION,
     APP_NAME,
     ERROR_STATUS,
     MAX_IMAGE_BYTES,
+    MAX_PROFILE_BYTES,
     ApiError,
     Health,
     MatchResponse,
@@ -24,6 +27,7 @@ from gmagc_common.protocol import (
 )
 from gmagc_desktop.about import VERSION
 from gmagc_desktop.service.access import RateLimiter, codes_equal
+from gmagc_desktop.service.fixture_export import FixtureExporter, NoTargetError
 from gmagc_desktop.service.results import SearchOutcome
 from gmagc_desktop.service.search_service import NoIndexError, PhotoError, SearchService
 from gmagc_desktop.service.settings import MAX_TOP_N
@@ -48,6 +52,7 @@ class ApiContext:
     service: SearchService
     limiter: RateLimiter
     on_request: Callable[[RequestRecord], None] | None = None
+    fixtures: FixtureExporter | None = None
 
 
 def match_response(request_id: str, outcome: SearchOutcome) -> MatchResponse:
@@ -101,8 +106,11 @@ class ApiHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._unread = self._content_length() or 0
         try:
-            if urlsplit(self.path).path == "/api/match":
+            path = urlsplit(self.path).path
+            if path == "/api/match":
                 self._authorized(self._match)
+            elif path == "/api/fixtures":
+                self._authorized(self._fixtures)
             else:
                 self._error("not_found", "нет такого метода")
         finally:
@@ -206,6 +214,48 @@ class ApiHandler(BaseHTTPRequestHandler):
         request_id = secrets.token_hex(4)
         self._send_json(200, match_response(request_id, outcome).to_dict())
         self._notify(RequestRecord(request_id, time.time(), self.client_address[0], data, outcome))
+
+    def _fixtures(self) -> None:
+        """Принимает профиль прибора (JSON) и записывает типы grandMA3 и grandMA2 в папки пультов на этом ПК."""
+        length = self._content_length()
+        if length is None:
+            self._error("bad_request", "нужен заголовок Content-Length")
+            return
+        if length > MAX_PROFILE_BYTES:
+            self._error("too_large", f"профиль больше {MAX_PROFILE_BYTES // 1024} КБ")
+            return
+        self._unread = 0
+        try:
+            data = self.rfile.read(length)
+        except OSError:
+            self._error("bad_request", "не удалось получить профиль")
+            return
+        if len(data) != length:
+            self._error("bad_request", "тело запроса получено не полностью")
+            return
+        try:
+            profile = profile_from_dict(json.loads(data.decode("utf-8")))
+        except (ValueError, ProfileError):  # UnicodeDecodeError и ошибка разбора JSON тоже ValueError
+            self._error("bad_profile", "это не профиль прибора GMAGC")
+            return
+        exporter = self.context.fixtures
+        if exporter is None:
+            self._error("server_error", "запись типов приборов не настроена")
+            return
+        try:
+            result = exporter.store(profile)
+        except ExportError as error:
+            self._error("bad_profile", str(error))
+            return
+        except NoTargetError as error:
+            self._error("no_target", f"некуда записать типы приборов: {error}")
+            return
+        except OSError as error:
+            log.exception("не удалось записать тип прибора")
+            self._error("server_error", f"не удалось записать файл: {error}")
+            return
+        log.info("получен профиль «%s»: записано файлов %d", profile.name, len(result.written))
+        self._send_json(200, result.to_dict())
 
     def _notify(self, record: RequestRecord) -> None:
         callback = self.context.on_request

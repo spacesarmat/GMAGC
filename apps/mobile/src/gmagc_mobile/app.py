@@ -13,6 +13,7 @@ import flet as ft
 import flet_camera as fc
 import flet_permission_handler as ph
 
+from gmagc_common.fixtures import profile_to_dict
 from gmagc_common.protocol import (
     OUTCOME_NO_PROJECTION,
     Connection,
@@ -165,6 +166,7 @@ class MobileApp:
             profile_store or ProfileStore(prefs or MemoryPrefs()),
             self.share,
             on_exit=lambda: self._show(self._return_view),
+            send=self._send_profile,
         )
         self.profiles_view = self.editor.view
         self.client_factory = client_factory
@@ -641,6 +643,12 @@ class MobileApp:
 
     def on_open_help(self, _event) -> None:
         self._open_overlay("help")
+
+    async def _send_profile(self, profile):
+        """Отправка профиля на ПК из редактора; без подключения (client is None) редактор сам подскажет."""
+        if self.client is None:
+            raise ClientError(UNREACHABLE, "Нет подключения к ПК: подключитесь на главном экране и повторите.")
+        return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
 
     async def on_open_profiles(self, _event) -> None:
         self._open_overlay("profiles")

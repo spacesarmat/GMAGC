@@ -121,8 +121,37 @@ def test_broken_responses_raise_protocol_error(broken):
 
 
 def test_every_error_code_has_an_http_status():
-    codes = {"unauthorized", "bad_request", "bad_image", "not_found", "too_large", "rate_limited", "no_index"}
+    codes = {
+        "unauthorized",
+        "bad_request",
+        "bad_image",
+        "not_found",
+        "too_large",
+        "rate_limited",
+        "no_index",
+        "bad_profile",
+        "no_target",
+    }
     codes.add("server_error")
     assert set(protocol.ERROR_STATUS) == codes
     assert protocol.ERROR_STATUS["unauthorized"] == 401 and protocol.ERROR_STATUS["rate_limited"] == 429
     assert protocol.ERROR_STATUS["too_large"] == 413 and protocol.ERROR_STATUS["no_index"] == 409
+
+
+def test_the_fixture_upload_result_round_trips_and_lists_targets_and_skips():
+    result = protocol.FixtureUploadResult(
+        written=(("ma3", "C:/lib/a.xml"), ("ma2", "C:/lib/b.xml")), skipped=("grandMA2: папка не найдена",)
+    )
+
+    assert protocol.FixtureUploadResult.from_dict(result.to_dict()) == result
+    assert result.to_dict()["written"][0] == {"target": "ma3", "path": "C:/lib/a.xml"}
+
+
+@pytest.mark.parametrize("data", [{}, {"written": "x", "skipped": []}, {"written": [{"target": "ma3"}], "skipped": []}])
+def test_a_malformed_fixture_upload_result_is_a_protocol_error(data):
+    with pytest.raises(protocol.ProtocolError):
+        protocol.FixtureUploadResult.from_dict(data)
+
+
+def test_the_profile_size_limit_is_smaller_than_the_image_limit():
+    assert 0 < protocol.MAX_PROFILE_BYTES <= protocol.MAX_IMAGE_BYTES
