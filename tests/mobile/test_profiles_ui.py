@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 
 import flet as ft
@@ -283,3 +284,23 @@ def test_the_channel_screen_shows_range_rows():
 
     values = [c.value for c in walk(editor.view) if isinstance(c, ft.TextField)]
     assert "Открыто" in values
+
+
+def test_sharing_a_profile_sends_its_json_through_the_share_sheet():
+    editor, _, _ = make_editor()
+    open_new(editor)
+    run(editor.set_profile_text("name", "380W Beam"))
+
+    run(editor.on_share(None))
+
+    assert json.loads(editor.share.texts[0])["name"] == "380W Beam"
+
+
+def test_a_failing_share_is_reported_on_the_screen_and_does_not_break_the_editor():
+    prefs = FakePrefs()
+    editor = ProfileEditor(StubPage(), ProfileStore(prefs), FakeShare(fail=True), on_exit=lambda: None)
+    open_new(editor)
+
+    run(editor.on_share(None))
+
+    assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"

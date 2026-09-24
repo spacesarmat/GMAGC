@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
@@ -18,6 +19,7 @@ from gmagc_common.fixtures import (
     channel_from_template,
     new_profile,
     next_free_dmx,
+    profile_to_dict,
     template_by_id,
     validate_profile,
 )
@@ -243,6 +245,18 @@ class ProfileEditor:
             controls.append(ft.Text(text, size=12, color=color))
         return controls
 
+    async def on_share(self, _event) -> None:
+        """Отправляет профиль как JSON через системное «Поделиться»: до появления экспорта это единственный выход."""
+        if self.profile is None:
+            return
+        text = json.dumps(profile_to_dict(self.profile), ensure_ascii=False, indent=2)
+        subject = f"{self.profile.manufacturer} {self.profile.name}".strip() or "Профиль прибора"
+        try:
+            await self.share.share_text(text, subject=subject)
+        except Exception as error:  # noqa: BLE001 - недоступное «Поделиться» не должно ломать редактор
+            self.message = f"Не удалось поделиться: {error}"
+            self.render()
+
     async def _set_text(self, field: str, value: str, *, render: bool = True) -> None:
         await self.set_profile_text(field, value, render=render)
 
@@ -256,6 +270,8 @@ class ProfileEditor:
             ),
             ft.Text("Режимы", size=14, weight=ft.FontWeight.BOLD),
         ]
+        if self.message:
+            controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
         for index, mode in enumerate(profile.modes):
             controls.append(
                 ft.Row(
@@ -278,6 +294,7 @@ class ProfileEditor:
                 )
             )
         controls.append(ft.Button("Добавить режим", icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
+        controls.append(ft.TextButton("Поделиться профилем (JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
 
