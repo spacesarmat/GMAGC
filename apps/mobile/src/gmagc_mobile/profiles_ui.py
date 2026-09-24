@@ -8,7 +8,16 @@ from functools import partial
 
 import flet as ft
 
-from gmagc_common.fixtures import FixtureProfile, Issue, Mode, new_profile, validate_profile
+from gmagc_common.fixtures import (
+    TEMPLATES,
+    FixtureProfile,
+    Issue,
+    Mode,
+    channel_from_template,
+    new_profile,
+    next_free_dmx,
+    validate_profile,
+)
 from gmagc_mobile.profile_store import ProfileStore
 
 SCREEN_LIST = "list"
@@ -261,8 +270,71 @@ class ProfileEditor:
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
 
+    # ---- режим и каналы -----------------------------------------------------
+    @property
+    def mode(self) -> Mode:
+        return self.profile.modes[self.mode_index]
+
+    async def _commit_mode(self, mode: Mode, *, render: bool = True) -> None:
+        modes = tuple(mode if i == self.mode_index else m for i, m in enumerate(self.profile.modes))
+        await self._commit(replace(self.profile, modes=modes), render=render)
+
+    async def add_channel(self, template_id: str) -> None:
+        channel = channel_from_template(template_id, next_free_dmx(self.mode))
+        await self._commit_mode(replace(self.mode, channels=(*self.mode.channels, channel)))
+
+    async def delete_channel(self, index: int) -> None:
+        channels = tuple(c for i, c in enumerate(self.mode.channels) if i != index)
+        await self._commit_mode(replace(self.mode, channels=channels))
+
+    async def open_channel(self, index: int) -> None:
+        self.channel_index = index
+        self.screen = SCREEN_CHANNEL
+        self.render()
+
+    async def _rename_current_mode(self, value: str, *, render: bool = True) -> None:
+        await self.rename_mode(self.mode_index, value, render=render)
+
+    async def _on_template_pick(self, event) -> None:
+        if event.control.value:
+            await self.add_channel(event.control.value)
+
     def _render_mode(self) -> list[ft.Control]:
-        return [self._header("Режим")]  # наполняется в задаче 6
+        mode = self.mode
+        controls: list[ft.Control] = [
+            self._header("Режим"),
+            self._field("Название режима", mode.name, self._rename_current_mode),
+            ft.Text("Каналы", size=14, weight=ft.FontWeight.BOLD),
+        ]
+        for index, channel in sorted(enumerate(mode.channels), key=lambda pair: pair[1].dmx):
+            span = f"{channel.dmx}–{channel.last}" if channel.bits == 16 else str(channel.dmx)
+            controls.append(
+                ft.Row(
+                    [
+                        ft.Container(
+                            ft.Text(f"{span}  {channel.name}"),
+                            on_click=self._async_click(self.open_channel, index),
+                            padding=8,
+                            expand=True,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            tooltip="Удалить",
+                            on_click=self._async_click(self.delete_channel, index),
+                        ),
+                    ]
+                )
+            )
+        controls.append(
+            ft.Dropdown(
+                label="Добавить канал (шаблон)",
+                options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
+                on_select=self._on_template_pick,
+            )
+        )
+        issues = [i for i in validate_profile(self.profile) if i.path == mode.name or i.path.startswith(f"{mode.name} → ")]
+        controls.extend(self._issue_controls(issues))
+        return controls
 
     def _render_channel(self) -> list[ft.Control]:
         return [self._header("Канал")]  # наполняется в задаче 7

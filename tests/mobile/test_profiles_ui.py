@@ -153,3 +153,62 @@ def test_the_profile_screen_lists_modes_and_shows_validation_messages():
     text = shown(editor)
 
     assert "Режим 1" in text and "не указан производитель" in text
+
+
+def test_a_channel_added_from_a_template_gets_the_next_free_address():
+    editor, store, _ = make_editor()
+    open_new(editor)
+    run(editor.open_mode(0))
+
+    run(editor.add_channel("dimmer"))
+    run(editor.add_channel("pan"))
+    run(editor.add_channel("shutter"))
+
+    channels = run(store.list())[0].modes[0].channels
+    assert [(c.dmx, c.bits, c.template) for c in channels] == [(1, 8, "dimmer"), (2, 16, "pan"), (4, 8, "shutter")]
+
+
+def test_deleting_a_channel_keeps_the_others_untouched():
+    editor, store, _ = make_editor()
+    open_new(editor)
+    run(editor.open_mode(0))
+    run(editor.add_channel("dimmer"))
+    run(editor.add_channel("red"))
+
+    run(editor.delete_channel(0))
+
+    assert [c.template for c in run(store.list())[0].modes[0].channels] == ["red"]
+
+
+def test_the_mode_screen_shows_channels_in_dmx_order_and_validation_messages():
+    editor, _, _ = make_editor()
+    open_new(editor)
+    run(editor.open_mode(0))
+    run(editor.add_channel("dimmer"))
+    run(editor.add_channel("pan"))
+
+    text = shown(editor)
+
+    assert "Диммер" in text and "Pan" in text
+
+
+def test_a_channel_added_beyond_512_is_reported_as_an_error_on_the_screen():
+    editor, store, _ = make_editor()
+    open_new(editor)
+    run(editor.open_mode(0))
+    profile = run(store.list())[0]
+    run(editor._commit(replace(profile, modes=(replace(profile.modes[0], channels=(Channel(512, 8, "z", "dimmer"),)),))))
+    run(editor.add_channel("dimmer"))
+
+    assert "адрес должен лежать" in shown(editor)
+
+
+def test_opening_a_channel_switches_to_the_channel_screen():
+    editor, _, _ = make_editor()
+    open_new(editor)
+    run(editor.open_mode(0))
+    run(editor.add_channel("dimmer"))
+
+    run(editor.open_channel(0))
+
+    assert editor.screen == "channel" and editor.go_back() is True and editor.screen == "mode"
