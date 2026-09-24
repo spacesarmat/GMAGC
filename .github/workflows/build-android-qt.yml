@@ -2,6 +2,11 @@ name: Build Android (Qt)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/pyside6]
+    paths:
+      - .github/workflows/build-android-qt.yml
+      - apps/mobile_qt/**
 
 env:
   PYSIDE_VERSION: "6.11.2"
