@@ -10,14 +10,18 @@ from collections.abc import Callable
 
 import flet as ft
 
+from gmagc_common.i18n import t
 from gmagc_common.updates import UpdateCheckError
 from gmagc_desktop.about import VERSION
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_desktop.update.installer import InstallCancelled, InstallError
 from gmagc_desktop.update.manager import UpdateOffer
 
-MANUAL_FALLBACK = " Можно скачать обновление вручную на странице релиза."
 EXIT_FALLBACK_SECONDS = 4.0  # если окно не закрылось само, процесс завершается: помощнику нужно, чтобы приложение вышло
+
+
+def manual_fallback() -> str:
+    return t(" Можно скачать обновление вручную на странице релиза.")
 
 
 class UpdateBar:
@@ -44,19 +48,17 @@ class UpdateBar:
         self.text = ft.Text("", weight=ft.FontWeight.BOLD)
         self.note = ft.Text("", size=12, visible=False, selectable=True)
         self.progress = ft.ProgressBar(value=0, visible=False)
-        self.now_button = ft.Button("Обновить", on_click=self.on_update_now)
-        self.page_button = ft.TextButton(content=ft.Text("Что нового"), on_click=self.on_release_page)
-        self.skip_button = ft.TextButton(content=ft.Text("Пропустить"), on_click=self.on_skip)
-        self.cancel_button = ft.Button("Отмена", on_click=self.on_cancel, visible=False)
+        self.now_button = ft.Button(t("Обновить"), on_click=self.on_update_now)
+        self.page_button = ft.TextButton(content=ft.Text(t("Что нового")), on_click=self.on_release_page)
+        self.skip_button = ft.TextButton(content=ft.Text(t("Пропустить")), on_click=self.on_skip)
+        self.cancel_button = ft.Button(t("Отмена"), on_click=self.on_cancel, visible=False)
         self.container = ft.Container(
             ft.Column(
                 [
                     self.text,
                     self.note,
                     self.progress,
-                    ft.Row(
-                        [self.now_button, self.page_button, self.skip_button, self.cancel_button], spacing=8, wrap=True
-                    ),
+                    ft.Row([self.now_button, self.page_button, self.skip_button, self.cancel_button], spacing=8, wrap=True),
                 ],
                 spacing=6,
             ),
@@ -67,9 +69,9 @@ class UpdateBar:
         )
         self.status = ft.Text("", size=12)
         self.switch = ft.Switch(
-            label="Проверять обновления при запуске", value=service.settings.check_updates, on_change=self.on_toggle
+            label=t("Проверять обновления при запуске"), value=service.settings.check_updates, on_change=self.on_toggle
         )
-        self.check_button = ft.TextButton(content=ft.Text("Проверить обновления", size=12), on_click=self.on_check)
+        self.check_button = ft.TextButton(content=ft.Text(t("Проверить обновления"), size=12), on_click=self.on_check)
 
     # ---- проверка ----------------------------------------------------------------
     def start(self) -> None:
@@ -85,7 +87,7 @@ class UpdateBar:
     def on_check(self, _event) -> None:
         if self.updates is None:
             return
-        self._set_status("Проверяю обновления…")
+        self._set_status(t("Проверяю обновления…"))
         self.page.run_thread(lambda: self._run_check(force=True))
 
     def _run_check(self, *, force: bool) -> None:
@@ -97,10 +99,10 @@ class UpdateBar:
             return
         except Exception as error:  # noqa: BLE001 - проверка не должна ни ронять приложение, ни шуметь
             if force:
-                self._set_status(f"Ошибка проверки обновлений: {error}")
+                self._set_status(t("Ошибка проверки обновлений: {error}", error=error))
             return
         if offer is None:
-            self._set_status(f"Установлена последняя версия ({VERSION})" if force else "")
+            self._set_status(t("Установлена последняя версия ({VERSION})", VERSION=VERSION) if force else "")
             return
         self._show_offer(offer)
 
@@ -110,11 +112,11 @@ class UpdateBar:
 
     def _show_offer(self, offer: UpdateOffer) -> None:
         self.offer = offer
-        self.text.value = f"Доступна версия {offer.release.version} (у вас {VERSION})"
+        self.text.value = t("Доступна версия {version} (у вас {VERSION})", version=offer.release.version, VERSION=VERSION)
         self.note.value = offer.reason
         self.note.visible = bool(offer.reason)
         self.now_button.visible = offer.can_install
-        self.page_button.content.value = "Что нового" if offer.can_install else "Открыть страницу релиза"
+        self.page_button.content.value = t("Что нового") if offer.can_install else t("Открыть страницу релиза")
         self.container.visible = True
         self.status.value = ""
         self.page.update()
@@ -145,7 +147,7 @@ class UpdateBar:
         self.cancel_button.visible = True
         self.progress.value = 0
         self.progress.visible = True
-        self.note.value = "Скачивание…"
+        self.note.value = t("Скачивание…")
         self.note.visible = True
         self.page.update()
         self.page.run_thread(self._install_worker)
@@ -154,14 +156,14 @@ class UpdateBar:
         try:
             self.updates.install(self.offer, progress=self._on_progress, cancel=lambda: self._cancel)
         except InstallCancelled:
-            self._install_failed("Загрузка отменена.")
+            self._install_failed(t("Загрузка отменена."))
         except (InstallError, UpdateCheckError) as error:
-            self._install_failed(f"{error}.{MANUAL_FALLBACK}".replace("..", "."))
+            self._install_failed(f"{error}.{manual_fallback()}".replace("..", "."))
         except Exception as error:  # noqa: BLE001 - рабочий поток обязан показать причину, а не пропасть
-            self._install_failed(f"Ошибка обновления: {error}.{MANUAL_FALLBACK}")
+            self._install_failed(t("Ошибка обновления: {error}.{fallback}", error=error, fallback=manual_fallback()))
         else:
             self.progress.value = 1.0
-            self.text.value = "Обновление скачано, приложение перезапускается…"
+            self.text.value = t("Обновление скачано, приложение перезапускается…")
             self.note.visible = False
             self.cancel_button.visible = False
             self.page.update()
@@ -169,7 +171,11 @@ class UpdateBar:
 
     def _on_progress(self, done: int, total: int) -> None:
         self.progress.value = done / total if total else 0
-        self.note.value = f"Скачивание: {done // 1_000_000} из {total // 1_000_000} МБ" if total else "Скачивание…"
+        self.note.value = (
+            t("Скачивание: {done} из {total} МБ", done=done // 1_000_000, total=total // 1_000_000)
+            if total
+            else t("Скачивание…")
+        )
         self.page.update()
 
     def _install_failed(self, text: str) -> None:

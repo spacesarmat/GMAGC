@@ -14,6 +14,7 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
+from gmagc_common.i18n import t
 from gmagc_common.updates import Asset, UpdateCheckError, open_url, parse_sha256
 
 MAX_DOWNLOAD_BYTES = 400 * 1024 * 1024
@@ -93,17 +94,17 @@ def sha256_of(path: Path) -> str:
 
 def _expected_checksum(asset: Asset | None, allow_local: bool, timeout: float) -> str:
     if asset is None:
-        raise InstallError("В релизе нет контрольной суммы: обновление не установлено, скачайте его вручную")
+        raise InstallError(t("В релизе нет контрольной суммы: обновление не установлено, скачайте его вручную"))
     try:
         with open_url(asset.url, allow_local=allow_local, timeout=timeout) as response:
             text = response.read(4096).decode("utf-8", "replace")
     except UpdateCheckError as error:
         raise InstallError(str(error)) from error
     except (OSError, http.client.HTTPException) as error:
-        raise InstallError(f"Не удалось получить контрольную сумму: {error}") from error
+        raise InstallError(t("Не удалось получить контрольную сумму: {error}", error=error)) from error
     checksum = parse_sha256(text)
     if checksum is None:
-        raise InstallError("Контрольная сумма в релизе повреждена: обновление не установлено")
+        raise InstallError(t("Контрольная сумма в релизе повреждена: обновление не установлено"))
     return checksum
 
 
@@ -129,7 +130,7 @@ def download(
         with open_url(asset.url, allow_local=allow_local, timeout=timeout) as response, part.open("wb") as out:
             total = int(response.headers.get("Content-Length") or asset.size or 0)
             if total > MAX_DOWNLOAD_BYTES:
-                raise InstallError("Файл обновления слишком большой")
+                raise InstallError(t("Файл обновления слишком большой"))
             while True:
                 if cancel is not None and cancel():
                     raise InstallCancelled()
@@ -140,19 +141,19 @@ def download(
                 digest.update(chunk)
                 done += len(chunk)
                 if done > MAX_DOWNLOAD_BYTES:
-                    raise InstallError("Файл обновления слишком большой")
+                    raise InstallError(t("Файл обновления слишком большой"))
                 if progress is not None:
                     progress(done, total)
         if total and done != total:
-            raise InstallError("Загрузка оборвалась: файл получен не полностью")
+            raise InstallError(t("Загрузка оборвалась: файл получен не полностью"))
         if digest.hexdigest() != expected:
-            raise InstallError("Контрольная сумма не совпала: файл повреждён, обновление не установлено")
+            raise InstallError(t("Контрольная сумма не совпала: файл повреждён, обновление не установлено"))
         part.replace(target)
         return target
     except UpdateCheckError as error:
         raise InstallError(str(error)) from error
     except (OSError, http.client.HTTPException) as error:
-        raise InstallError(f"Не удалось скачать обновление: {error}") from error
+        raise InstallError(t("Не удалось скачать обновление: {error}", error=error)) from error
     finally:
         part.unlink(missing_ok=True)
 
@@ -162,7 +163,7 @@ def _ditto(zip_path: Path, dest: Path) -> None:
     try:
         subprocess.run(["ditto", "-x", "-k", str(zip_path), str(dest)], check=True, capture_output=True)
     except (OSError, subprocess.CalledProcessError) as error:
-        raise InstallError(f"Не удалось распаковать обновление: {error}") from error
+        raise InstallError(t("Не удалось распаковать обновление: {error}", error=error)) from error
 
 
 def _is_unsafe_name(name: str) -> bool:
@@ -178,15 +179,15 @@ def stage(zip_path: Path, staging_dir: Path, platform: str) -> Path:
     try:
         archive = zipfile.ZipFile(zip_path)
     except (zipfile.BadZipFile, OSError) as error:
-        raise InstallError("Файл обновления повреждён: это не архив") from error
+        raise InstallError(t("Файл обновления повреждён: это не архив")) from error
     with archive:
         infos = archive.infolist()
         if sum(info.file_size for info in infos) > MAX_UNPACKED_BYTES:
-            raise InstallError("Архив обновления слишком велик после распаковки")
+            raise InstallError(t("Архив обновления слишком велик после распаковки"))
         for info in infos:
             destination = (root / info.filename).resolve()
             if _is_unsafe_name(info.filename) or (destination != root and root not in destination.parents):
-                raise InstallError("Архив обновления содержит небезопасный путь: установка отменена")
+                raise InstallError(t("Архив обновления содержит небезопасный путь: установка отменена"))
         root.mkdir(parents=True, exist_ok=True)
         if platform == "macos":
             _ditto(zip_path, root)
@@ -194,11 +195,11 @@ def stage(zip_path: Path, staging_dir: Path, platform: str) -> Path:
             archive.extractall(root)
     if platform == "windows":
         if not (root / WINDOWS_EXE).is_file():
-            raise InstallError("В архиве нет приложения GMAGC")
+            raise InstallError(t("В архиве нет приложения GMAGC"))
         return root
     apps = [item for item in root.iterdir() if item.suffix == ".app"]
     if len(apps) != 1:
-        raise InstallError("В архиве нет приложения GMAGC")
+        raise InstallError(t("В архиве нет приложения GMAGC"))
     return apps[0]
 
 
@@ -288,7 +289,7 @@ def write_helper(
         )
         script.chmod(0o755)
         return script
-    raise InstallError("Обновление из приложения на этой платформе не поддерживается")
+    raise InstallError(t("Обновление из приложения на этой платформе не поддерживается"))
 
 
 def launch_helper(script: Path, platform: str) -> None:
@@ -309,4 +310,4 @@ def launch_helper(script: Path, platform: str) -> None:
                 ["/bin/sh", str(script)], start_new_session=True, close_fds=True, cwd=tempfile.gettempdir(), **quiet
             )
     except OSError as error:
-        raise InstallError(f"Не удалось запустить установщик обновления: {error}") from error
+        raise InstallError(t("Не удалось запустить установщик обновления: {error}", error=error)) from error

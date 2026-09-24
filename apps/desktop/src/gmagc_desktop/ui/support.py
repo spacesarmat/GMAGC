@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 import flet as ft
 
+from gmagc_common.i18n import t
 from gmagc_common.support import (
     AUTHOR_TELEGRAM_URL,
     CHANNEL_URL,
@@ -41,9 +42,9 @@ class SupportPrompt:
         self.now = now
         self.delay = delay
         self.busy = busy
-        self.link = ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.on_open_link)
-        self.telegram_link = ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.on_open_telegram)
-        self.channel_link = ft.TextButton(content=ft.Text("Канал GMAGC", size=12), on_click=self.on_open_channel)
+        self.link = ft.TextButton(content=ft.Text(t("Поддержать автора"), size=12), on_click=self.on_open_link)
+        self.telegram_link = ft.TextButton(content=ft.Text(t("Telegram автора"), size=12), on_click=self.on_open_telegram)
+        self.channel_link = ft.TextButton(content=ft.Text(t("Канал GMAGC"), size=12), on_click=self.on_open_channel)
         self._dialog: ft.AlertDialog | None = None
 
     def start(self) -> None:
@@ -63,9 +64,9 @@ class SupportPrompt:
             title=ft.Text(DIALOG_TITLE),
             content=ft.Text(DIALOG_TEXT),
             actions=[
-                ft.Button("Поддержать", on_click=self.on_support),
-                ft.TextButton(content=ft.Text("Позже"), on_click=self.on_later),
-                ft.TextButton(content=ft.Text("Больше не показывать"), on_click=self.on_never),
+                ft.Button(t("Поддержать"), on_click=self.on_support),
+                ft.TextButton(content=ft.Text(t("Позже")), on_click=self.on_later),
+                ft.TextButton(content=ft.Text(t("Больше не показывать")), on_click=self.on_never),
             ],
         )
         self.page.show_dialog(self._dialog)

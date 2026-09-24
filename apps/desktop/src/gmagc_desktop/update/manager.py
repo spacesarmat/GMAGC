@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from gmagc_common.i18n import t
 from gmagc_common.updates import ReleaseInfo, check_due, fetch_latest, pick_assets, update_source
 from gmagc_desktop.about import VERSION
 from gmagc_desktop.service.search_service import SearchService
@@ -25,9 +26,17 @@ from gmagc_desktop.update.installer import (
     write_helper,
 )
 
-NO_FILE = "Для этой платформы в релизе нет готового файла: скачайте обновление на странице релиза."
-NOT_PACKAGED = "Приложение запущено не из собранной папки: обновите его вручную."
-NO_CHECKSUM = "В релизе нет контрольной суммы: обновление из приложения отключено, скачайте его вручную."
+
+def no_file() -> str:
+    return t("Для этой платформы в релизе нет готового файла: скачайте обновление на странице релиза.")
+
+
+def not_packaged() -> str:
+    return t("Приложение запущено не из собранной папки: обновите его вручную.")
+
+
+def no_checksum() -> str:
+    return t("В релизе нет контрольной суммы: обновление из приложения отключено, скачайте его вручную.")
 
 
 @dataclass(frozen=True)
@@ -80,14 +89,14 @@ class UpdateManager:
     def _offer(self, release: ReleaseInfo) -> UpdateOffer:
         picked = pick_assets(release, self._platform) if self._platform else None
         if picked is None:
-            return UpdateOffer(release, False, NO_FILE)
+            return UpdateOffer(release, False, no_file())
         target = install_target(self._exe(), self._platform)
         if target is None:
-            return UpdateOffer(release, False, NOT_PACKAGED)
+            return UpdateOffer(release, False, not_packaged())
         if picked[1] is None:
-            return UpdateOffer(release, False, NO_CHECKSUM)
+            return UpdateOffer(release, False, no_checksum())
         if not is_writable(target.parent) or (self._platform == "windows" and not is_writable(target)):
-            reason = f"Нет прав на запись в папку приложения ({target}): скачайте обновление вручную."
+            reason = t("Нет прав на запись в папку приложения ({target}): скачайте обновление вручную.", target=target)
             return UpdateOffer(release, False, reason)
         return UpdateOffer(release, True)
 
@@ -99,12 +108,12 @@ class UpdateManager:
     ) -> Path:
         """Скачивает и проверяет обновление, готовит помощника и запускает его; после этого приложение должно закрыться."""
         if not offer.can_install:
-            raise InstallError(offer.reason or "Обновление из приложения недоступно")
+            raise InstallError(offer.reason or t("Обновление из приложения недоступно"))
         picked = pick_assets(offer.release, self._platform)
         exe = self._exe()
         target = install_target(exe, self._platform)
         if picked is None or target is None:
-            raise InstallError(offer.reason or NOT_PACKAGED)
+            raise InstallError(offer.reason or not_packaged())
         asset, checksum = picked
         work = self._data_dir / "updates" / offer.release.version
         shutil.rmtree(work, ignore_errors=True)

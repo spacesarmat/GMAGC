@@ -821,3 +821,18 @@ def test_a_rebuild_does_not_create_a_new_support_prompt(tmp_path):
     app.on_language_change(None)
 
     assert app.rebuilt_as.support is None  # повторный показ окна поддержки и счётчик запусков не нужны
+
+
+def test_the_whole_desktop_interface_is_in_english_after_switching_the_language(tmp_path):
+    app, _ = make_app(tmp_path)
+
+    app.language_dropdown.value = "en"
+    app.on_language_change(None)
+
+    new = app.rebuilt_as
+    everything = " | ".join(t for t in all_texts(new) if t)
+    assert "Image search" in everything and "Number of search results" not in everything  # это label, не Text
+    assert new.results_count_dropdown.label == "Number of search results"
+    assert new.library_text.value == "not chosen" and new.status_label.value == "Index not built"
+    assert "Export settings" in everything and "Check the core" in everything
+    assert new.pick_photo_button.content == "Choose a photo…" or "Choose a photo…" in everything
