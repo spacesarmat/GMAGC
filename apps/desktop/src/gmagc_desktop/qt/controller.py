@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -16,10 +17,15 @@ import numpy as np
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from gmagc_common.i18n import t
+from gmagc_common.protocol import build_link, format_code
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.matcher.adjust import apply_adjustments
 from gmagc_desktop.matcher.pipeline import normalize_photo
 from gmagc_desktop.matcher.thumbnail import thumbnail_png
+from gmagc_desktop.server.api import RequestRecord
+from gmagc_desktop.server.network import lan_addresses
+from gmagc_desktop.server.qr import qr_png
+from gmagc_desktop.server.runner import PhoneServer, ServerStartError
 from gmagc_desktop.service.results import Outcome, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import (
@@ -29,7 +35,7 @@ from gmagc_desktop.service.search_service import (
     PhotoError,
     SearchService,
 )
-from gmagc_desktop.ui.texts import outcome_message, status_text
+from gmagc_desktop.ui.texts import outcome_message, source_text, status_text
 
 logger = logging.getLogger("gmagc.desktop")
 
@@ -64,6 +70,20 @@ class PoolExecutor:
         self._pool.start(_Task(task))
 
 
+HISTORY_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class ServerView:
+    """Что показывает экран «Телефон»: состояние сервера, QR и код (пустые, пока сервер не работает)."""
+
+    status: str
+    running: bool
+    qr_png: bytes | None = None
+    code_text: str = ""
+    other_addresses: str = ""
+
+
 def no_library_hint() -> str:
     return t("Сначала выберите папку библиотеки и постройте индекс")
 
@@ -80,6 +100,11 @@ class AppController(QObject):
     outcome_shown = Signal(object)  # SearchOutcome
     adjustments_changed = Signal()  # значения поправок изменились не пользователем (сброс)
     path_copied = Signal(str)
+    server_changed = Signal()
+    history_changed = Signal()
+    phone_request = Signal(object)  # RequestRecord: приходит из потока сервера, обрабатывается в главном
+    note_shown = Signal(str)  # короткое сообщение на экране «Телефон» («Код скопирован»)
+    screen_requested = Signal(str)  # какой экран показать (результат с телефона — «Поиск»)
 
     def __init__(
         self,
@@ -87,9 +112,17 @@ class AppController(QObject):
         executor: Executor | None = None,
         reveal: Callable[[str], bool] = reveal_in_file_manager,
         copy_text: Callable[[str], None] | None = None,
+        server=None,
+        addresses: Callable[[], list[str]] = lan_addresses,
+        qr: Callable[[str], bytes] = qr_png,
     ):
         super().__init__()
         self.service = service
+        self._server = server
+        self._server_error: str | None = None
+        self._addresses = addresses
+        self._qr = qr
+        self.history: list[RequestRecord] = []
         self.executor: Executor = executor or PoolExecutor()
         self.reveal = reveal
         self._copy_text = copy_text or (lambda text: None)
@@ -101,6 +134,7 @@ class AppController(QObject):
         self._cancel = False
         self.last_search_ms: float | None = None
         self.last_score: float | None = None
+        self.phone_request.connect(self._handle_phone_request)
 
     # ---- запуск и состояние ---------------------------------------------------
     def load(self) -> None:
@@ -325,3 +359,79 @@ class AppController(QObject):
         self.show_banner(t("Запомнено: при похожих запросах теперь будет показан верный файл"), error=False)
         if self.last_query_photo is not None:
             self.search_bytes(self.last_query_photo)
+
+    # ---- сервер для телефона -----------------------------------------------
+    @property
+    def server(self) -> PhoneServer:
+        """Сервер создаётся при первом обращении: тесты без телефона порт не занимают."""
+        if self._server is None:
+            self._server = PhoneServer(self.service)
+        self._server.on_request = self.phone_request.emit  # вызывается из потока сервера, сигнал доставит в главный
+        return self._server
+
+    def start_server_if_enabled(self) -> None:
+        if self.service.settings.server_enabled:
+            self._start_server()
+
+    def _start_server(self) -> None:
+        self._server_error = None
+        try:
+            self.server.start(self.service.settings.port)
+        except ServerStartError as error:
+            self._server_error = str(error)
+        self.server_changed.emit()
+
+    def set_server_enabled(self, enabled: bool) -> None:
+        self.service.set_server_enabled(enabled)
+        if enabled:
+            self._start_server()
+        else:
+            self._server_error = None
+            self.server.stop()
+            self.server_changed.emit()
+
+    def stop_server(self) -> None:
+        if self._server is not None:
+            self._server.stop()
+
+    def server_view(self) -> ServerView:
+        error = self._server_error
+        running = self.server.running and error is None
+        addresses = self._addresses() if running else []
+        if error:
+            return ServerView(t("Не удалось запустить: {error}", error=error), False)
+        if not running:
+            return ServerView(t("Выключен"), False)
+        if not addresses:
+            status = t(
+                "Работает на порту {port}, но адрес ПК в сети не найден: подключите ПК к Wi-Fi", port=self.server.port
+            )
+            return ServerView(status, True)
+        host, port = addresses[0], self.server.port
+        code = self.service.ensure_access_code()
+        return ServerView(
+            t("Работает: {host}:{port}", host=host, port=port),
+            True,
+            self._qr(build_link(host, port, code)),
+            t("Код: {format_code}", format_code=format_code(code)),
+            t("Другие адреса ПК: ") + ", ".join(addresses[1:]) if len(addresses) > 1 else "",
+        )
+
+    def copy_code(self) -> None:
+        self._copy_text(format_code(self.service.ensure_access_code()))
+        self.note_shown.emit(t("Код скопирован"))
+
+    def new_code(self) -> None:
+        self.service.reset_access_code()
+        self.server_changed.emit()
+
+    def _handle_phone_request(self, record: RequestRecord) -> None:
+        """Запрос телефона: запись в историю и показ результата в основном окне, на каком бы экране ни были."""
+        self.history.insert(0, record)
+        del self.history[HISTORY_LIMIT:]
+        self.history_changed.emit()
+        self.show_record(record)
+
+    def show_record(self, record: RequestRecord) -> None:
+        self.show_phone_record(record.photo, record.outcome, source_text(record.time, record.client))
+        self.screen_requested.emit("search")

@@ -13,6 +13,7 @@ from gmagc_common import i18n
 from gmagc_desktop import lang_en  # noqa: F401 - при импорте регистрирует английские переводы
 from gmagc_desktop.qt.controller import AppController, Executor
 from gmagc_desktop.qt.screens.library import LibraryScreen
+from gmagc_desktop.qt.screens.phone import PhoneScreen
 from gmagc_desktop.qt.screens.search import SearchScreen
 from gmagc_desktop.qt.theme import stylesheet
 from gmagc_desktop.qt.window import MainWindow
@@ -36,17 +37,20 @@ def build_window(
     service: SearchService,
     executor: Executor | None = None,
     pick_directory: Callable[[QWidget | None], str] | None = None,
+    **services,
 ) -> MainWindow:
-    controller = AppController(service, executor, copy_text=_copy_to_clipboard)
+    """Окно со всеми экранами; `services` (server, addresses, qr) подменяются в тестах."""
+    controller = AppController(service, executor, copy_text=_copy_to_clipboard, **services)
     library = LibraryScreen(controller, pick_directory) if pick_directory else LibraryScreen(controller)
     search = SearchScreen(controller)
     screens = {
         "search": search,
-        "phone": _placeholder("Телефон — переносится"),
+        "phone": PhoneScreen(controller),
         "library": library,
         "settings": _placeholder("Настройки — переносятся"),
     }
     window = MainWindow(controller, screens)
+    controller.screen_requested.connect(window.show_screen)
 
     def paste() -> None:
         """Ctrl+V — вставить фото из буфера обмена (в полях ввода вставка обычная)."""
@@ -69,4 +73,6 @@ def run(argv: list[str] | None = None) -> int:
     app.setStyleSheet(stylesheet(service.settings.large_text))
     window = build_window(service)
     window.show()
+    window.controller.start_server_if_enabled()
+    app.aboutToQuit.connect(window.controller.stop_server)
     return app.exec()
