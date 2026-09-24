@@ -1,6 +1,7 @@
 import asyncio
+from dataclasses import replace
 
-from gmagc_common.fixtures import FixtureProfile, Mode, new_profile
+from gmagc_common.fixtures import Channel, FixtureProfile, Mode, new_profile
 from gmagc_mobile.profile_store import ProfileStore, profile_key
 from gmagc_mobile.profiles_ui import ProfileEditor
 from tests.fakes import StubPage, texts
@@ -82,3 +83,73 @@ def test_back_from_a_profile_returns_to_the_list_and_from_the_list_is_not_handle
 
     assert editor.go_back() is True and editor.screen == "list"
     assert editor.go_back() is False
+
+
+def open_new(editor):
+    run(editor.open())
+    run(editor.on_new_profile(None))
+
+
+def test_profile_fields_are_saved_as_you_type():
+    editor, store, _ = make_editor()
+    open_new(editor)
+
+    run(editor.set_profile_text("manufacturer", "SHEHDS"))
+    run(editor.set_profile_text("name", "380W Beam"))
+    run(editor.set_profile_text("short_name", "380WB"))
+
+    saved = run(store.list())[0]
+    assert (saved.manufacturer, saved.name, saved.short_name) == ("SHEHDS", "380W Beam", "380WB")
+
+
+def test_adding_a_mode_gives_it_a_unique_name_and_saves():
+    editor, store, _ = make_editor()
+    open_new(editor)
+
+    run(editor.add_mode())
+
+    names = [m.name for m in run(store.list())[0].modes]
+    assert names == ["Режим 1", "Режим 2"]
+
+
+def test_duplicating_a_mode_copies_its_channels_under_a_new_name():
+    editor, store, _ = make_editor()
+    open_new(editor)
+    mode = replace(editor.profile.modes[0], channels=(Channel(1, 8, "d", "dimmer"),))
+    with_channel = replace(editor.profile, modes=(mode,))
+    run(editor._commit(with_channel))
+
+    run(editor.duplicate_mode(0))
+
+    modes = run(store.list())[0].modes
+    assert len(modes) == 2 and modes[1].name != modes[0].name and modes[1].channels == modes[0].channels
+
+
+def test_the_last_mode_can_not_be_deleted_but_others_can():
+    editor, store, _ = make_editor()
+    open_new(editor)
+
+    run(editor.delete_mode(0))
+    assert len(run(store.list())[0].modes) == 1
+
+    run(editor.add_mode())
+    run(editor.delete_mode(0))
+    assert len(run(store.list())[0].modes) == 1
+
+
+def test_renaming_a_mode_is_saved():
+    editor, store, _ = make_editor()
+    open_new(editor)
+
+    run(editor.rename_mode(0, "Расширенный"))
+
+    assert run(store.list())[0].modes[0].name == "Расширенный"
+
+
+def test_the_profile_screen_lists_modes_and_shows_validation_messages():
+    editor, _, _ = make_editor()
+    open_new(editor)
+
+    text = shown(editor)
+
+    assert "Режим 1" in text and "не указан производитель" in text
