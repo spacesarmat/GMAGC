@@ -11,6 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gmagc_common.i18n import normalize_choice
 from gmagc_common.protocol import is_valid_code
 from gmagc_common.support import SupportState
 from gmagc_common.updates import parse_version
@@ -150,6 +151,10 @@ class SearchService:
         with self._lock:
             self._update_settings(access_code=generate_code())
             return self.settings.access_code
+
+    def set_language(self, choice: str) -> None:
+        """Язык интерфейса: «auto» (по системе), «ru» или «en»; неизвестное значение сводится к «auto»."""
+        self._update_settings(language=normalize_choice(choice))
 
     def set_fixture_dirs(self, ma3: str, ma2: str) -> None:
         """Папки для типов приборов, присланных с телефона (пустая строка — искать самому)."""
