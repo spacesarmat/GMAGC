@@ -831,7 +831,7 @@ def test_the_whole_desktop_interface_is_in_english_after_switching_the_language(
 
     new = app.rebuilt_as
     everything = " | ".join(t for t in all_texts(new) if t)
-    assert "Image search" in everything and "Number of search results" not in everything  # подпись выпадающего списка — label
+    assert "Image search" in everything and "Number of search results" not in everything  # это label, не Text
     assert new.results_count_dropdown.label == "Number of search results"
     assert new.library_text.value == "not chosen" and new.status_label.value == "Index not built"
     assert "Export settings" in everything and "Check the core" in everything
