@@ -427,7 +427,7 @@ class ProfileEditor:
             keyboard_type=ft.KeyboardType.NUMBER,
             on_change=changed,
             on_blur=self._redraw_later,
-            width=110,
+            width=150,
         )
 
     def _range_row(self, index: int, item: Range) -> ft.Control:
