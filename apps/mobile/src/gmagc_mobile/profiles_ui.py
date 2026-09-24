@@ -24,6 +24,7 @@ from gmagc_common.fixtures import (
     template_by_id,
     validate_profile,
 )
+from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_mobile.profile_store import ProfileStore
 
 SCREEN_LIST = "list"
@@ -265,6 +266,23 @@ class ProfileEditor:
             self.message = f"Не удалось поделиться: {error}"
             self.render()
 
+    async def on_share_ma3(self, _event) -> None:
+        """Отправляет готовый тип прибора grandMA3 (XML) через «Поделиться»: получателю остаётся сохранить как .xml."""
+        if self.profile is None:
+            return
+        try:
+            text = export_ma3(self.profile)
+        except ExportError as error:
+            self.message = str(error)
+            self.render()
+            return
+        subject = f"{self.profile.manufacturer} {self.profile.name}".strip() or "Тип прибора grandMA3"
+        try:
+            await self.share.share_text(text, subject=f"{subject} (grandMA3 XML)")
+        except Exception as error:  # noqa: BLE001
+            self.message = f"Не удалось поделиться: {error}"
+            self.render()
+
     async def _set_text(self, field: str, value: str, *, render: bool = True) -> None:
         await self.set_profile_text(field, value, render=render)
 
@@ -303,6 +321,7 @@ class ProfileEditor:
             )
         controls.append(ft.Button("Добавить режим", icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
         controls.append(ft.TextButton("Поделиться профилем (JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
+        controls.append(ft.TextButton("Поделиться для grandMA3 (XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma3))
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
 

@@ -327,3 +327,41 @@ def test_the_redraw_after_typing_happens_later_and_only_if_nothing_else_redrew(m
     run(editor._redraw_later(None))
 
     assert editor.page.updates == before + 1  # только та перерисовка, что сделал сам пользователь
+
+
+def ready_editor():
+    editor, _, _ = make_editor()
+    open_new(editor)
+    run(editor.set_profile_text("manufacturer", "SHEHDS"))
+    run(editor.set_profile_text("name", "380W Beam"))
+    run(editor.open_mode(0))
+    run(editor.add_channel("dimmer"))
+    editor.go_back()
+    return editor
+
+
+def test_sharing_the_ma3_xml_sends_a_fixture_type_through_the_share_sheet():
+    editor = ready_editor()
+
+    run(editor.on_share_ma3(None))
+
+    sent = editor.share.texts[0]
+    assert sent.startswith("<?xml") and 'Name="380W Beam"' in sent and "<DMXMode" in sent
+
+
+def test_the_ma3_xml_of_an_unfinished_profile_is_refused_with_a_reason_on_the_screen():
+    editor, _, _ = make_editor()
+    open_new(editor)
+
+    run(editor.on_share_ma3(None))
+
+    assert editor.share.texts == [] and "не готов к экспорту" in shown(editor) and editor.screen == "profile"
+
+
+def test_a_failing_share_of_the_ma3_xml_is_reported_on_the_screen():
+    editor = ready_editor()
+    editor.share.fail = True
+
+    run(editor.on_share_ma3(None))
+
+    assert "Не удалось поделиться" in shown(editor)
