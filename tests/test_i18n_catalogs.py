@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from gmagc_common.fixtures import TEMPLATES
+from gmagc_common.lang_en import EN as COMMON_EN
 from gmagc_desktop.lang_en import EN as DESKTOP_EN
 from gmagc_mobile.lang_en import EN as MOBILE_EN
 
@@ -14,7 +16,7 @@ PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
 
 
 def used_keys(pattern: str) -> set[str]:
-    keys = set()
+    keys = template_texts() if pattern.startswith("packages/common") else set()
     for path in sorted(ROOT.glob(pattern)):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             is_t = isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "t"
@@ -26,7 +28,17 @@ def used_keys(pattern: str) -> set[str]:
 CATALOGS = [
     ("телефон", "apps/mobile/src/gmagc_mobile/*.py", MOBILE_EN),
     ("ПК", "apps/desktop/src/gmagc_desktop/**/*.py", DESKTOP_EN),
+    ("общее", "packages/common/gmagc_common/*.py", COMMON_EN),
 ]
+
+
+def template_texts() -> set[str]:
+    """Названия шаблонов каналов и их диапазонов: задаются данными, а не вызовами t(\"…\")."""
+    texts = set()
+    for template in TEMPLATES:
+        texts.add(template.title)
+        texts.update(item.name for item in template.ranges)
+    return {text for text in texts if re.search("[А-Яа-яЁё]", text)}
 
 
 @pytest.mark.parametrize(("name", "pattern", "catalog"), CATALOGS, ids=[c[0] for c in CATALOGS])

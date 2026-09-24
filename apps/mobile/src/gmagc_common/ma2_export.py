@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from gmagc_common.fixtures import Channel, FixtureProfile, Mode, file_part, has_errors, validate_profile
+from gmagc_common.i18n import t
 from gmagc_common.ma3_export import ExportError
 
 MA_NAMESPACE = "http://schemas.malighting.de/grandma2/xml/MA"
@@ -81,7 +82,11 @@ def _resolve(mode: Mode) -> list[Ma2Attr]:
         found = _ATTRIBUTES.get(channel.template)
         if found is not None and "{n}" not in found.attribute and seen[channel.template] > 1:
             raise ExportError(
-                f"в режиме «{mode.name}» шаблон «{channel.template}» повторяется: MA2 не различит эти каналы"
+                t(
+                    "в режиме «{name}» шаблон «{template}» повторяется: MA2 не различит эти каналы",
+                    name=mode.name,
+                    template=channel.template,
+                )
             )
         specs.append(_spec(channel.template, seen[channel.template]))
     return specs
@@ -102,7 +107,7 @@ def _sets(function: ET.Element, channel: Channel, spec: Ma2Attr) -> None:
                 function,
                 "ChannelSet",
                 {
-                    "name": item.name or f"Диапазон {number}",
+                    "name": item.name or t("Диапазон {number}", number=number),
                     "from_dmx": str(item.start * scale),
                     "to_dmx": str(item.end * scale + (scale - 1)),
                 },
@@ -153,9 +158,9 @@ def export_ma2(profile: FixtureProfile, mode_index: int = 0, now: datetime | Non
     issues = validate_profile(profile)
     if has_errors(issues):
         details = "; ".join(f"{i.path}: {i.message}" if i.path else i.message for i in issues if i.error)
-        raise ExportError(f"профиль не готов к экспорту: {details}")
+        raise ExportError(t("профиль не готов к экспорту: {details}", details=details))
     if not 0 <= mode_index < len(profile.modes):
-        raise ExportError(f"нет режима с номером {mode_index}")
+        raise ExportError(t("нет режима с номером {mode_index}", mode_index=mode_index))
     mode = profile.modes[mode_index]
     specs = _resolve(mode)
 
@@ -173,7 +178,7 @@ def export_ma2(profile: FixtureProfile, mode_index: int = 0, now: datetime | Non
     fixture_type = ET.SubElement(root, "FixtureType", {"name": profile.name, "mode": mode.name})
     info = ET.SubElement(fixture_type, "InfoItems")
     stamp = (now or datetime.now()).strftime("%Y-%m-%d")
-    ET.SubElement(info, "Info", {"type": "Revision", "date": stamp}).text = "Создано в GMAGC"
+    ET.SubElement(info, "Info", {"type": "Revision", "date": stamp}).text = t("Создано в GMAGC")
     ET.SubElement(fixture_type, "short_name").text = profile.short_name or profile.name[:16]
     ET.SubElement(fixture_type, "manufacturer").text = profile.manufacturer
     ET.SubElement(fixture_type, "short_manufacturer").text = profile.manufacturer

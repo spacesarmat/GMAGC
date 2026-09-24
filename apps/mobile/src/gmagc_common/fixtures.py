@@ -6,6 +6,8 @@ import re
 import uuid
 from dataclasses import dataclass
 
+from gmagc_common.i18n import t
+
 MAX_DMX = 512
 BITS_CHOICES = (8, 16)
 
@@ -96,12 +98,22 @@ def template_by_id(template_id: str) -> Template:
     try:
         return _BY_ID[template_id]
     except KeyError:
-        raise ProfileError(f"неизвестный шаблон канала: {template_id}") from None
+        raise ProfileError(t("неизвестный шаблон канала: {template_id}", template_id=template_id)) from None
+
+
+def template_title(template: Template) -> str:
+    """Название шаблона на текущем языке (в самих шаблонах хранятся русские тексты — источник переводов)."""
+    return t(template.title)
+
+
+def template_ranges(template: Template) -> tuple[Range, ...]:
+    """Диапазоны шаблона с названиями на текущем языке."""
+    return tuple(Range(item.start, item.end, t(item.name)) for item in template.ranges)
 
 
 def channel_from_template(template_id: str, dmx: int) -> Channel:
     template = template_by_id(template_id)
-    return Channel(dmx, template.bits, template.title, template.id, 0, template.ranges)
+    return Channel(dmx, template.bits, template_title(template), template.id, 0, template_ranges(template))
 
 
 def next_free_dmx(mode: Mode) -> int:
@@ -110,7 +122,7 @@ def next_free_dmx(mode: Mode) -> int:
 
 
 def new_profile(manufacturer: str = "", name: str = "") -> FixtureProfile:
-    return FixtureProfile(uuid.uuid4().hex, manufacturer, name, "", (Mode("Режим 1"),))
+    return FixtureProfile(uuid.uuid4().hex, manufacturer, name, "", (Mode(t("Режим {number}", number=1)),))
 
 
 # ---- JSON ------------------------------------------------------------------
@@ -142,38 +154,38 @@ def profile_to_dict(profile: FixtureProfile) -> dict:
 
 def _text(value: object, field: str) -> str:
     if not isinstance(value, str):
-        raise ProfileError(f"поле «{field}» должно быть строкой")
+        raise ProfileError(t("поле «{field}» должно быть строкой", field=field))
     return value
 
 
 def _int(value: object, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ProfileError(f"поле «{field}» должно быть целым числом")
+        raise ProfileError(t("поле «{field}» должно быть целым числом", field=field))
     return value
 
 
 def _list(value: object, field: str) -> list:
     if not isinstance(value, list):
-        raise ProfileError(f"поле «{field}» должно быть списком")
+        raise ProfileError(t("поле «{field}» должно быть списком", field=field))
     return value
 
 
 def _dict(value: object, field: str) -> dict:
     if not isinstance(value, dict):
-        raise ProfileError(f"поле «{field}» должно быть объектом")
+        raise ProfileError(t("поле «{field}» должно быть объектом", field=field))
     return value
 
 
 def _range(data: object) -> Range:
-    data = _dict(data, "диапазон")
+    data = _dict(data, t("диапазон"))
     return Range(_int(data.get("start"), "start"), _int(data.get("end"), "end"), _text(data.get("name"), "name"))
 
 
 def _channel(data: object) -> Channel:
-    data = _dict(data, "канал")
+    data = _dict(data, t("канал"))
     bits = _int(data.get("bits"), "bits")
     if bits not in BITS_CHOICES:
-        raise ProfileError("разрядность канала должна быть 8 или 16")
+        raise ProfileError(t("разрядность канала должна быть 8 или 16"))
     template = _text(data.get("template", "custom"), "template")
     return Channel(
         _int(data.get("dmx"), "dmx"),
@@ -186,10 +198,10 @@ def _channel(data: object) -> Channel:
 
 
 def profile_from_dict(data: object) -> FixtureProfile:
-    data = _dict(data, "профиль")
+    data = _dict(data, t("профиль"))
     modes = tuple(
         Mode(
-            _text(_dict(mode, "режим").get("name"), "name"),
+            _text(_dict(mode, t("режим")).get("name"), "name"),
             tuple(_channel(item) for item in _list(mode.get("channels", []), "channels")),
         )
         for mode in _list(data.get("modes"), "modes")
@@ -218,47 +230,65 @@ def _check_ranges(channel: Channel, path: str, out: list[Issue]) -> None:
     ordered = sorted(channel.ranges, key=lambda r: (r.start, r.end))
     for r in ordered:
         if not 0 <= r.start <= r.end <= 255:
-            out.append(Issue(path, f"диапазон «{r.name}» должен лежать в 0–255 и идти от меньшего к большему", True))
+            out.append(
+                Issue(path, t("диапазон «{name}» должен лежать в 0–255 и идти от меньшего к большему", name=r.name), True)
+            )
     valid = [r for r in ordered if 0 <= r.start <= r.end <= 255]
     for previous, current in zip(valid, valid[1:], strict=False):
         if current.start <= previous.end:
-            out.append(Issue(path, f"диапазоны «{previous.name}» и «{current.name}» пересекаются", True))
+            out.append(
+                Issue(path, t("диапазоны «{name}» и «{name2}» пересекаются", name=previous.name, name2=current.name), True)
+            )
         elif current.start > previous.end + 1:
-            out.append(Issue(path, f"между диапазонами «{previous.name}» и «{current.name}» есть пропуск", False))
+            out.append(
+                Issue(
+                    path,
+                    t("между диапазонами «{name}» и «{name2}» есть пропуск", name=previous.name, name2=current.name),
+                    False,
+                )
+            )
 
 
 def validate_profile(profile: FixtureProfile) -> list[Issue]:
     issues: list[Issue] = []
     if not profile.manufacturer.strip():
-        issues.append(Issue("", "не указан производитель", True))
+        issues.append(Issue("", t("не указан производитель"), True))
     if not profile.name.strip():
-        issues.append(Issue("", "не указано название прибора", True))
+        issues.append(Issue("", t("не указано название прибора"), True))
     if not profile.modes:
-        issues.append(Issue("", "нет ни одного режима", True))
+        issues.append(Issue("", t("нет ни одного режима"), True))
     seen: set[str] = set()
     for mode in profile.modes:
         if mode.name in seen:
-            issues.append(Issue(mode.name, f"название режима «{mode.name}» повторяется", True))
+            issues.append(Issue(mode.name, t("название режима «{name}» повторяется", name=mode.name), True))
         seen.add(mode.name)
         if not mode.channels:
-            issues.append(Issue(mode.name, "в режиме нет каналов", True))
+            issues.append(Issue(mode.name, t("в режиме нет каналов"), True))
         used: dict[int, str] = {}
         previous_last = 0
         for channel in sorted(mode.channels, key=lambda c: c.dmx):
             path = f"{mode.name} → {channel.name.strip() or '(без названия)'}"
             if not channel.name.strip():
-                issues.append(Issue(path, "у канала нет названия", True))
+                issues.append(Issue(path, t("у канала нет названия"), True))
             if channel.dmx < 1 or channel.last > MAX_DMX:
-                issues.append(Issue(path, f"адрес должен лежать в 1–{MAX_DMX} (с учётом 16 бит)", True))
+                issues.append(Issue(path, t("адрес должен лежать в 1–{MAX_DMX} (с учётом 16 бит)", MAX_DMX=MAX_DMX), True))
             for address in range(channel.dmx, channel.last + 1):
                 if address in used:
-                    issues.append(Issue(path, f"адрес {address} пересекается с каналом «{used[address]}»", True))
+                    issues.append(
+                        Issue(
+                            path,
+                            t("адрес {address} пересекается с каналом «{used}»", address=address, used=used[address]),
+                            True,
+                        )
+                    )
                 used[address] = channel.name
             if channel.dmx > previous_last + 1 and 1 <= channel.dmx <= MAX_DMX:
-                issues.append(Issue(path, f"пропуск адресов {previous_last + 1}–{channel.dmx - 1}", False))
+                issues.append(
+                    Issue(path, t("пропуск адресов {start}–{end}", start=previous_last + 1, end=channel.dmx - 1), False)
+                )
             previous_last = max(previous_last, channel.last)
             if not 0 <= channel.default <= 255:
-                issues.append(Issue(path, "значение по умолчанию должно быть 0–255", True))
+                issues.append(Issue(path, t("значение по умолчанию должно быть 0–255"), True))
             _check_ranges(channel, path, issues)
     return issues
 

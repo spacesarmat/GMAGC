@@ -75,7 +75,7 @@ def test_a_missing_console_is_skipped_with_a_message_while_the_other_is_written(
     result = exporter.store(ready_profile())
 
     assert [target for target, _ in result.written] == ["ma3"]
-    assert len(result.skipped) == 1 and "grandMA2" in result.skipped[0] and "настройк" in result.skipped[0]
+    assert result.skipped == ("no_folder:ma2",)
 
 
 def test_when_no_folder_is_available_nothing_is_written_and_the_reason_is_raised(tmp_path):
@@ -116,4 +116,4 @@ def test_a_folder_that_cannot_be_created_is_skipped_with_the_reason(tmp_path):
 
     result = exporter.store(ready_profile())
 
-    assert [target for target, _ in result.written] == ["ma3"] and "grandMA2" in result.skipped[0]
+    assert [target for target, _ in result.written] == ["ma3"] and result.skipped[0].startswith("cannot_use:ma2:")

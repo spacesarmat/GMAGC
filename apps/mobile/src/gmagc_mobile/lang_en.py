@@ -1,5 +1,6 @@
 """Английские переводы интерфейса телефона: словарь «русский текст → английский»."""
 
+from gmagc_common import lang_en as _common  # noqa: F401 - общие переводы регистрируются при импорте
 from gmagc_common.i18n import register
 
 EN = {
@@ -133,6 +134,15 @@ EN = {
     ),
     "Изображение слишком большое для отправки.": "The image is too large to send.",
     "Ошибка на ПК: {message}": "PC error: {message}",
+    "На ПК не найдена папка для grandMA3 или grandMA2: укажите её на экране «Настройки» ПК-приложения.": (
+        "No folder for grandMA3 or grandMA2 was found on the PC: specify it on the “Settings” screen of the PC app."
+    ),
+    "ПК не принял профиль: {message}": "The PC did not accept the profile: {message}",
+    "Профиль не готов к отправке: {problems}": "The profile is not ready to send: {problems}",
+    "{console}: папка не найдена, укажите её в настройках ПК-приложения": (
+        "{console}: folder not found, specify it in the PC app settings"
+    ),
+    "{console}: не удалось использовать папку ({detail})": "{console}: could not use the folder ({detail})",
     "Совпадение ненадёжно: похоже, такого гобо в библиотеке нет. Ниже самые близкие.": (
         "The match is unreliable: this gobo is probably not in the library. The closest ones are below."
     ),

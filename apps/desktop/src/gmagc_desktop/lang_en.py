@@ -1,5 +1,6 @@
 """Английские переводы интерфейса ПК-приложения: словарь «русский текст → английский»."""
 
+from gmagc_common import lang_en as _common  # noqa: F401 - общие переводы регистрируются при импорте
 from gmagc_common.i18n import register
 
 EN = {
@@ -188,7 +189,11 @@ EN = {
     "Нет прав на запись в папку приложения ({target}): скачайте обновление вручную.": (
         "No permission to write to the app folder ({target}): download the update manually."
     ),
-    # ошибки службы
+    # ошибки службы и запись типов приборов
+    "{console}: папка не найдена, укажите её в настройках ПК-приложения": (
+        "{console}: folder not found, specify it in the PC app settings"
+    ),
+    "{console}: не удалось использовать папку ({detail})": "{console}: could not use the folder ({detail})",
     "папка библиотеки не выбрана": "the library folder is not chosen",
     "выбранный файл не в папке библиотеки": "the chosen file is not in the library folder",
     "выбранный файл не входит в текущий индекс: обновите его и попробуйте снова": (

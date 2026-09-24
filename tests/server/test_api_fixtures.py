@@ -119,4 +119,5 @@ def test_one_console_folder_missing_still_stores_the_other_and_reports_the_skip(
         server.stop()
 
     result = FixtureUploadResult.from_dict(reply)
-    assert response.status == 200 and [t for t, _ in result.written] == ["ma3"] and "grandMA2" in result.skipped[0]
+    assert response.status == 200 and [t for t, _ in result.written] == ["ma3"]
+    assert result.skipped == ("no_folder:ma2",)

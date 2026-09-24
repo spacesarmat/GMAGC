@@ -13,6 +13,8 @@ import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from gmagc_common.i18n import t
+
 REPO = "spacesarmat/GMAGC"
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
@@ -134,14 +136,14 @@ class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not is_allowed_url(newurl, self._allow_local):
-            raise UpdateCheckError("Переход на недопустимый адрес: обновление отменено")
+            raise UpdateCheckError(t("Переход на недопустимый адрес: обновление отменено"))
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def open_url(url: str, *, allow_local: bool = False, timeout: float = 8.0, user_agent: str = "GMAGC"):
     """Открывает адрес через urllib, проверяя его и каждый переход; ошибки сети остаются исключениями urllib."""
     if not is_allowed_url(url, allow_local):
-        raise UpdateCheckError("Недопустимый адрес обновления")
+        raise UpdateCheckError(t("Недопустимый адрес обновления"))
     opener = urllib.request.build_opener(_CheckedRedirect(allow_local))
     request = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/vnd.github+json"})
     return opener.open(request, timeout=timeout)
@@ -157,21 +159,21 @@ def fetch_latest(
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code in (403, 429):
-            raise UpdateCheckError("GitHub временно ограничил число запросов: попробуйте позже") from error
+            raise UpdateCheckError(t("GitHub временно ограничил число запросов: попробуйте позже")) from error
         if error.code == 404:
-            raise UpdateCheckError("Релизы не найдены") from error
-        raise UpdateCheckError(f"GitHub ответил ошибкой {error.code}") from error
+            raise UpdateCheckError(t("Релизы не найдены")) from error
+        raise UpdateCheckError(t("GitHub ответил ошибкой {code}", code=error.code)) from error
     except OSError as error:  # нет сети, отказ в соединении, таймаут
-        raise UpdateCheckError("Нет связи с GitHub") from error
+        raise UpdateCheckError(t("Нет связи с GitHub")) from error
     if len(raw) > MAX_RESPONSE_BYTES:
-        raise UpdateCheckError("Слишком большой ответ GitHub")
+        raise UpdateCheckError(t("Слишком большой ответ GitHub"))
     try:
         data = json.loads(raw)
     except ValueError as error:
-        raise UpdateCheckError("Ответ GitHub не удалось разобрать") from error
+        raise UpdateCheckError(t("Ответ GitHub не удалось разобрать")) from error
     release = ReleaseInfo.from_api(data)
     if release is None:
-        raise UpdateCheckError("Ответ GitHub не похож на релиз")
+        raise UpdateCheckError(t("Ответ GitHub не похож на релиз"))
     return release if is_newer(release.version, current_version) else None
 
 

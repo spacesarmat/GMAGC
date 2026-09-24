@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import NamedTuple
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+from gmagc_common.i18n import t
+
 API_VERSION = 1
 APP_NAME = "GMAGC"
 DEFAULT_PORT = 8765
@@ -122,7 +124,7 @@ def _decode(value: str | None) -> bytes | None:
     try:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, TypeError, ValueError) as error:
-        raise ProtocolError("повреждённое изображение в ответе") from error
+        raise ProtocolError(t("повреждённое изображение в ответе")) from error
 
 
 def _parse[T](build: Callable[[], T]) -> T:
@@ -132,7 +134,7 @@ def _parse[T](build: Callable[[], T]) -> T:
     except ProtocolError:
         raise
     except (KeyError, TypeError, AttributeError, ValueError) as error:
-        raise ProtocolError(f"неверный ответ сервера: {error!r}") from error
+        raise ProtocolError(t("неверный ответ сервера: {error}", error=repr(error))) from error
 
 
 @dataclass(frozen=True)
@@ -216,9 +218,27 @@ class Health:
         )
 
 
+SKIP_NO_FOLDER = "no_folder"  # для пульта нет папки: не найдена и не задана
+SKIP_CANNOT_USE = "cannot_use"  # заданную папку нельзя использовать (подробности в третьей части)
+SKIP_TARGETS = ("ma3", "ma2")
+
+
+def skip_item(code: str, target: str, detail: str = "") -> str:
+    """Запись о пропущенном пульте: `код:пульт[:подробности]`."""
+    return f"{code}:{target}:{detail}" if detail else f"{code}:{target}"
+
+
+def parse_skip(item: str) -> tuple[str, str, str] | None:
+    """(код, пульт, подробности) или None, если запись не в этом виде (старый ПК присылает готовый текст)."""
+    parts = item.split(":", 2)
+    if len(parts) >= 2 and parts[0] in (SKIP_NO_FOLDER, SKIP_CANNOT_USE) and parts[1] in SKIP_TARGETS:
+        return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
+    return None
+
+
 @dataclass(frozen=True)
 class FixtureUploadResult:
-    """Итог отправки профиля прибора: какие файлы записал ПК (пульт, путь) и что пропустил (сообщения)."""
+    """Итог отправки профиля прибора: какие файлы записал ПК (пульт, путь) и какие пульты пропустил (см. skip_item)."""
 
     written: tuple[tuple[str, str], ...]
     skipped: tuple[str, ...]
@@ -234,7 +254,7 @@ class FixtureUploadResult:
         def build() -> FixtureUploadResult:
             written, skipped = data["written"], data["skipped"]
             if not isinstance(written, list) or not isinstance(skipped, list):
-                raise TypeError("ожидались списки")
+                raise TypeError(t("ожидались списки"))
             return cls(
                 tuple((str(item["target"]), str(item["path"])) for item in written),
                 tuple(str(item) for item in skipped),

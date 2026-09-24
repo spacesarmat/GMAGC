@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from gmagc_common.i18n import t
+
 SUPPORT_URL = "https://boosty.to/djmaker/donate"
 AUTHOR_TELEGRAM_URL = "https://t.me/Andy_bum"  # Telegram автора: постоянная ссылка на экранах
 CHANNEL_URL = "https://t.me/gmagclight"  # канал о GMAGC: постоянная ссылка на экранах
@@ -14,11 +16,16 @@ SUPPORT = "support"
 LATER = "later"
 NEVER = "never"
 
-DIALOG_TITLE = "Поддержать автора"
-DIALOG_TEXT = (
-    "GMAGC бесплатна, её делает один человек. Если программа помогает вам в работе, "
-    "вы можете поддержать автора добровольным взносом. Спасибо!"
-)
+
+def dialog_title() -> str:
+    return t("Поддержать автора")
+
+
+def dialog_text() -> str:
+    return t(
+        "GMAGC бесплатна, её делает один человек. Если программа помогает вам в работе, "
+        "вы можете поддержать автора добровольным взносом. Спасибо!"
+    )
 
 
 @dataclass(frozen=True)
@@ -43,4 +50,4 @@ def after_answer(state: SupportState, now: float, answer: str) -> SupportState:
         return replace(state, last_ask=now, muted=True)
     if answer == LATER:
         return replace(state, last_ask=now)
-    raise ValueError(f"неизвестный ответ: {answer}")
+    raise ValueError(t("неизвестный ответ: {answer}", answer=answer))
