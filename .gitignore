@@ -32,3 +32,6 @@ dist/
 
 # Скачанные модели (загружаются scripts/fetch_model.py, в git не хранятся)
 models/
+
+# graphify: локальный граф знаний и выгрузка для Obsidian
+graphify-out/
