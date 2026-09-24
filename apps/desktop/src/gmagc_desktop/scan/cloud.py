@@ -83,6 +83,8 @@ PROMPT = (
     "macro, program, speed, reset and mode channels.\n"
     "- `ranges` are the DMX value ranges of the channel (0-255) with their meaning, exactly as in the manual; "
     "an empty list when the manual gives none.\n"
+    "- If the table skips channels with a '......' row between two numbered rows, the skipped channels are identical: "
+    "list every skipped channel too, continuing the numbering in the names (for example '2 Dimming' ... '17 Dimming').\n"
     "Do not invent channels or ranges that are not in the document."
 )
 

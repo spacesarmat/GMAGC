@@ -26,6 +26,8 @@ from gmagc_common.scan_draft import (
 
 _LABEL = re.compile(r"^\s*ch(?:annel)?\.?\s*(\d{1,3})\s*$", re.IGNORECASE)
 _HEADING = re.compile(r"dmx\s*channel\s*[:：]?\s*(\d+)\s*ch", re.IGNORECASE)
+_ELLIPSIS = re.compile(r"^[\s.·•…‥:_-]{2,}$")  # строка «......» между каналами: пропущенные каналы такие же
+_NAME_NUMBER = re.compile(r"^(\D*?)(\d+)(\D*)$")
 _HEADER_WORDS = {"serial", "number", "function", "illustrate", "description", "channel", "value", "serial number"}
 ORPHAN = 0  # диапазоны над первой меткой страницы: продолжение последнего канала предыдущей страницы
 
@@ -95,7 +97,9 @@ def _parse_section(items: list[OcrItem], require_header: bool = False) -> list[D
     body = [i for i in items if i.text.strip().lower() not in _HEADER_WORDS]
     labels = sorted(((i, int(m.group(1))) for i in body if (m := _LABEL.match(i.text))), key=lambda p: p[0].yc)
     label_ids = {id(i) for i, _ in labels}
-    others = [i for i in body if id(i) not in label_ids]
+    dots = [i for i in body if id(i) not in label_ids and _ELLIPSIS.match(i.text)]
+    dot_ids = {id(i) for i in dots}
+    others = [i for i in body if id(i) not in label_ids and id(i) not in dot_ids]
     if not labels and not any(parse_range_line(i.text) for i in others):
         return []
     if require_header and not labels and not any(i.text.strip().lower() in {"illustrate", "function"} for i in items):
@@ -123,8 +127,11 @@ def _parse_section(items: list[OcrItem], require_header: bool = False) -> list[D
         bands = [(ORPHAN, float("-inf"), float("inf"))]
 
     channels: list[DraftChannel] = []
+    gaps: set[int] = set()  # каналы, после которых в таблице стоит строка «......»
     for number, top, bottom in bands:
         band = [i for i in content if top <= i.yc < bottom]
+        if number != ORPHAN and any(top <= d.yc < bottom for d in dots):
+            gaps.add(number)
         label_y = next((lab.yc for lab, n in labels if n == number), None)
         ranges: list[Range] = []
         used: set[int] = set()
@@ -156,7 +163,44 @@ def _parse_section(items: list[OcrItem], require_header: bool = False) -> list[D
         channels.append(
             DraftChannel(number, name or fallback, guess_template(name), 8, tuple(ranges), note[:300], 1.0 if name else 0.6)
         )
-    return _fold_fine_channels(list(merge_channels((), tuple(channels))))
+    merged = list(merge_channels((), tuple(channels)))
+    return _fold_fine_channels(_fill_gaps(merged, gaps))
+
+
+def _numbered_names(first: str, last: str, count: int) -> list[str] | None:
+    """«1 Dimming» … «18 Dimming» → названия промежуточных каналов, если число в названиях растёт на единицу."""
+    a, b = _NAME_NUMBER.match(first), _NAME_NUMBER.match(last)
+    if not a or not b or a.group(1) != b.group(1) or a.group(3) != b.group(3):
+        return None
+    start, end = int(a.group(2)), int(b.group(2))
+    if end - start != count + 1:
+        return None
+    return [f"{a.group(1)}{start + step}{a.group(3)}" for step in range(1, count + 1)]
+
+
+def _fill_gaps(channels: list[DraftChannel], gaps: set[int]) -> list[DraftChannel]:
+    """Между каналами, разделёнными строкой «......», добавляет пропущенные: они повторяют канал перед строкой."""
+    result: list[DraftChannel] = []
+    for index, channel in enumerate(channels):
+        result.append(channel)
+        following = channels[index + 1] if index + 1 < len(channels) else None
+        if channel.dmx not in gaps or following is None or following.dmx - channel.dmx < 2:
+            continue
+        count = following.dmx - channel.dmx - 1
+        names = _numbered_names(channel.name, following.name, count) or [channel.name] * count
+        for step, name in enumerate(names, start=1):
+            result.append(
+                replace(
+                    channel,
+                    dmx=channel.dmx + step,
+                    name=name,
+                    template=guess_template(name) if name != channel.name else channel.template,
+                    note="",
+                    # добавлен по строке «......»: на экране проверки помечается «?»
+                    confidence=min(channel.confidence, 0.8),
+                )
+            )
+    return result
 
 
 def _fold_fine_channels(channels: list[DraftChannel]) -> list[DraftChannel]:

@@ -110,6 +110,7 @@ class ProfileEditor:
         self.send = send  # отправка профиля на ПК; None — нет подключения к ПК
         self.scan = scan  # выбор файла инструкции и распознавание на ПК; None — нет подключения, ответ None — отмена
         self.scanning = False
+        self.undo_mode: Mode | None = None  # режим до добавления каналов из инструкции: для кнопки «Отменить»
         self.confirm_cloud: bool | None = None  # ждём подтверждения отправки в облако; значение — «взять прежний файл»
         self.draft: ScanDraft | None = None
         self.draft_checked: set[tuple[int, int]] = set()  # (режим черновика, канал), отмеченные галочкой
@@ -137,6 +138,7 @@ class ProfileEditor:
         """Шаг назад внутри редактора. False — уже на списке, выходить должно приложение."""
         self.message = self.notice = ""
         self.confirm_cloud = None
+        self.undo_mode = None
         if self.screen == SCREEN_SCAN:
             self.draft = None
             self.screen = SCREEN_MODE
@@ -255,6 +257,7 @@ class ProfileEditor:
     # ---- профиль и режимы ---------------------------------------------------
     async def _commit(self, profile: FixtureProfile, *, render: bool = True) -> None:
         """Автосохранение: новая версия профиля сразу пишется в хранилище."""
+        self.undo_mode = None  # любая правка, кроме самого добавления, закрывает возможность отмены
         self.profile = profile
         await self.store.save(profile)
         self.profiles = await self.store.list()
@@ -548,11 +551,23 @@ class ProfileEditor:
             self.mode_index = len(modes) - 1
             await self._commit(replace(self.profile, modes=modes), render=False)
         else:
-            await self._commit_mode(add_draft_channels(self.mode, chosen), render=False)
+            before = self.mode
+            await self._commit_mode(add_draft_channels(before, chosen), render=False)
+            self.undo_mode = before
         self.draft = None
         self.message = ""
         self.screen = SCREEN_MODE
         self.notice = t("Добавлено каналов: {count}", count=len(chosen))
+        self.render()
+
+    async def undo_apply(self) -> None:
+        """Отменяет добавление каналов из инструкции в текущий режим: режим возвращается таким, каким был."""
+        before = self.undo_mode
+        if before is None:
+            return
+        await self._commit_mode(before, render=False)
+        self.message = ""
+        self.notice = t("Добавление отменено.")
         self.render()
 
     def _render_scan(self) -> list[ft.Control]:
@@ -637,6 +652,8 @@ class ProfileEditor:
             controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
         if self.notice:
             controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
+            if self.undo_mode is not None:
+                controls.insert(2, ft.TextButton(t("Отменить"), on_click=self._async_click(self.undo_apply)))
         for index, channel in sorted(enumerate(mode.channels), key=lambda pair: pair[1].dmx):
             span = f"{channel.dmx}–{channel.last}" if channel.bits == 16 else str(channel.dmx)
             controls.append(
