@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-pythonpath = ["apps/desktop/src", "apps/mobile/src", "."]
+pythonpath = ["apps/desktop/src", "apps/mobile/src", "apps/mobile_qt/src", "."]
 testpaths = ["tests"]
 # весь набор обычно укладывается в ~70с; таймаут на отдельный тест — чтобы зависший тест падал с трассировкой
 # за секунды, а не молча вешал CI на 15-20 минут (случалось на macOS-раннере, причина не установлена)
@@ -8,13 +8,14 @@ timeout = 30
 [tool.ruff]
 line-length = 125
 target-version = "py312"
-src = ["apps/desktop/src", "apps/mobile/src", "."]
+src = ["apps/desktop/src", "apps/mobile/src", "apps/mobile_qt/src", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/lang_en.py" = ["E501"]  # ключи словарей — длинные русские тексты целиком, их нельзя разбивать
+"**/qr_decode.py" = ["E501"]  # таблицы стандарта QR записаны строками целиком
 "scripts/*.py" = ["E402", "I001"]  # sys.path подменяется до импортов намеренно
 "tests/test_scripts.py" = ["E402", "I001"]
 "tests/test_thumbs.py" = ["E402", "I001"]

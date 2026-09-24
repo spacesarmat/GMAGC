@@ -5,7 +5,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "packages" / "common" / "gmagc_common"
-TARGETS = [ROOT / "apps" / "desktop" / "src" / "gmagc_common", ROOT / "apps" / "mobile" / "src" / "gmagc_common"]
+TARGETS = [
+    ROOT / "apps" / "desktop" / "src" / "gmagc_common",
+    ROOT / "apps" / "mobile" / "src" / "gmagc_common",
+    ROOT / "apps" / "mobile_qt" / "src" / "gmagc_common",
+]
 
 
 def sync() -> list[Path]:
