@@ -195,3 +195,25 @@ def test_a_page_without_views_does_not_break_the_build():
     app.build()
 
     assert page.added
+
+
+def test_back_from_the_profiles_list_returns_to_the_screen_it_was_opened_from():
+    app, view, _, _ = make()
+    asyncio.run(app.on_open_profiles(None))
+
+    press_back(app, view)
+
+    assert app.profiles_view.visible is False and views_shown(app) == ["connect"] and view.decisions == [False]
+
+
+def test_back_inside_the_profile_editor_goes_one_level_up_first():
+    app, view, _, _ = make()
+    asyncio.run(app.on_open_profiles(None))
+    asyncio.run(app.editor.on_new_profile(None))
+    assert app.editor.screen == "profile"
+
+    press_back(app, view)
+    assert app.profiles_view.visible and app.editor.screen == "list"
+    press_back(app, view)
+
+    assert app.profiles_view.visible is False

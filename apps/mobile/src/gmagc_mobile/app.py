@@ -28,6 +28,8 @@ from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, UNREACHABLE, ClientError, GmagcClient
 from gmagc_mobile.imaging import prepare_upload
+from gmagc_mobile.profile_store import MemoryPrefs, ProfileStore
+from gmagc_mobile.profiles_ui import ProfileEditor
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
 from gmagc_mobile.store import ConnectionStore
 from gmagc_mobile.support import SupportPrompt
@@ -149,6 +151,7 @@ class MobileApp:
         support: bool = False,
         support_delay: float = 8.0,
         prefs=None,
+        profile_store: ProfileStore | None = None,
     ):
         self.page = page
         self.store = store
@@ -157,6 +160,13 @@ class MobileApp:
         self.picker = picker or ft.FilePicker()
         self.clipboard = clipboard or ft.Clipboard()
         self.share = share or ft.Share()
+        self.editor = ProfileEditor(
+            page,
+            profile_store or ProfileStore(prefs or MemoryPrefs()),
+            self.share,
+            on_exit=lambda: self._show(self._return_view),
+        )
+        self.profiles_view = self.editor.view
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.qr_diagnose = qr_diagnose
@@ -231,6 +241,7 @@ class MobileApp:
                 ft.Divider(),
                 _nav_row(
                     [
+                        _nav_item(ft.Icons.TUNE, "Профили", self.on_open_profiles),
                         _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
                         _nav_item(ft.Icons.HELP_OUTLINE, "Помощь", self.on_open_help),
                         _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
@@ -339,6 +350,7 @@ class MobileApp:
                 ft.Row(
                     [
                         _camera_icon_button(ft.Icons.PHOTO_LIBRARY, "Галерея", self.on_open_gallery),
+                        _camera_icon_button(ft.Icons.TUNE, "Профили приборов", self.on_open_profiles),
                         _camera_icon_button(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
                         _camera_icon_button(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
                     ],
@@ -519,6 +531,7 @@ class MobileApp:
                                 self.settings_view,
                                 self.about_view,
                                 self.help_view,
+                                self.profiles_view,
                                 self.diag_text,
                             ],
                             expand=True,
@@ -587,7 +600,7 @@ class MobileApp:
             await self._search(Path(photo).read_bytes())
 
     # ---- вид -----------------------------------------------------------------
-    _VIEW_NAMES = ("connect", "camera", "results", "gallery", "settings", "about", "help")
+    _VIEW_NAMES = ("connect", "camera", "results", "gallery", "settings", "about", "help", "profiles")
 
     def _show(self, name: str) -> None:
         if self.camera_view.visible and name != "camera":
@@ -618,6 +631,10 @@ class MobileApp:
 
     def on_open_help(self, _event) -> None:
         self._open_overlay("help")
+
+    async def on_open_profiles(self, _event) -> None:
+        self._open_overlay("profiles")
+        await self.editor.open()
 
     def _remember(self, text: str) -> None:
         self.last_error = text
@@ -830,7 +847,9 @@ class MobileApp:
         if self.results_view.visible:
             await self.on_again(None)
             return False
-        if any(getattr(self, f"{name}_view").visible for name in ("gallery", "settings", "about", "help")):
+        if self.profiles_view.visible and self.editor.go_back():
+            return False
+        if any(getattr(self, f"{name}_view").visible for name in ("gallery", "settings", "about", "help", "profiles")):
             self._show(self._return_view)
             return False
         now = self._clock()
@@ -1139,6 +1158,7 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
         launcher=launcher,
         support=support,
         prefs=prefs,
+        profile_store=ProfileStore(prefs),
         **services,
     )
     page.services.extend([prefs, permission, app.picker, app.clipboard, app.share, launcher])
