@@ -72,7 +72,7 @@ def connect_manually(app, address="192.168.1.121:8765", code="zbz3-6ynk"):
 
 
 def views(app):
-    names = ("connect", "camera", "results", "gallery", "settings", "about", "help")
+    names = ("connect", "camera", "results", "gallery", "settings", "about", "help", "profiles")
     return [name for name in names if getattr(app, f"{name}_view").visible]
 
 
@@ -906,3 +906,13 @@ def test_the_last_error_line_disappears_after_a_successful_connection_and_when_c
     app._remember("что-то пошло не так")  # noqa: SLF001
     run(app.on_change_pc(None))
     assert not app.diag_text.visible
+
+
+def test_the_profiles_screen_opens_from_connect_and_returns_there():
+    app, _, _, _, _ = start()
+
+    run(app.on_open_profiles(None))
+    assert views(app) == ["profiles"]
+    app.on_close_overlay(None)
+
+    assert views(app) == ["connect"]
