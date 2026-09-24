@@ -13,7 +13,9 @@ import flet as ft
 import flet_camera as fc
 import flet_permission_handler as ph
 
+from gmagc_common import i18n
 from gmagc_common.fixtures import profile_to_dict
+from gmagc_common.i18n import CHOICES, language_name, t
 from gmagc_common.protocol import (
     OUTCOME_NO_PROJECTION,
     Connection,
@@ -25,6 +27,7 @@ from gmagc_common.protocol import (
     parse_link,
 )
 from gmagc_common.theme import MOBILE_ACCENT_COLOR, SEED_COLOR, score_band
+from gmagc_mobile import lang_en  # noqa: F401 - при импорте регистрирует английские переводы
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import UNAUTHORIZED, UNREACHABLE, ClientError, GmagcClient
@@ -32,7 +35,7 @@ from gmagc_mobile.imaging import prepare_upload
 from gmagc_mobile.profile_store import MemoryPrefs, ProfileStore
 from gmagc_mobile.profiles_ui import ProfileEditor
 from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, connection_from_qr, diagnose
-from gmagc_mobile.store import ConnectionStore
+from gmagc_mobile.store import ConnectionStore, LanguageStore
 from gmagc_mobile.support import SupportPrompt
 from gmagc_mobile.texts import (
     NO_INDEX_NOTE,
@@ -153,6 +156,8 @@ class MobileApp:
         support_delay: float = 8.0,
         prefs=None,
         profile_store: ProfileStore | None = None,
+        language_store: LanguageStore | None = None,
+        language_choice: str = "auto",
     ):
         self.page = page
         self.store = store
@@ -169,6 +174,9 @@ class MobileApp:
             send=self._send_profile,
         )
         self.profiles_view = self.editor.view
+        self.language_store = language_store or LanguageStore(prefs or MemoryPrefs())
+        self.language_choice = language_choice
+        self.rebuilt_as: MobileApp | None = None  # новый экземпляр после смены языка (этот уже не используется)
         self.client_factory = client_factory
         self.qr_reader = qr_reader
         self.qr_diagnose = qr_diagnose
@@ -193,6 +201,33 @@ class MobileApp:
             if support and prefs is not None and launcher is not None
             else None
         )
+        # всё, что нужно, чтобы собрать приложение заново на тех же службах (смена языка без перезапуска);
+        # окно поддержки при пересборке не повторяется
+        self._kwargs = {
+            "preview": self.preview,
+            "picker": self.picker,
+            "clipboard": self.clipboard,
+            "share": self.share,
+            "client_factory": client_factory,
+            "qr_reader": qr_reader,
+            "qr_diagnose": qr_diagnose,
+            "frame_reader": frame_reader,
+            "scan_interval": scan_interval,
+            "marker_seconds": marker_seconds,
+            "mount_seconds": mount_seconds,
+            "clock": clock,
+            "back_seconds": back_seconds,
+            "hint_seconds": self.hint_seconds,
+            "tracker": tracker,
+            "launcher": launcher,
+            "check_on_start": check_on_start,
+            "update_delay": update_delay,
+            "support": False,
+            "support_delay": support_delay,
+            "prefs": prefs,
+            "profile_store": self.editor.store,
+            "language_store": self.language_store,
+        }
         self.connection: Connection | None = None
         self.client: GmagcClient | None = None
         self._return_view = "connect"  # куда вернуться со вложенного экрана (Настройки/О программе/Помощь/Галерея)
@@ -247,9 +282,9 @@ class MobileApp:
                 ft.Divider(),
                 _nav_row(
                     [
-                        _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
-                        _nav_item(ft.Icons.HELP_OUTLINE, "Помощь", self.on_open_help),
-                        _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
+                        _nav_item(ft.Icons.SETTINGS, t("Настройки"), self.on_open_settings),
+                        _nav_item(ft.Icons.HELP_OUTLINE, t("Помощь"), self.on_open_help),
+                        _nav_item(ft.Icons.INFO_OUTLINE, t("О программе"), self.on_open_about),
                     ]
                 ),
                 ft.Text(f"Версия {VERSION}", size=11, color=ft.Colors.GREY_600),
@@ -425,10 +460,17 @@ class MobileApp:
             expand=True,
             scroll=ft.ScrollMode.AUTO,
         )
+        self.language_dropdown = ft.Dropdown(
+            label="Язык / Language",
+            value=self.language_choice,
+            options=[ft.DropdownOption(key=choice, text=language_name(choice)) for choice in CHOICES],
+            on_select=self.on_language_change,
+        )
         self.settings_view = ft.Column(
             [
-                _back_row("Настройки", self.on_close_overlay),
+                _back_row(t("Настройки"), self.on_close_overlay),
                 self.change_pc_button,
+                self.language_dropdown,
                 ft.Divider(),
                 *self._update_controls(),
             ],
@@ -515,6 +557,7 @@ class MobileApp:
     # ---- построение и запуск -----------------------------------------------
     def build(self) -> None:
         self.page.padding = PAGE_PADDING
+        self.page.on_locale_change = self.on_locale_change  # язык системы сменился: «Авто» следует за ним
         scrollbar_theme = ft.ScrollbarTheme(
             thumb_color=ft.Colors.with_opacity(0.6, MOBILE_ACCENT_COLOR),
             track_color=ft.Colors.with_opacity(0.15, MOBILE_ACCENT_COLOR),
@@ -649,6 +692,41 @@ class MobileApp:
         if self.client is None:
             raise ClientError(UNREACHABLE, "Нет подключения к ПК: подключитесь на главном экране и повторите.")
         return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
+
+    async def on_language_change(self, _event) -> None:
+        """Выбор языка: сохраняется и применяется сразу, интерфейс собирается заново на новом языке."""
+        choice = self.language_dropdown.value or "auto"
+        self.language_choice = choice
+        await self.language_store.save(choice)
+        i18n.set_language(choice)
+        self.rebuild("settings")
+
+    async def on_locale_change(self, event) -> None:
+        """Язык системы сменился: при выборе «Авто» интерфейс переключается вслед за ним."""
+        if self.language_choice != "auto" or not getattr(event, "locales", None):
+            return
+        first = event.locales[0]
+        name = f"{getattr(first, 'language_code', '')}_{getattr(first, 'country_code', '') or ''}"
+        before = i18n.current_language()
+        if i18n.set_language("auto", system_locale=name) != before:
+            self.rebuild("settings")
+
+    def rebuild(self, view: str = "settings") -> MobileApp:
+        """Собирает приложение заново на тех же службах (камера, хранилища, подключение сохраняются).
+
+        Временное состояние экрана (снимки этой сессии) теряется."""
+        fresh_return = "camera" if self.camera_view.visible else self._return_view
+        self.page.clean()
+        fresh = MobileApp(self.page, self.store, self.camera, **self._kwargs)
+        fresh.language_choice = self.language_choice
+        fresh.language_dropdown.value = self.language_choice
+        fresh.connection, fresh.client = self.connection, self.client
+        fresh._return_view = fresh_return
+        fresh.build()
+        fresh._set_connectivity(self.connection is not None)
+        fresh._show(view)
+        self.rebuilt_as = fresh
+        return fresh
 
     async def on_open_profiles(self, _event) -> None:
         self._open_overlay("profiles")
@@ -1156,6 +1234,9 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
         except Exception:  # noqa: BLE001 - блокировка поворота не должна мешать запуску экрана
             pass
     prefs = services.pop("prefs", None) or ft.SharedPreferences()
+    language_store = LanguageStore(prefs)
+    language_choice = await language_store.load()
+    i18n.set_language(language_choice)  # до сборки: тексты берутся при создании элементов
     permission = services.pop("permission", None) or ph.PermissionHandler()
     supported = camera_supported(page)
     camera_control = services.pop("camera_control", None) or (
@@ -1177,6 +1258,8 @@ async def build_page(page: ft.Page, **services) -> MobileApp:
         support=support,
         prefs=prefs,
         profile_store=ProfileStore(prefs),
+        language_store=language_store,
+        language_choice=language_choice,
         **services,
     )
     page.services.extend([prefs, permission, app.picker, app.clipboard, app.share, launcher])

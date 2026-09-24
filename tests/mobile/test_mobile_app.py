@@ -6,6 +6,7 @@ import flet as ft
 import flet_permission_handler as ph
 import pytest
 
+from gmagc_common import i18n
 from gmagc_common.protocol import Connection, Health, Status
 from gmagc_mobile import client
 from gmagc_mobile.about import AUTHOR, NAME, VERSION
@@ -13,7 +14,7 @@ from gmagc_mobile.app import PAGE_PADDING, MobileApp, build_page
 from gmagc_mobile.camera import CameraController
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.qr import QrImageError, QrUnavailable
-from gmagc_mobile.store import KEY_CODE, KEY_HOST, KEY_PORT, ConnectionStore
+from gmagc_mobile.store import KEY_CODE, KEY_HOST, KEY_LANGUAGE, KEY_PORT, ConnectionStore, LanguageStore
 from tests.fakes import FakeClipboard, FakePicker, StubPage, texts, walk
 from tests.fakes_mobile import FakeCameraApi, FakePermission, FakePrefs, FakeShare, Script, frame_event, sample_response
 
@@ -41,6 +42,7 @@ def make_app(
         page,
         ConnectionStore(prefs),
         controller,
+        language_store=LanguageStore(prefs),
         preview=ft.Container(),
         picker=picker or FakePicker(),
         clipboard=clipboard or FakeClipboard(),
@@ -938,3 +940,90 @@ def test_sending_a_profile_without_a_connection_says_to_connect_first():
 
     assert script.fixtures == []
     assert "подключ" in " ".join(t for t in texts(app.profiles_view) if t).lower()
+
+
+def all_texts(app):
+    return [c.value for c in walk(app.page.added[-1]) if isinstance(c, ft.Text)]
+
+
+def test_the_settings_screen_has_a_language_dropdown_with_the_saved_choice():
+    app, _, _, _, _ = start(prefs=FakePrefs({KEY_LANGUAGE: "ru"}))
+
+    assert app.language_dropdown in list(walk(app.settings_view))
+    assert [o.key for o in app.language_dropdown.options] == ["auto", "ru", "en"]
+    assert app.language_dropdown.value == "auto"  # выбор читает build_page, здесь приложение собрано напрямую
+
+
+def test_switching_the_language_saves_it_and_rebuilds_the_app_in_english_keeping_the_connection():
+    app, page, _, prefs, _ = start(prefs=FakePrefs(STORED))
+    app.on_open_settings(None)
+    cleans = page.clean_calls
+
+    app.language_dropdown.value = "en"
+    run(app.on_language_change(None))
+
+    new = app.rebuilt_as
+    assert new is not None and new is not app and prefs.data[KEY_LANGUAGE] == "en"
+    assert i18n.current_language() == "en" and page.clean_calls == cleans + 1 and len(page.added) == 1
+    assert views(new) == ["settings"] and new.connection == app.connection and new.client is app.client
+    assert "Settings" in all_texts(new) and new.language_dropdown.value == "en"
+    new.on_close_overlay(None)
+    assert views(new) == ["camera"]  # «назад» ведёт туда, откуда открывали настройки
+
+
+def test_the_rebuilt_app_shares_the_camera_and_the_editor_store_with_the_old_one():
+    app, _, _, _, _ = start()
+
+    app.language_dropdown.value = "en"
+    run(app.on_language_change(None))
+
+    new = app.rebuilt_as
+    assert new.camera is app.camera and new.picker is app.picker and new.share is app.share
+    assert new.editor.store is app.editor.store and new.support is None
+
+
+def test_build_page_applies_the_saved_language_before_building_the_screens():
+    page = StubPage()
+    app = asyncio.run(
+        build_page(
+            page,
+            prefs=FakePrefs({**STORED, KEY_LANGUAGE: "en"}),
+            permission=FakePermission(),
+            camera_control=ft.Container(),
+            controller=CameraController(FakeCameraApi(), FakePermission(), settle_seconds=0, retry_seconds=0),
+            picker=FakePicker(),
+            clipboard=FakeClipboard(),
+            client_factory=Script().factory,
+            mount_seconds=0,
+            tracker=None,
+            support=False,
+        )
+    )
+
+    assert i18n.current_language() == "en" and app.language_choice == "en" and app.language_dropdown.value == "en"
+    assert "Settings" in [c.value for c in walk(app.settings_view) if isinstance(c, ft.Text)]
+
+
+def locale_event(*names):
+    from types import SimpleNamespace
+
+    locales = [SimpleNamespace(language_code=n.split("_")[0], country_code=n.split("_")[1]) for n in names]
+    return SimpleNamespace(locales=locales)
+
+
+def test_a_system_language_change_switches_an_auto_app_to_english():
+    app, page, _, _, _ = start()
+    assert app.language_choice == "auto" and page.on_locale_change == app.on_locale_change
+
+    run(app.on_locale_change(locale_event("en_US")))
+
+    assert i18n.current_language() == "en" and app.rebuilt_as is not None
+
+
+def test_a_system_language_change_does_not_override_an_explicit_choice():
+    app, _, _, _, _ = start()
+    app.language_choice = "ru"
+
+    run(app.on_locale_change(locale_event("en_US")))
+
+    assert i18n.current_language() == "ru" and app.rebuilt_as is None
