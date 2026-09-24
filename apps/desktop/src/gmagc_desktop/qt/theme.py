@@ -73,6 +73,8 @@ QLineEdit:focus, QComboBox:focus {{ border-color: {DESKTOP_ACCENT}; }}
 QComboBox QAbstractItemView {{ background: {DESKTOP_PANEL2}; selection-background-color: {DESKTOP_STRONG}; }}
 
 QCheckBox {{ spacing: 8px; }}
+QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {DESKTOP_STRONG}; background: {DESKTOP_PANEL2}; }}
+QCheckBox::indicator:checked {{ background: {DESKTOP_ACCENT}; border-color: {DESKTOP_ACCENT}; }}
 QProgressBar {{ background: {DESKTOP_PANEL2}; border: 1px solid {DESKTOP_LINE}; height: 8px; text-align: center; }}
 QProgressBar::chunk {{ background: {DESKTOP_ACCENT}; }}
 QSlider::groove:horizontal {{ height: 4px; background: {DESKTOP_LINE}; }}

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
+import urllib.parse
+import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,16 +19,20 @@ import cv2
 import numpy as np
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
+from gmagc_common import i18n
 from gmagc_common.i18n import t
 from gmagc_common.protocol import build_link, format_code
+from gmagc_desktop.about import NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.matcher.adjust import apply_adjustments
 from gmagc_desktop.matcher.pipeline import normalize_photo
 from gmagc_desktop.matcher.thumbnail import thumbnail_png
+from gmagc_desktop.selfcheck import run_core_check
 from gmagc_desktop.server.api import RequestRecord
 from gmagc_desktop.server.network import lan_addresses
 from gmagc_desktop.server.qr import qr_png
 from gmagc_desktop.server.runner import PhoneServer, ServerStartError
+from gmagc_desktop.service import autostart
 from gmagc_desktop.service.results import Outcome, SearchOutcome
 from gmagc_desktop.service.reveal import reveal_in_file_manager
 from gmagc_desktop.service.search_service import (
@@ -36,6 +43,7 @@ from gmagc_desktop.service.search_service import (
     SearchService,
 )
 from gmagc_desktop.ui.texts import outcome_message, source_text, status_text
+from gmagc_desktop.update.installer import current_executable
 
 logger = logging.getLogger("gmagc.desktop")
 
@@ -71,6 +79,7 @@ class PoolExecutor:
 
 
 HISTORY_LIMIT = 10
+SUPPORT_EMAIL = "yodayodaspace@gmail.com"
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,8 @@ class AppController(QObject):
     phone_request = Signal(object)  # RequestRecord: приходит из потока сервера, обрабатывается в главном
     note_shown = Signal(str)  # короткое сообщение на экране «Телефон» («Код скопирован»)
     screen_requested = Signal(str)  # какой экран показать (результат с телефона — «Поиск»)
+    large_text_changed = Signal(bool)
+    language_changed = Signal(str)  # выбранный язык: окно собирается заново на новом языке
 
     def __init__(
         self,
@@ -115,6 +126,9 @@ class AppController(QObject):
         server=None,
         addresses: Callable[[], list[str]] = lan_addresses,
         qr: Callable[[str], bytes] = qr_png,
+        check: Callable[[], dict] = run_core_check,
+        open_url: Callable[[str], object] = webbrowser.open,
+        log_path: Path | None = None,
     ):
         super().__init__()
         self.service = service
@@ -122,6 +136,9 @@ class AppController(QObject):
         self._server_error: str | None = None
         self._addresses = addresses
         self._qr = qr
+        self._check = check
+        self._open_url = open_url
+        self._log_path = log_path or (service.data_dir / "gmagc.log")
         self.history: list[RequestRecord] = []
         self.executor: Executor = executor or PoolExecutor()
         self.reveal = reveal
@@ -435,3 +452,77 @@ class AppController(QObject):
     def show_record(self, record: RequestRecord) -> None:
         self.show_phone_record(record.photo, record.outcome, source_text(record.time, record.client))
         self.screen_requested.emit("search")
+
+    # ---- настройки ------------------------------------------------------------
+    def set_large_text(self, enabled: bool) -> None:
+        self.service.set_large_text(enabled)
+        self.large_text_changed.emit(enabled)
+
+    def set_results_count(self, count: int) -> None:
+        self.service.set_results_count(count)
+
+    def set_language(self, choice: str) -> None:
+        """Выбор языка: сохраняется и применяется сразу, окно собирается заново на новом языке."""
+        self.service.set_language(choice)
+        i18n.set_language(choice)
+        self.language_changed.emit(choice)
+
+    def set_fixture_dirs(self, ma3: str, ma2: str) -> None:
+        self.service.set_fixture_dirs(ma3, ma2)
+
+    def set_cloud_key(self, key: str) -> None:
+        self.service.set_cloud_key(key)
+
+    def set_autostart(self, enabled: bool) -> bool:
+        """Включает или выключает автозапуск; False — путь к приложению определить не удалось (показан баннер)."""
+        exe = current_executable()
+        if exe is None:
+            self.show_banner(t("Не удалось определить путь к приложению"), error=True)
+            return False
+        autostart.set_autostart(enabled, exe)
+        return True
+
+    def export_settings(self, path: str | Path) -> None:
+        data = self.service.export_settings_json().encode("utf-8")
+        try:
+            Path(path).write_bytes(data)
+        except OSError as error:
+            self.show_banner(t("Не удалось записать файл: {error}", error=error), error=True)
+            return
+        self.show_banner(t("Настройки сохранены: {path}", path=path), error=False)
+
+    def import_settings(self, path: str | Path) -> None:
+        try:
+            text = Path(path).read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            self.show_banner(t("Не удалось прочитать файл: {error}", error=error), error=True)
+            return
+        self.service.import_settings_json(text)
+        self.service.load()
+        self.library_changed.emit()
+        self.metrics_changed.emit()
+        self.show_banner(
+            t("Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения."),
+            error=False,
+        )
+
+    def check_core(self) -> str:
+        info = self._check()
+        head = t("ОК: ядро работает") if info["ok"] else t("ОШИБКА: ядро не сработало")
+        return head + ", " + ", ".join(f"{name}: {value}" for name, value in info["versions"].items())
+
+    def send_log(self) -> None:
+        """Открывает почтовый клиент с готовым письмом и показывает файл лога, чтобы приложить его вручную: само
+        приложение не может безопасно отправить почту (учётные данные никуда не вшиты)."""
+        body = (
+            f"Версия: {NAME} {VERSION}\n"
+            f"ОС: {platform.platform()}\n"
+            f"Индекс: {status_text(self.service.status())}\n\n"
+            "Опишите проблему и приложите файл лога — он открыт в проводнике/Finder.\n"
+        )
+        query = urllib.parse.urlencode({"subject": "GMAGC: лог и описание проблемы", "body": body})
+        self._open_url(f"mailto:{SUPPORT_EMAIL}?{query}")
+        if self._log_path.exists() and self._log_path.stat().st_size > 0:
+            self.reveal(str(self._log_path))
+        else:
+            self.show_banner(t("Файл лога пока пуст: ошибок в этой сессии не было"), error=False)

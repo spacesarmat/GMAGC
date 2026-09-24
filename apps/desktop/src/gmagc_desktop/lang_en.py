@@ -120,6 +120,7 @@ EN = {
     "Диагностика": "Diagnostics",
     "Отправить лог по почте": "Send the log by email",
     "Настройки сохранены: {path}": "Settings saved: {path}",
+    "Не удалось записать файл: {error}": "Could not write the file: {error}",
     "Не удалось прочитать файл: {error}": "Could not read the file: {error}",
     "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.": (
         "Settings imported. The phone server and access code will apply after the app is restarted."
