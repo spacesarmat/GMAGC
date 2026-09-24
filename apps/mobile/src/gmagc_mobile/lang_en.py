@@ -250,6 +250,8 @@ EN = {
     ),
     "Отправить в облако": "Send to the cloud",
     "Отмена": "Cancel",
+    "Добавление отменено.": "Adding cancelled.",
+    "Отменить": "Undo",
 }
 
 register("en", EN)

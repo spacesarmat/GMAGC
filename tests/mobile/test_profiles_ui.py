@@ -685,3 +685,44 @@ def test_going_back_drops_a_pending_cloud_question():
     editor.go_back()
 
     assert editor.confirm_cloud is None
+
+
+def test_undo_restores_the_mode_after_adding_channels_from_the_manual():
+    async def scan(engine="local", reuse=False):
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    editor.profile = replace(editor.profile, modes=(Mode("Std", (Channel(1, 8, "Old", "dimmer"),)),))
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=False))
+    assert len(editor.mode.channels) == 3
+    buttons = [c.content for c in walk(editor.view) if isinstance(c, ft.TextButton)]
+    assert "Отменить" in buttons
+
+    run(editor.undo_apply())
+
+    assert [c.name for c in editor.mode.channels] == ["Old"] and "отменено" in shown(editor)
+    after = [c.content for c in walk(editor.view) if isinstance(c, ft.TextButton)]
+    assert editor.undo_mode is None and "Отменить" not in after
+
+
+def test_undo_is_not_offered_after_a_new_mode_or_after_another_edit_or_leaving():
+    async def scan(engine="local", reuse=False):
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=True))
+    assert editor.undo_mode is None
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=False))
+    run(editor.add_channel("dimmer"))
+    assert editor.undo_mode is None
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=False))
+    editor.go_back()
+    assert editor.undo_mode is None

@@ -130,3 +130,60 @@ def test_extra_text_next_to_a_range_joins_its_name():
         (242, 245, "effect 60 Color not selectable"),
         (246, 249, "effect 61"),
     ]
+
+
+# ---- строка «......» между каналами -----------------------------------------------------------
+def synthetic_rows(rows, dots_after=None):
+    """Строки таблицы `(метка, функция, описание)`; пустая метка вместе с «......» — строка пропуска."""
+    items, y = [], 100.0
+    for label, function, description in rows:
+        for x0, text in ((80, label), (250, function), (500, description)):
+            if text:
+                items.append(OcrItem(x0, y, x0 + 8 * len(text), y + 16, text))
+        y += 20
+    return items
+
+
+def test_a_dots_row_between_two_channels_fills_the_skipped_channels_with_numbered_names():
+    rows = [
+        ("Channel 9", "R Dimming", "Linear dimming"),
+        ("Channel 10", "1 Dimming", "Linear dimming"),
+        ("", "......", ""),
+        ("Channel 13", "4 Dimming", "Linear dimming"),
+    ]
+    items = synthetic_rows(rows)
+    items += [OcrItem(x, 140, x + 50, 156, "......") for x in (80, 250, 500)]
+    items = [i for i in items if i.text]
+
+    draft = parse_tables(items)
+
+    channels = {c.dmx: c for c in draft.modes[0].channels}
+    assert sorted(channels) == [9, 10, 11, 12, 13]
+    assert [channels[n].name for n in (10, 11, 12, 13)] == ["1 Dimming", "2 Dimming", "3 Dimming", "4 Dimming"]
+    assert channels[11].template == "dimmer" and channels[11].confidence < 1.0 and channels[10].confidence == 1.0
+    assert channels[11].name and "......" not in channels[10].name + channels[10].note
+
+
+def test_skipped_channels_without_a_number_pattern_copy_the_channel_name():
+    items = [
+        OcrItem(80, 100, 150, 116, "Channel 1"),
+        OcrItem(250, 100, 320, 116, "Dimmer"),
+        OcrItem(80, 120, 130, 136, "......"),
+        OcrItem(250, 120, 300, 136, "......"),
+        OcrItem(80, 140, 150, 156, "Channel 4"),
+        OcrItem(250, 140, 320, 156, "Dimmer"),
+    ]
+
+    channels = {c.dmx: c for c in parse_tables(items).modes[0].channels}
+
+    assert sorted(channels) == [1, 2, 3, 4] and channels[2].name == channels[3].name == "Dimmer"
+
+
+def test_a_dots_row_without_a_following_channel_adds_nothing():
+    items = [
+        OcrItem(80, 100, 150, 116, "Channel 1"),
+        OcrItem(250, 100, 320, 116, "Dimmer"),
+        OcrItem(80, 120, 130, 136, "......"),
+    ]
+
+    assert [c.dmx for c in parse_tables(items).modes[0].channels] == [1]
