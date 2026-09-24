@@ -129,7 +129,7 @@ def test_no_index_is_409(tmp_path, photo_jpeg):
 def test_the_request_callback_gets_the_photo_client_and_outcome(call, running, photo_jpeg):
     status, _, body = call("POST", "/api/match", photo_jpeg)
 
-    assert status == 200 and len(running.records) == 1
+    assert status == 200 and len(running.wait_for_records(1)) == 1
     record = running.records[0]
     assert isinstance(record, RequestRecord) and record.request_id == body["request_id"]
     assert record.client == "127.0.0.1" and record.photo == photo_jpeg

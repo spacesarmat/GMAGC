@@ -1,3 +1,4 @@
+import time
 from types import SimpleNamespace
 
 import cv2
@@ -38,5 +39,15 @@ def running(service):
     records = []
     server = PhoneServer(service, on_request=records.append, host="127.0.0.1")
     port = server.start(0)
-    yield SimpleNamespace(server=server, port=port, code=service.settings.access_code, records=records)
+
+    def wait_for_records(count, timeout=5.0):
+        """Сервер сначала отвечает телефону, потом сообщает о запросе: тесту нужно дождаться записи, а не читать сразу."""
+        deadline = time.monotonic() + timeout
+        while len(records) < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return records
+
+    yield SimpleNamespace(
+        server=server, port=port, code=service.settings.access_code, records=records, wait_for_records=wait_for_records
+    )
     server.stop()
