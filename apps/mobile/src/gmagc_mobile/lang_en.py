@@ -262,6 +262,13 @@ EN = {
     "Гобо: {name}": "Gobo: {name}",
     "Убрать гобо": "Remove the gobo",
     "{console}: файл гобо «{detail}» не найден в библиотеке": "{console}: the gobo file “{detail}” was not found in the library",
+    "Создан режим «{name}»: каналов {count}": "Mode “{name}” created: {count} channels",
+    "Создано режимов: {count}": "Modes created: {count}",
+    "Нечего добавлять: все режимы уже добавлены или ничего не отмечено.": (
+        "Nothing to add: all modes are already added or nothing is checked."
+    ),
+    "Добавить все режимы новыми": "Add all modes as new",
+    "Продолжить с прошлым результатом": "Continue with the previous result",
 }
 
 register("en", EN)
