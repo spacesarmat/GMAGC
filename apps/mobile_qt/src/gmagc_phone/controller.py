@@ -21,6 +21,15 @@ MODE_SHOOT = "shoot"
 MODE_SCAN = "scan"
 HISTORY_LIMIT = 10  # снимков за сессию, самый новый первым; дальше старые записи забываются
 
+
+
+def scan_hint() -> str:
+    return t(
+        "Наведите камеру на QR-код в приложении на ПК — считается автоматически "
+        "(приближение и касание для фокуса помогают)"
+    )
+
+
 VIEWS = ("connect", "camera", "results", "gallery", "settings", "about", "help", "profiles")
 
 

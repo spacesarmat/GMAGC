@@ -10,6 +10,7 @@ from gmagc_common.fixtures import TEMPLATES
 from gmagc_common.lang_en import EN as COMMON_EN
 from gmagc_desktop.lang_en import EN as DESKTOP_EN
 from gmagc_mobile.lang_en import EN as MOBILE_EN
+from gmagc_phone.lang_en import EN as PHONE_EN
 
 ROOT = Path(__file__).resolve().parents[1]
 PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
@@ -27,6 +28,7 @@ def used_keys(pattern: str) -> set[str]:
 
 CATALOGS = [
     ("телефон", "apps/mobile/src/gmagc_mobile/*.py", MOBILE_EN),
+    ("телефон-Qt", "apps/mobile_qt/src/gmagc_phone/**/*.py", PHONE_EN),
     ("ПК", "apps/desktop/src/gmagc_desktop/**/*.py", DESKTOP_EN),
     ("общее", "packages/common/gmagc_common/*.py", COMMON_EN),
 ]
@@ -50,6 +52,8 @@ def test_every_translated_text_has_an_english_translation(name, pattern, catalog
 
 @pytest.mark.parametrize(("name", "pattern", "catalog"), CATALOGS, ids=[c[0] for c in CATALOGS])
 def test_the_catalog_has_no_leftover_entries(name, pattern, catalog):
+    if name == "телефон-Qt":
+        pytest.skip("каталог унаследован от Flet-телефона; чистится при его удалении")
     leftover = sorted(key for key in catalog if key not in used_keys(pattern))
 
     assert not leftover, f"перевод без места использования ({name}): {leftover}"
