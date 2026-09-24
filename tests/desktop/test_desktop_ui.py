@@ -733,3 +733,27 @@ def test_demo_variables_run_indexing_and_a_search_at_startup(tmp_path, library, 
     app, _ = make_app(tmp_path)
 
     assert app.status_label.value.startswith("6 файлов") and len(app.results_column.controls) == 5
+
+
+def test_the_settings_screen_has_fixture_folder_fields_that_show_and_save_the_folders(tmp_path):
+    app, _ = make_app(tmp_path)
+    assert app.ma3_dir_field in list(walk(app.settings_view)) and app.ma2_dir_field in list(walk(app.settings_view))
+    assert app.ma3_dir_field.value == "" and app.ma2_dir_field.value == ""
+
+    app.ma3_dir_field.value = " C:/ma3 "
+    app.ma2_dir_field.value = "C:/ma2"
+    app.on_fixture_dirs_change(None)
+
+    assert (app.service.settings.ma3_fixture_dir, app.service.settings.ma2_fixture_dir) == ("C:/ma3", "C:/ma2")
+
+
+def test_the_fixture_folder_fields_start_from_the_saved_settings(tmp_path):
+    from gmagc_desktop.service.search_service import SearchService
+
+    first = SearchService(tmp_path / "data")
+    first.load()
+    first.set_fixture_dirs("D:/ma3", "D:/ma2")
+
+    app, _ = make_app(tmp_path)
+
+    assert (app.ma3_dir_field.value, app.ma2_dir_field.value) == ("D:/ma3", "D:/ma2")
