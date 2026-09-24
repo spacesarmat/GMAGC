@@ -131,6 +131,8 @@ def test_every_error_code_has_an_http_status():
         "no_index",
         "bad_profile",
         "no_target",
+        "bad_scan",
+        "scan_unavailable",
     }
     codes.add("server_error")
     assert set(protocol.ERROR_STATUS) == codes

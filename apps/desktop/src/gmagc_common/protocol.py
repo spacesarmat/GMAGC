@@ -21,6 +21,7 @@ DEFAULT_PORT = 8765
 CODE_LENGTH = 8
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # без похожих 0/O и 1/I/L
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_SCAN_BYTES = 20 * 1024 * 1024  # фото или PDF инструкции для автозаполнения профиля
 MAX_PROFILE_BYTES = 1024 * 1024  # профиль прибора в JSON: килобайты, мегабайт с большим запасом
 LINK_SCHEME = "gmagc"
 OUTCOME_FOUND = "found"
@@ -37,6 +38,8 @@ ERROR_STATUS = {
     "no_index": 409,
     "bad_profile": 400,
     "no_target": 409,
+    "bad_scan": 400,
+    "scan_unavailable": 409,
     "server_error": 500,
 }
 

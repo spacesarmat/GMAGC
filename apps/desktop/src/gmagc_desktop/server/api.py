@@ -19,6 +19,7 @@ from gmagc_common.protocol import (
     ERROR_STATUS,
     MAX_IMAGE_BYTES,
     MAX_PROFILE_BYTES,
+    MAX_SCAN_BYTES,
     ApiError,
     Health,
     MatchResponse,
@@ -26,6 +27,7 @@ from gmagc_common.protocol import (
     Status,
 )
 from gmagc_desktop.about import VERSION
+from gmagc_desktop.scan.engine import LocalScanner, ScanError, ScanUnavailableError
 from gmagc_desktop.service.access import RateLimiter, codes_equal
 from gmagc_desktop.service.fixture_export import FixtureExporter, NoTargetError
 from gmagc_desktop.service.results import SearchOutcome
@@ -53,6 +55,7 @@ class ApiContext:
     limiter: RateLimiter
     on_request: Callable[[RequestRecord], None] | None = None
     fixtures: FixtureExporter | None = None
+    scanner: LocalScanner | None = None
 
 
 def match_response(request_id: str, outcome: SearchOutcome) -> MatchResponse:
@@ -111,6 +114,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._authorized(self._match)
             elif path == "/api/fixtures":
                 self._authorized(self._fixtures)
+            elif path == "/api/fixture-scan":
+                self._authorized(self._fixture_scan)
             else:
                 self._error("not_found", "нет такого метода")
         finally:
@@ -214,6 +219,49 @@ class ApiHandler(BaseHTTPRequestHandler):
         request_id = secrets.token_hex(4)
         self._send_json(200, match_response(request_id, outcome).to_dict())
         self._notify(RequestRecord(request_id, time.time(), self.client_address[0], data, outcome))
+
+    def _fixture_scan(self) -> None:
+        """Фото или PDF инструкции → черновик каналов (`ScanDraft`); распознавание локальное, на этом ПК."""
+        engine = parse_qs(urlsplit(self.path).query).get("engine", ["local"])[0]
+        if engine != "local":
+            self._error("bad_request", "неизвестный движок распознавания")
+            return
+        length = self._content_length()
+        if length is None:
+            self._error("bad_request", "нужен заголовок Content-Length")
+            return
+        if length == 0:
+            self._error("bad_scan", "пустой файл")
+            return
+        if length > MAX_SCAN_BYTES:
+            self._error("too_large", f"файл больше {MAX_SCAN_BYTES // (1024 * 1024)} МБ")
+            return
+        self._unread = 0
+        try:
+            data = self.rfile.read(length)
+        except OSError:
+            self._error("bad_request", "не удалось получить файл")
+            return
+        if len(data) != length:
+            self._error("bad_request", "тело запроса получено не полностью")
+            return
+        scanner = self.context.scanner
+        if scanner is None:
+            self._error("server_error", "распознавание не настроено")
+            return
+        try:
+            draft = scanner.scan(data)
+        except ScanUnavailableError as error:
+            self._error("scan_unavailable", str(error))
+            return
+        except ScanError as error:
+            self._error("bad_scan", str(error))
+            return
+        except Exception:  # noqa: BLE001 - сервер обязан ответить, а не оборвать соединение
+            log.exception("ошибка распознавания")
+            self._error("server_error", "ошибка распознавания на ПК")
+            return
+        self._send_json(200, draft.to_dict())
 
     def _fixtures(self) -> None:
         """Принимает профиль прибора (JSON) и записывает типы grandMA3 и grandMA2 в папки пультов на этом ПК."""
