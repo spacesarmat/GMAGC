@@ -200,3 +200,63 @@ def profile_from_dict(data: object) -> FixtureProfile:
         _text(data.get("short_name", ""), "short_name"),
         modes,
     )
+
+
+@dataclass(frozen=True)
+class Issue:
+    path: str  # «режим → канал» или пусто для профиля целиком
+    message: str
+    error: bool  # False — предупреждение, сохранению и экспорту не мешает
+
+
+def has_errors(issues: list[Issue]) -> bool:
+    return any(issue.error for issue in issues)
+
+
+def _check_ranges(channel: Channel, path: str, out: list[Issue]) -> None:
+    ordered = sorted(channel.ranges, key=lambda r: (r.start, r.end))
+    for r in ordered:
+        if not 0 <= r.start <= r.end <= 255:
+            out.append(Issue(path, f"диапазон «{r.name}» должен лежать в 0–255 и идти от меньшего к большему", True))
+    valid = [r for r in ordered if 0 <= r.start <= r.end <= 255]
+    for previous, current in zip(valid, valid[1:], strict=False):
+        if current.start <= previous.end:
+            out.append(Issue(path, f"диапазоны «{previous.name}» и «{current.name}» пересекаются", True))
+        elif current.start > previous.end + 1:
+            out.append(Issue(path, f"между диапазонами «{previous.name}» и «{current.name}» есть пропуск", False))
+
+
+def validate_profile(profile: FixtureProfile) -> list[Issue]:
+    issues: list[Issue] = []
+    if not profile.manufacturer.strip():
+        issues.append(Issue("", "не указан производитель", True))
+    if not profile.name.strip():
+        issues.append(Issue("", "не указано название прибора", True))
+    if not profile.modes:
+        issues.append(Issue("", "нет ни одного режима", True))
+    seen: set[str] = set()
+    for mode in profile.modes:
+        if mode.name in seen:
+            issues.append(Issue(mode.name, f"название режима «{mode.name}» повторяется", True))
+        seen.add(mode.name)
+        if not mode.channels:
+            issues.append(Issue(mode.name, "в режиме нет каналов", True))
+        used: dict[int, str] = {}
+        previous_last = 0
+        for channel in sorted(mode.channels, key=lambda c: c.dmx):
+            path = f"{mode.name} → {channel.name.strip() or '(без названия)'}"
+            if not channel.name.strip():
+                issues.append(Issue(path, "у канала нет названия", True))
+            if channel.dmx < 1 or channel.last > MAX_DMX:
+                issues.append(Issue(path, f"адрес должен лежать в 1–{MAX_DMX} (с учётом 16 бит)", True))
+            for address in range(channel.dmx, channel.last + 1):
+                if address in used:
+                    issues.append(Issue(path, f"адрес {address} пересекается с каналом «{used[address]}»", True))
+                used[address] = channel.name
+            if channel.dmx > previous_last + 1 and 1 <= channel.dmx <= MAX_DMX:
+                issues.append(Issue(path, f"пропуск адресов {previous_last + 1}–{channel.dmx - 1}", False))
+            previous_last = max(previous_last, channel.last)
+            if not 0 <= channel.default <= 255:
+                issues.append(Issue(path, "значение по умолчанию должно быть 0–255", True))
+            _check_ranges(channel, path, issues)
+    return issues

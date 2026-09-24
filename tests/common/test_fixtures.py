@@ -9,11 +9,13 @@ from gmagc_common.fixtures import (
     ProfileError,
     Range,
     channel_from_template,
+    has_errors,
     new_profile,
     next_free_dmx,
     profile_from_dict,
     profile_to_dict,
     template_by_id,
+    validate_profile,
 )
 
 
@@ -98,3 +100,73 @@ def test_an_unknown_template_in_saved_data_falls_back_to_custom():
     data["modes"][0]["channels"][0]["template"] = "from_the_future"
 
     assert profile_from_dict(data).modes[0].channels[0].template == "custom"
+
+
+def issues_of(profile):
+    return [(issue.path, issue.message, issue.error) for issue in validate_profile(profile)]
+
+
+def profile_with(*channels, manufacturer="M", name="N", mode_name="Режим"):
+    return FixtureProfile("i", manufacturer, name, "", (Mode(mode_name, tuple(channels)),))
+
+
+def test_a_complete_profile_has_no_issues():
+    assert validate_profile(sample_profile()) == []
+
+
+def test_missing_manufacturer_name_and_modes_are_errors():
+    issues = validate_profile(FixtureProfile("i", "", "", "", ()))
+
+    messages = [issue.message for issue in issues]
+    assert has_errors(issues) and any("производител" in m for m in messages) and any("название" in m for m in messages)
+    assert any("режим" in m for m in messages)
+
+
+def test_an_empty_mode_and_duplicate_mode_names_are_errors():
+    profile = FixtureProfile("i", "M", "N", "", (Mode("A"), Mode("A", (Channel(1, 8, "x", "dimmer"),))))
+
+    messages = [issue.message for issue in validate_profile(profile)]
+    assert any("нет каналов" in m for m in messages) and any("повторяется" in m for m in messages)
+
+
+def test_an_empty_channel_name_is_an_error():
+    assert has_errors(validate_profile(profile_with(Channel(1, 8, " ", "dimmer"))))
+
+
+def test_channels_must_not_overlap_including_the_fine_byte():
+    profile = profile_with(Channel(1, 16, "Pan", "pan"), Channel(2, 8, "Tilt", "tilt"))
+
+    assert any("пересека" in issue.message and issue.error for issue in validate_profile(profile))
+
+
+def test_addresses_must_stay_inside_1_to_512():
+    assert has_errors(validate_profile(profile_with(Channel(0, 8, "a", "dimmer"))))
+    assert has_errors(validate_profile(profile_with(Channel(MAX_DMX, 16, "a", "pan"))))
+    assert not has_errors(validate_profile(profile_with(Channel(MAX_DMX, 8, "a", "dimmer"))))
+
+
+def test_a_gap_between_channels_is_only_a_warning():
+    issues = validate_profile(profile_with(Channel(1, 8, "a", "dimmer"), Channel(5, 8, "b", "red")))
+
+    assert len(issues) == 1 and issues[0].error is False and "пропуск" in issues[0].message
+
+
+def test_the_default_value_must_be_a_byte():
+    assert has_errors(validate_profile(profile_with(Channel(1, 8, "a", "dimmer", 256))))
+
+
+def test_ranges_must_be_ordered_inside_a_byte_and_not_overlap():
+    bad_order = Channel(1, 8, "a", "dimmer", 0, (Range(10, 5, "x"),))
+    outside = Channel(1, 8, "a", "dimmer", 0, (Range(0, 300, "x"),))
+    overlap = Channel(1, 8, "a", "dimmer", 0, (Range(0, 10, "x"), Range(10, 20, "y")))
+
+    for channel in (bad_order, outside, overlap):
+        assert has_errors(validate_profile(profile_with(channel)))
+
+
+def test_a_hole_between_ranges_is_a_warning_and_the_path_names_the_channel():
+    channel = Channel(1, 8, "Гобо", "gobo_wheel", 0, (Range(0, 9, "a"), Range(20, 255, "b")))
+
+    issues = validate_profile(profile_with(channel, mode_name="Стандарт"))
+
+    assert len(issues) == 1 and not issues[0].error and issues[0].path == "Стандарт → Гобо"
