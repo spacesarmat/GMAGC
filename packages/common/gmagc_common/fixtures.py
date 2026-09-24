@@ -28,6 +28,7 @@ class Gobo:
     name: str
     path: str
     thumb: str = ""  # base64(zlib(сырые RGBA 64×64)); пусто — слот без картинки
+    source: str = ""  # путь файла в библиотеке GMAGC на ПК (по нему ПК находит PNG для MA3)
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,12 @@ def new_profile(manufacturer: str = "", name: str = "") -> FixtureProfile:
 
 
 # ---- JSON ------------------------------------------------------------------
+def gobo_media_path(rel_path: str) -> str:
+    """Путь картинки гобо в типе прибора: «GMAGC/имя_хеш.png» (хеш пути различает одинаковые имена в разных папках)."""
+    stem = rel_path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return f"GMAGC/{file_part(stem)}_{zlib.crc32(rel_path.encode('utf-8')) & 0xFFFFFF:06x}.png"
+
+
 def gobo_rgba(gobo: Gobo) -> bytes | None:
     """Сырые RGBA 64×64 миниатюры гобо; None — картинки нет. Повреждённая миниатюра — ProfileError."""
     if not gobo.thumb:
@@ -157,7 +164,12 @@ def gobo_rgba(gobo: Gobo) -> bytes | None:
 def _range_to_dict(item: Range) -> dict:
     data = {"start": item.start, "end": item.end, "name": item.name}
     if item.gobo is not None:
-        data["gobo"] = {"name": item.gobo.name, "path": item.gobo.path, "thumb": item.gobo.thumb}
+        data["gobo"] = {
+            "name": item.gobo.name,
+            "path": item.gobo.path,
+            "thumb": item.gobo.thumb,
+            "source": item.gobo.source,
+        }
     return data
 
 
@@ -216,7 +228,12 @@ def _range(data: object) -> Range:
     gobo = None
     if data.get("gobo") is not None:
         raw = _dict(data["gobo"], "gobo")
-        gobo = Gobo(_text(raw.get("name"), "name"), _text(raw.get("path"), "path"), _text(raw.get("thumb", ""), "thumb"))
+        gobo = Gobo(
+            _text(raw.get("name"), "name"),
+            _text(raw.get("path"), "path"),
+            _text(raw.get("thumb", ""), "thumb"),
+            _text(raw.get("source", ""), "source"),
+        )
         gobo_rgba(gobo)  # миниатюра проверяется при загрузке, а не при экспорте
     return Range(_int(data.get("start"), "start"), _int(data.get("end"), "end"), _text(data.get("name"), "name"), gobo)
 

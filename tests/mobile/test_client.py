@@ -301,3 +301,22 @@ def test_scan_fixture_passes_the_chosen_engine_to_the_pc(running):
     draft = make_client(running).scan_fixture(b"photo", engine="cloud")
 
     assert seen == ["cloud"] and draft.engine == "cloud"
+
+
+def test_find_gobos_and_gobo_read_the_pc_library(running, service):
+    from gmagc_common.protocol import GoboItem, GoboList
+
+    rel = sorted(f.rel_path for f in service._index.files)[0]
+    stem = rel.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+
+    found = make_client(running).find_gobos(stem, limit=3)
+    one = make_client(running).gobo(rel)
+
+    assert isinstance(found, GoboList) and found.total >= 1 and isinstance(one, GoboItem) and one.source == rel
+
+
+def test_gobo_lookup_of_an_unknown_file_is_a_client_error(running):
+    with pytest.raises(ClientError) as error:
+        make_client(running).gobo("nope.png")
+
+    assert error.value.kind == SERVER

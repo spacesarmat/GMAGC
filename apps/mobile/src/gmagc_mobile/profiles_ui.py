@@ -15,6 +15,7 @@ from gmagc_common.fixtures import (
     TEMPLATES,
     Channel,
     FixtureProfile,
+    Gobo,
     Issue,
     Mode,
     Range,
@@ -31,7 +32,7 @@ from gmagc_common.fixtures import (
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
-from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, parse_skip
+from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, GoboItem, GoboList, parse_skip
 from gmagc_common.scan_apply import add_draft_channels
 from gmagc_common.scan_draft import ENGINE_CLOUD, WARN_NO_TABLE, DraftChannel, ScanDraft
 from gmagc_mobile.client import ClientError
@@ -43,6 +44,7 @@ SCREEN_PROFILE = "profile"
 SCREEN_MODE = "mode"
 SCREEN_CHANNEL = "channel"
 SCREEN_SCAN = "scan"
+SCREEN_GOBO = "gobo"
 
 
 def parse_int(text: str, fallback: int) -> int:
@@ -102,6 +104,8 @@ class ProfileEditor:
         on_exit: Callable[[], None] | None = None,
         send: Callable[[FixtureProfile], Awaitable[FixtureUploadResult]] | None = None,
         scan: Callable[[str, bool], Awaitable[ScanDraft | None]] | None = None,
+        gobo_search: Callable[[str], Awaitable[GoboList]] | None = None,
+        gobo_photo: Callable[[], Awaitable[list[GoboItem] | None]] | None = None,
     ):
         self.page = page
         self.store = store
@@ -109,6 +113,13 @@ class ProfileEditor:
         self.on_exit = on_exit
         self.send = send  # отправка профиля на ПК; None — нет подключения к ПК
         self.scan = scan  # выбор файла инструкции и распознавание на ПК; None — нет подключения, ответ None — отмена
+        self.gobo_search = gobo_search  # поиск гобо по имени в библиотеке на ПК; None — нет подключения
+        self.gobo_photo = gobo_photo  # выбор фото и поиск гобо по нему; None — нет подключения, ответ None — отмена
+        self.gobo_range: int | None = None  # диапазон канала, для которого выбирается гобо
+        self.gobo_items: list[GoboItem] = []
+        self.gobo_total = 0
+        self.gobo_query = ""
+        self.gobo_busy = False
         self.scanning = False
         self.undo_mode: Mode | None = None  # режим до добавления каналов из инструкции: для кнопки «Отменить»
         self.confirm_cloud: bool | None = None  # ждём подтверждения отправки в облако; значение — «взять прежний файл»
@@ -139,7 +150,10 @@ class ProfileEditor:
         self.message = self.notice = ""
         self.confirm_cloud = None
         self.undo_mode = None
-        if self.screen == SCREEN_SCAN:
+        if self.screen == SCREEN_GOBO:
+            self.gobo_range = None
+            self.screen = SCREEN_CHANNEL
+        elif self.screen == SCREEN_SCAN:
             self.draft = None
             self.screen = SCREEN_MODE
         elif self.screen == SCREEN_CHANNEL:
@@ -721,14 +735,132 @@ class ProfileEditor:
 
     async def set_range(self, index: int, start=None, end=None, name=None, *, render: bool = True) -> None:
         def changed(item: Range) -> Range:
-            return Range(
-                item.start if start is None else start,
-                item.end if end is None else end,
-                item.name if name is None else name,
+            return replace(
+                item,
+                start=item.start if start is None else start,
+                end=item.end if end is None else end,
+                name=item.name if name is None else name,
             )
 
         ranges = tuple(changed(r) if i == index else r for i, r in enumerate(self.channel.ranges))
         await self._commit_channel(replace(self.channel, ranges=ranges), render=render)
+
+    # ---- гобо из библиотеки для диапазона колеса ----------------------------------
+    async def open_gobo_picker(self, range_index: int) -> None:
+        self.gobo_range = range_index
+        self.gobo_items = []
+        self.gobo_total = 0
+        self.gobo_query = ""
+        self.message = self.notice = ""
+        self.screen = SCREEN_GOBO
+        self.render()
+
+    async def find_gobos(self, query: str) -> None:
+        """Поиск гобо по имени на ПК; результат показывается списком с картинками."""
+        self.gobo_query = query
+        self.message = ""
+        if self.gobo_search is None:
+            self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
+            self.render()
+            return
+        if not query.strip():
+            self.gobo_items, self.gobo_total = [], 0
+            self.render()
+            return
+        self.gobo_busy = True
+        self.render()
+        try:
+            found = await self.gobo_search(query)
+        except ClientError as error:
+            self.message = error_text(error)
+            self.gobo_items, self.gobo_total = [], 0
+        else:
+            self.gobo_items, self.gobo_total = list(found.items), found.total
+            if not found.items:
+                self.message = t("Ничего не найдено.")
+        self.gobo_busy = False
+        self.render()
+
+    async def find_gobos_by_photo(self) -> None:
+        """Фото гобо → ближайшие гобо библиотеки (тот же поиск, что и на главном экране)."""
+        self.message = ""
+        if self.gobo_photo is None:
+            self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
+            self.render()
+            return
+        self.gobo_busy = True
+        self.render()
+        try:
+            found = await self.gobo_photo()
+        except ClientError as error:
+            self.message = error_text(error)
+            found = []
+        self.gobo_busy = False
+        if found is not None:
+            self.gobo_items, self.gobo_total = list(found), len(found)
+            self.gobo_query = ""
+            if not found and not self.message:
+                self.message = t("Ничего не найдено.")
+        self.render()
+
+    async def pick_gobo(self, item_index: int) -> None:
+        """Ставит выбранное гобо в диапазон; пустое название диапазона берётся из имени гобо."""
+        item = self.gobo_items[item_index]
+        index = self.gobo_range
+        chosen = Gobo(item.name, item.path, item.thumb, item.source)
+
+        def changed(current: Range) -> Range:
+            return replace(current, gobo=chosen, name=current.name.strip() or item.name)
+
+        ranges = tuple(changed(r) if i == index else r for i, r in enumerate(self.channel.ranges))
+        self.gobo_range = None
+        self.screen = SCREEN_CHANNEL
+        await self._commit_channel(replace(self.channel, ranges=ranges))
+
+    async def clear_gobo(self, range_index: int) -> None:
+        ranges = tuple(replace(r, gobo=None) if i == range_index else r for i, r in enumerate(self.channel.ranges))
+        await self._commit_channel(replace(self.channel, ranges=ranges))
+
+    def _render_gobo(self) -> list[ft.Control]:
+        async def submit(event) -> None:
+            await self.find_gobos(event.control.value or "")
+
+        controls: list[ft.Control] = [
+            self._header(t("Гобо из библиотеки")),
+            ft.TextField(label=t("Имя гобо"), value=self.gobo_query, on_submit=submit, autofocus=False),
+            ft.Row(
+                [
+                    ft.Button(
+                        t("Найти по фото"),
+                        icon=ft.Icons.PHOTO_LIBRARY,
+                        on_click=self._async_click(self.find_gobos_by_photo),
+                    ),
+                ],
+                wrap=True,
+            ),
+        ]
+        if self.gobo_busy:
+            controls.append(ft.Text(t("Ищу на ПК…"), size=12))
+        if self.message:
+            controls.append(ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
+        for index, item in enumerate(self.gobo_items):
+            controls.append(
+                ft.Container(
+                    ft.Row(
+                        [
+                            ft.Image(src=item.png, width=56, height=56, fit=ft.BoxFit.CONTAIN),
+                            ft.Text(item.name, expand=True),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    on_click=self._async_click(self.pick_gobo, index),
+                    padding=6,
+                )
+            )
+        if self.gobo_total > len(self.gobo_items):
+            more = self.gobo_total - len(self.gobo_items)
+            controls.append(ft.Text(t("Ещё {count}: уточните запрос.", count=more), size=12))
+        return controls
 
     async def delete_range(self, index: int) -> None:
         ranges = tuple(r for i, r in enumerate(self.channel.ranges) if i != index)
@@ -777,9 +909,34 @@ class ProfileEditor:
                     ]
                 ),
                 self._field(t("Название значения"), item.name, set_name),
+                *self._gobo_controls(index, item),
             ],
             spacing=4,
         )
+
+    def _gobo_controls(self, index: int, item: Range) -> list[ft.Control]:
+        """Выбор гобо для диапазона канала «колесо гобо»: кнопка или выбранное гобо с картинкой и кнопкой «убрать»."""
+        if self.channel.template != "gobo_wheel":
+            return []
+        if item.gobo is None:
+            return [
+                ft.Button(
+                    t("Гобо из библиотеки"),
+                    icon=ft.Icons.IMAGE_SEARCH,
+                    on_click=self._async_click(self.open_gobo_picker, index),
+                )
+            ]
+        return [
+            ft.Row(
+                [
+                    ft.Text(t("Гобо: {name}", name=item.gobo.name), expand=True),
+                    ft.IconButton(
+                        icon=ft.Icons.CLOSE, tooltip=t("Убрать гобо"), on_click=self._async_click(self.clear_gobo, index)
+                    ),
+                ],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            )
+        ]
 
     def _render_channel(self) -> list[ft.Control]:
         channel = self.channel

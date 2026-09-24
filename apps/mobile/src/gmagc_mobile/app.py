@@ -180,6 +180,8 @@ class MobileApp:
             on_exit=lambda: self._show(self._return_view),
             send=self._send_profile,
             scan=self._scan_instruction,
+            gobo_search=self._search_gobos,
+            gobo_photo=self._gobos_by_photo,
         )
         self.profiles_view = self.editor.view
         self.language_store = language_store or LanguageStore(prefs or MemoryPrefs())
@@ -703,6 +705,32 @@ class MobileApp:
         if self.client is None:
             raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
         return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
+
+    async def _search_gobos(self, query: str):
+        """Поиск гобо по имени в библиотеке на ПК."""
+        if self.client is None:
+            raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
+        return await asyncio.to_thread(self.client.find_gobos, query)
+
+    async def _gobos_by_photo(self):
+        """Фото гобо из галереи → поиск по фото на ПК → карточки ближайших гобо; None — фото не выбрано."""
+        if self.client is None:
+            raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
+        files = await self.picker.pick_files(dialog_title=t("Фото проекции"), file_type=ft.FilePickerFileType.IMAGE)
+        if not files:
+            return None
+        picked = files[0]
+        try:
+            raw = picked.bytes if picked.bytes else await asyncio.to_thread(Path(picked.path).read_bytes)
+            data = await asyncio.to_thread(prepare_upload, raw)
+        except (OSError, ValueError, TypeError) as error:
+            raise ClientError(UNREACHABLE, t("Не удалось подготовить фото: {error}", error=error)) from error
+
+        def lookup() -> list:
+            response = self.client.match(data)
+            return [self.client.gobo(item.path) for item in response.results]
+
+        return await asyncio.to_thread(lookup)
 
     async def _scan_instruction(self, engine: str = "local", reuse: bool = False):
         """Выбор фото или PDF инструкции и распознавание (на ПК или в облаке); None — файл не выбран.

@@ -11,8 +11,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gmagc_common.fixtures import gobo_media_path
 from gmagc_common.i18n import normalize_choice, t
-from gmagc_common.protocol import is_valid_code
+from gmagc_common.protocol import GoboItem, is_valid_code
 from gmagc_common.support import SupportState
 from gmagc_common.updates import parse_version
 from gmagc_desktop.library.cache import update_index
@@ -23,7 +24,7 @@ from gmagc_desktop.matcher.embedder import Embedder, PixelEmbedder
 from gmagc_desktop.matcher.imageio import load_library_gray, load_photo_bgr
 from gmagc_desktop.matcher.pipeline import normalize_photo
 from gmagc_desktop.matcher.search import DEFAULT_W_EMBED, Match, Searcher
-from gmagc_desktop.matcher.thumbnail import thumbnail_png
+from gmagc_desktop.matcher.thumbnail import gobo_thumb, thumbnail_png
 from gmagc_desktop.service.access import generate_code
 from gmagc_desktop.service.corrections import Correction, load_corrections, new_correction, save_corrections
 from gmagc_desktop.service.results import LOW_CONFIDENCE_SCORE, IndexStatus, Outcome, Result, SearchOutcome
@@ -358,6 +359,44 @@ class SearchService:
         copies = tuple(self._full_path(index.files[i].rel_path) for i in match.members if i != match.index)
         return Result(
             rank, Path(rel_path).name, rel_path, full_path, min(match.score, 1.0), copies, self._thumbnail(full_path)
+        )
+
+    def find_gobos(self, query: str, limit: int = 30) -> tuple[list[GoboItem], int]:
+        """Гобо по имени файла и папки: все слова запроса должны встречаться в пути. Возвращает (первые limit, всего)."""
+        index = self._index
+        if index is None:
+            raise NoIndexError(t("индекс библиотеки не построен"))
+        words = [w for w in query.lower().split() if w]
+        found = [f.rel_path for f in index.files if all(w in f.rel_path.lower() for w in words)] if words else []
+        found.sort(key=lambda p: (len(Path(p).name), p.lower()))
+        return [self._gobo_item(p) for p in found[: max(limit, 1)]], len(found)
+
+    def gobo_by_path(self, path: str) -> GoboItem | None:
+        """Гобо по пути относительно библиотеки или полному пути файла; None — такого файла нет в индексе."""
+        index = self._index
+        if index is None:
+            raise NoIndexError(t("индекс библиотеки не построен"))
+        rel = path
+        root = Path(self.settings.library_dir)
+        try:
+            rel = Path(path).resolve().relative_to(root.resolve()).as_posix() if Path(path).is_absolute() else path
+        except ValueError:
+            return None
+        known = {f.rel_path.replace("\\", "/"): f.rel_path for f in index.files}
+        actual = known.get(rel.replace("\\", "/"))
+        return self._gobo_item(actual) if actual else None
+
+    def _gobo_item(self, rel_path: str) -> GoboItem:
+        try:
+            gray = load_library_gray(self._full_path(rel_path))
+        except (OSError, ValueError, SyntaxError):
+            gray = np.zeros((1, 1), np.uint8)
+        return GoboItem(
+            Path(rel_path).stem,
+            rel_path,
+            gobo_media_path(rel_path),
+            thumbnail_png(gray, THUMBNAIL_SIZE),
+            gobo_thumb(gray),
         )
 
     def _full_path(self, rel_path: str) -> str:
