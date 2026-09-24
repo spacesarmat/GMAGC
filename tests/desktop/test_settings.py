@@ -39,6 +39,15 @@ def test_large_text_defaults_to_off_and_rejects_non_boolean_values():
     assert settings_from_json('{"large_text": "yes"}') == Settings(large_text=False)
 
 
+def test_results_count_defaults_to_50_and_accepts_only_the_offered_choices():
+    assert settings_from_json("{}").results_count == 50
+    assert settings_from_json('{"results_count": 100}').results_count == 100
+    assert settings_from_json('{"results_count": 10}').results_count == 10
+    assert settings_from_json('{"results_count": 33}').results_count == 50
+    assert settings_from_json('{"results_count": "100"}').results_count == 50
+    assert settings_from_json('{"results_count": true}').results_count == 50
+
+
 def test_settings_to_json_roundtrips_through_settings_from_json():
     original = Settings(library_dir="D:\\Библиотека гобо", top_n=15, access_code="ABCD2345")
 

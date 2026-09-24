@@ -79,6 +79,14 @@ def test_top_n_limits_results_and_empty_index_is_safe(library):
     assert Searcher(empty, embedder).search(normalized[0]) == []
 
 
+def test_top_n_above_the_shortlist_extends_the_shortlist_instead_of_capping_the_results(library):
+    names, normalized, embedder, data = library
+    searcher = Searcher(data, embedder, shortlist=2)
+
+    assert len(searcher.search(normalized[0], top_n=2)) == 2
+    assert len(searcher.search(normalized[0], top_n=4)) == 4
+
+
 def test_embedder_with_other_dimensions_than_the_index_is_rejected_clearly(library):
     names, normalized, embedder, data = library  # индекс построен PixelEmbedder(side=16): 256 измерений
     other = PixelEmbedder(side=8)  # 64 измерения

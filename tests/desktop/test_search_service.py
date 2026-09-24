@@ -45,6 +45,17 @@ def test_the_service_persists_the_text_size_choice(tmp_path):
     assert other.settings.large_text is True
 
 
+def test_the_service_persists_the_results_count_choice(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    service.set_results_count(100)
+
+    other = SearchService(tmp_path / "data")
+    other.load()
+    assert other.settings.results_count == 100
+
+
 def test_export_settings_json_matches_the_current_settings(service):
     assert service.export_settings_json() == settings_to_json(service.settings)
 

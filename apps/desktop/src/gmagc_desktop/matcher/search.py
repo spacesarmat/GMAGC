@@ -68,6 +68,7 @@ class Searcher:
             )
         best_embed = (data.embeddings @ query_vectors.T).max(axis=1)  # (N,)
 
+        shortlist = max(self._shortlist, top_n)  # больше кандидатов, чем просят вернуть, нет смысла
         candidates: list[int] = []
         seen_groups: set[int] = set()
         for index in np.argsort(-best_embed):
@@ -76,7 +77,7 @@ class Searcher:
                 continue
             seen_groups.add(group)
             candidates.append(int(index))
-            if len(candidates) >= self._shortlist:
+            if len(candidates) >= shortlist:
                 break
 
         shape = ShapeMatcher(soft_mask(normalized_query))

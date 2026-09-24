@@ -14,6 +14,7 @@ from gmagc_common.updates import parse_version
 
 APP_FOLDER = "GMAGC"
 MAX_TOP_N = 50
+RESULTS_COUNT_CHOICES = (10, 20, 50, 100)  # сколько результатов показывает окно ПК (телефон живёт на top_n)
 MAX_PORT = 65525  # запас под перебор соседних портов при занятом
 
 
@@ -34,6 +35,7 @@ def data_dir() -> Path:
 class Settings:
     library_dir: str = ""
     top_n: int = 10
+    results_count: int = 50
     server_enabled: bool = True
     port: int = DEFAULT_PORT
     access_code: str = ""
@@ -72,6 +74,7 @@ def settings_from_json(text: str) -> Settings:
         return Settings()
     library_dir = raw.get("library_dir", "")
     top_n = raw.get("top_n", 10)
+    results_count = raw.get("results_count", 50)
     server_enabled = raw.get("server_enabled", True)
     port = raw.get("port", DEFAULT_PORT)
     access_code = raw.get("access_code", "")
@@ -85,6 +88,7 @@ def settings_from_json(text: str) -> Settings:
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
+        results_count=results_count if _is_int(results_count) and results_count in RESULTS_COUNT_CHOICES else 50,
         server_enabled=server_enabled if isinstance(server_enabled, bool) else True,
         port=port if _is_int(port) and 1024 <= port <= MAX_PORT else DEFAULT_PORT,
         access_code=normalize_code(access_code) if isinstance(access_code, str) and is_valid_code(access_code) else "",
