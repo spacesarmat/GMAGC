@@ -155,3 +155,12 @@ def test_a_malformed_fixture_upload_result_is_a_protocol_error(data):
 
 def test_the_profile_size_limit_is_smaller_than_the_image_limit():
     assert 0 < protocol.MAX_PROFILE_BYTES <= protocol.MAX_IMAGE_BYTES
+
+
+def test_skip_items_round_trip_and_unknown_text_is_not_parsed():
+    item = protocol.skip_item(protocol.SKIP_CANNOT_USE, "ma2", "C:/x: доступ запрещён")
+
+    assert protocol.parse_skip(item) == ("cannot_use", "ma2", "C:/x: доступ запрещён")
+    assert protocol.parse_skip(protocol.skip_item(protocol.SKIP_NO_FOLDER, "ma3")) == ("no_folder", "ma3", "")
+    assert protocol.parse_skip("grandMA2: папка не найдена") is None
+    assert protocol.parse_skip("no_folder:ma9") is None

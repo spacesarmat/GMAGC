@@ -920,10 +920,20 @@ def test_the_profiles_screen_opens_from_connect_and_returns_there():
     assert views(app) == ["connect"]
 
 
+def make_ready_profile(app):
+    """Профиль, который можно отправлять: производитель, название и канал в режиме."""
+    run(app.editor.on_new_profile(None))
+    run(app.editor.set_profile_text("manufacturer", "SHEHDS"))
+    run(app.editor.set_profile_text("name", "380W Beam"))
+    run(app.editor.open_mode(0))
+    run(app.editor.add_channel("dimmer"))
+    app.editor.go_back()
+
+
 def test_a_profile_is_sent_to_the_connected_pc_through_the_client():
     app, _, script, _, _ = start(prefs=FakePrefs(STORED))
     run(app.on_open_profiles(None))
-    run(app.editor.on_new_profile(None))
+    make_ready_profile(app)
 
     run(app.editor.on_send_to_pc(None))
 
@@ -934,7 +944,7 @@ def test_a_profile_is_sent_to_the_connected_pc_through_the_client():
 def test_sending_a_profile_without_a_connection_says_to_connect_first():
     app, _, script, _, _ = start()
     run(app.on_open_profiles(None))
-    run(app.editor.on_new_profile(None))
+    make_ready_profile(app)
 
     run(app.editor.on_send_to_pc(None))
 

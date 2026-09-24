@@ -30,6 +30,10 @@ def error_text(error: ClientError) -> str:
         return t("ПК не смог прочитать изображение. Попробуйте снять ещё раз.")
     if kind == client.TOO_LARGE:
         return t("Изображение слишком большое для отправки.")
+    if kind == client.NO_TARGET:
+        return t("На ПК не найдена папка для grandMA3 или grandMA2: укажите её на экране «Настройки» ПК-приложения.")
+    if kind == client.BAD_PROFILE:
+        return t("ПК не принял профиль: {message}", message=error.message)
     if kind == client.PROTOCOL:
         return error.message
     return t("Ошибка на ПК: {message}", message=error.message)

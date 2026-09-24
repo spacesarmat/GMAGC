@@ -24,14 +24,17 @@ from gmagc_common.fixtures import (
     profile_file_name,
     profile_to_dict,
     template_by_id,
+    template_ranges,
+    template_title,
     validate_profile,
 )
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
-from gmagc_common.protocol import FixtureUploadResult
+from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, parse_skip
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.profile_store import ProfileStore
+from gmagc_mobile.texts import error_text
 
 SCREEN_LIST = "list"
 SCREEN_PROFILE = "profile"
@@ -47,13 +50,25 @@ def parse_int(text: str, fallback: int) -> int:
         return fallback
 
 
+def skip_text(item: str) -> str:
+    """Пропуск на ПК словами на языке телефона (код приходит от ПК; неизвестная запись показывается как есть)."""
+    parsed = parse_skip(item)
+    if parsed is None:
+        return item
+    code, target, detail = parsed
+    console = "grandMA3" if target == "ma3" else "grandMA2"
+    if code == SKIP_NO_FOLDER:
+        return t("{console}: папка не найдена, укажите её в настройках ПК-приложения", console=console)
+    return t("{console}: не удалось использовать папку ({detail})", console=console, detail=detail)
+
+
 def upload_text(result: FixtureUploadResult) -> str:
     """Что записал ПК: пульт и имя каждого файла, затем то, что пришлось пропустить."""
     labels = {"ma3": "grandMA3", "ma2": "grandMA2"}
     lines = [t("Записано на ПК:")]
     for target, path in result.written:
         lines.append(f"• {labels.get(target, target)}: {re.split(r'[\\\\/]', path)[-1]}")
-    lines.extend(t("Пропущено: {item}", item=item) for item in result.skipped)
+    lines.extend(t("Пропущено: {item}", item=skip_text(item)) for item in result.skipped)
     return "\n".join(lines)
 
 
@@ -282,6 +297,12 @@ class ProfileEditor:
         if self.profile is None:
             return
         self.message = self.notice = ""
+        problems = [i for i in validate_profile(self.profile) if i.error]
+        if problems:  # тексты проверки уже на языке телефона; ПК получит только готовый профиль
+            details = "; ".join(f"{i.path}: {i.message}" if i.path else i.message for i in problems)
+            self.message = t("Профиль не готов к отправке: {problems}", problems=details)
+            self.render()
+            return
         if self.send is None:
             self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
             self.render()
@@ -289,7 +310,7 @@ class ProfileEditor:
         try:
             result = await self.send(self.profile)
         except ClientError as error:
-            self.message = error.message
+            self.message = error_text(error)
         else:
             self.notice = upload_text(result)
         self.render()
@@ -457,7 +478,7 @@ class ProfileEditor:
         controls.append(
             ft.Dropdown(
                 label=t("Добавить канал (шаблон)"),
-                options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
+                options=[ft.DropdownOption(key=tpl.id, text=template_title(tpl)) for tpl in TEMPLATES],
                 on_select=self._on_template_pick,
             )
         )
@@ -478,7 +499,7 @@ class ProfileEditor:
         current = self.channel
         if "template" in changes:  # смена шаблона: разрядность и диапазоны новые, имя и адрес свои
             template = template_by_id(changes.pop("template"))
-            current = replace(current, template=template.id, bits=template.bits, ranges=template.ranges)
+            current = replace(current, template=template.id, bits=template.bits, ranges=template_ranges(template))
         await self._commit_channel(replace(current, **changes), render=render)
 
     async def set_channel_bits(self, bits: int) -> None:
@@ -568,7 +589,7 @@ class ProfileEditor:
             ft.Dropdown(
                 label=t("Шаблон"),
                 value=channel.template,
-                options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
+                options=[ft.DropdownOption(key=tpl.id, text=template_title(tpl)) for tpl in TEMPLATES],
                 on_select=self._on_template_change,
             ),
             self._field(t("Название"), channel.name, set_name),

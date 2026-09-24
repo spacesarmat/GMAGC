@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from gmagc_common.fixtures import Channel, FixtureProfile, Mode, has_errors, validate_profile
+from gmagc_common.i18n import t
 
 DATA_VERSION = "2.5.0.3"
 GEOMETRY = "Body"
@@ -95,7 +96,7 @@ def _attribute(name: str) -> AttrDef:
         return _STATIC[name]
     match = _NUMBERED.match(name)
     if match is None:
-        raise ExportError(f"нет определения атрибута {name}")
+        raise ExportError(t("нет определения атрибута {name}", name=name))
     family, number, suffix = match.group(1), int(match.group(2)), match.group(3)
     index = str(number - 1)
     if family == "Color":
@@ -151,7 +152,11 @@ def _resolve_attributes(mode: Mode) -> list[str]:
         seen[channel.template] = seen.get(channel.template, 0) + 1
         if "{n}" not in template and seen[channel.template] > 1:
             raise ExportError(
-                f"в режиме «{mode.name}» шаблон «{channel.template}» повторяется: MA3 не различит эти каналы"
+                t(
+                    "в режиме «{name}» шаблон «{template}» повторяется: MA3 не различит эти каналы",
+                    name=mode.name,
+                    template=channel.template,
+                )
             )
         names.append(template.format(n=seen[channel.template]))
     return names
@@ -231,7 +236,7 @@ def export_ma3(profile: FixtureProfile, now: datetime | None = None) -> str:
     issues = validate_profile(profile)
     if has_errors(issues):
         details = "; ".join(f"{i.path}: {i.message}" if i.path else i.message for i in issues if i.error)
-        raise ExportError(f"профиль не готов к экспорту: {details}")
+        raise ExportError(t("профиль не готов к экспорту: {details}", details=details))
     resolved = [_resolve_attributes(mode) for mode in profile.modes]
     used = list(dict.fromkeys(dep for names in resolved for name in names for dep in _dependencies(name)))
 
@@ -245,7 +250,7 @@ def export_ma3(profile: FixtureProfile, now: datetime | None = None) -> str:
             "Color": WHITE,
             "Source": "grandMA3",
             "ShortName": profile.short_name or profile.name[:16],
-            "Description": "Создано в GMAGC",
+            "Description": t("Создано в GMAGC"),
             "Manufacturer": profile.manufacturer,
         },
     )
@@ -263,8 +268,7 @@ def export_ma3(profile: FixtureProfile, now: datetime | None = None) -> str:
         _dmx_mode(modes, mode, attributes)
     revisions = ET.SubElement(fixture_type, "Revisions")
     stamp = (now or datetime.now()).strftime("%d.%m.%Y %H:%M:%S")
-    ET.SubElement(revisions, "Revision", {"Text": "Создано в GMAGC", "Date": stamp, "UserID": "0"})
+    ET.SubElement(revisions, "Revision", {"Text": t("Создано в GMAGC"), "Date": stamp, "UserID": "0"})
 
     ET.indent(root, space="    ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
-

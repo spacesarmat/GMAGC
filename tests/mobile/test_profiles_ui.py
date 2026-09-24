@@ -384,9 +384,15 @@ def test_a_failing_share_is_reported_on_the_screen_for_every_kind_of_file():
         assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"
 
 
-def make_sending_editor(send):
+def make_sending_editor(send, ready=True):
     editor = ProfileEditor(StubPage(), ProfileStore(FakePrefs()), FakeShare(), on_exit=lambda: None, send=send)
     open_new(editor)
+    if ready:  # профиль, который можно отправлять: производитель, название и канал в режиме
+        run(editor.set_profile_text("manufacturer", "SHEHDS"))
+        run(editor.set_profile_text("name", "380W Beam"))
+        run(editor.open_mode(0))
+        run(editor.add_channel("dimmer"))
+        editor.go_back()
     return editor
 
 
@@ -417,7 +423,7 @@ def test_a_failed_send_shows_the_reason_and_no_success_notice():
 
     run(editor.on_send_to_pc(None))
 
-    assert "некуда записать" in shown(editor) and "Записано на ПК" not in shown(editor)
+    assert "не найдена папка" in shown(editor) and "Записано на ПК" not in shown(editor)
 
 
 def test_sending_without_a_connection_explains_what_to_do():
@@ -455,3 +461,31 @@ def test_the_editor_speaks_english_when_the_language_is_english():
     labels = [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
     assert "Send to PC" in labels and "Add a mode" in labels
     assert "Modes" in texts(editor.view) and "Мод" not in texts(editor.view)
+
+
+def test_the_upload_summary_describes_skipped_consoles_in_the_phone_language():
+    from gmagc_common import i18n
+    from gmagc_mobile.profiles_ui import upload_text
+
+    skipped = ("no_folder:ma2", "cannot_use:ma3:C:/x: denied", "старый текст")
+    result = FixtureUploadResult((("ma3", "C:\lib\a.xml"),), skipped)
+
+    russian = upload_text(result)
+    assert "grandMA2: папка не найдена" in russian and "не удалось использовать папку (C:/x: denied)" in russian
+    assert "старый текст" in russian
+    i18n.set_language("en")
+    english = upload_text(result)
+    assert "grandMA2: folder not found" in english and "could not use the folder (C:/x: denied)" in english
+
+
+def test_an_unfinished_profile_is_not_sent_and_the_problems_are_listed_on_the_phone():
+    sent = []
+
+    async def send(profile):
+        sent.append(profile)
+
+    editor = make_sending_editor(send, ready=False)
+
+    run(editor.on_send_to_pc(None))
+
+    assert sent == [] and "не готов к отправке" in shown(editor) and "производитель" in shown(editor)

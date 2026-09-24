@@ -12,13 +12,13 @@ from gmagc_common.i18n import t
 from gmagc_common.support import (
     AUTHOR_TELEGRAM_URL,
     CHANNEL_URL,
-    DIALOG_TEXT,
-    DIALOG_TITLE,
     LATER,
     NEVER,
     SUPPORT,
     SUPPORT_URL,
     after_answer,
+    dialog_text,
+    dialog_title,
     register_launch,
     should_ask,
 )
@@ -61,8 +61,8 @@ class SupportPrompt:
 
     def show(self) -> None:
         self._dialog = ft.AlertDialog(
-            title=ft.Text(DIALOG_TITLE),
-            content=ft.Text(DIALOG_TEXT),
+            title=ft.Text(dialog_title()),
+            content=ft.Text(dialog_text()),
             actions=[
                 ft.Button(t("Поддержать"), on_click=self.on_support),
                 ft.TextButton(content=ft.Text(t("Позже")), on_click=self.on_later),
