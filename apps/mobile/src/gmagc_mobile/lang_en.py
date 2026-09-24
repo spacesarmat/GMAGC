@@ -222,6 +222,26 @@ EN = {
     "{bits} бит": "{bits} bit",
     "Диапазоны значений (0–255)": "Value ranges (0–255)",
     "Добавить диапазон": "Add a range",
+    "В инструкции не найдена таблица каналов DMX. Снимите таблицу ближе и ровнее или выберите другой файл.": (
+        "No DMX channel table was found in the manual. Shoot the table closer and straighter, or pick another file."
+    ),
+    "В этот режим": "Into this mode",
+    "Новым режимом": "As a new mode",
+    "Добавлено каналов: {count}": "Channels added: {count}",
+    "Заполнить по инструкции": "Fill in from the manual",
+    "Инструкция прибора (фото или PDF)": "Fixture manual (photo or PDF)",
+    "На ПК не установлено распознавание текста: {message}": "Text recognition is not installed on the PC: {message}",
+    "Найдено в инструкции": "Found in the manual",
+    "Не удалось прочитать файл: {error}": "Could not read the file: {error}",
+    "Неожиданный ответ ПК на распознавание.": "Unexpected reply from the PC to the recognition request.",
+    "Отметьте хотя бы один канал.": "Check at least one channel.",
+    "ПК не смог прочитать файл инструкции: {message}": "The PC could not read the manual file: {message}",
+    "Продолжение таблицы": "Table continuation",
+    "Распознаю инструкцию на ПК, это может занять минуту…": "Recognizing the manual on the PC, this may take a minute…",
+    "Снимите галочки с лишнего. Названия и диапазоны можно поправить после добавления.": (
+        "Uncheck what you do not need. Names and ranges can be edited after adding."
+    ),
+    "диапазонов: {count}": "ranges: {count}",
 }
 
 register("en", EN)

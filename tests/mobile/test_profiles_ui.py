@@ -489,3 +489,137 @@ def test_an_unfinished_profile_is_not_sent_and_the_problems_are_listed_on_the_ph
     run(editor.on_send_to_pc(None))
 
     assert sent == [] and "не готов к отправке" in shown(editor) and "производитель" in shown(editor)
+
+
+# ---- автозаполнение по инструкции ------------------------------------------------------------
+def draft_with_two_modes():
+    from gmagc_common.scan_draft import DraftChannel, DraftMode, ScanDraft
+
+    four = DraftMode(
+        "4CH",
+        tuple(DraftChannel(n, name, tpl) for n, name, tpl in ((1, "R dimming", "red"), (2, "G dimming", "green"))),
+    )
+    nine = DraftMode(
+        "9CH",
+        (
+            DraftChannel(1, "Total dimming", "dimmer"),
+            DraftChannel(2, "Strobing", "shutter", confidence=0.6),
+        ),
+    )
+    return ScanDraft((four, nine))
+
+
+def make_scanning_editor(scan):
+    editor = ProfileEditor(StubPage(), ProfileStore(FakePrefs()), FakeShare(), on_exit=lambda: None, scan=scan)
+    editor.profile = new_profile("M", "N")
+    editor.mode_index = 0
+    editor.screen = "mode"
+    return editor
+
+
+def test_scanning_shows_the_draft_with_every_channel_checked():
+    async def scan():
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+
+    run(editor.on_scan())
+
+    labels = [c.label for c in walk(editor.view) if isinstance(c, ft.Checkbox)]
+    boxes = [c for c in walk(editor.view) if isinstance(c, ft.Checkbox)]
+    assert editor.screen == "scan" and len(labels) == 4 and all(c.value for c in boxes)
+    assert "1  R dimming" in labels[0] and labels[3].endswith("?")
+
+
+def test_only_checked_channels_are_added_to_the_current_mode():
+    async def scan():
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    editor._toggle_draft_channel(0, 1, False)
+
+    run(editor.apply_draft(0, new_mode=False))
+
+    assert editor.screen == "mode" and [c.name for c in editor.mode.channels] == ["R dimming"]
+    assert "Добавлено каналов: 1" in shown(editor)
+
+
+def test_a_draft_mode_can_become_a_new_mode_of_the_profile():
+    async def scan():
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+
+    run(editor.apply_draft(1, new_mode=True))
+
+    assert [m.name for m in editor.profile.modes] == ["Режим 1", "9CH"]
+    assert editor.mode_index == 1 and len(editor.mode.channels) == 2
+
+
+def test_applying_with_nothing_checked_asks_to_check_something():
+    async def scan():
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    for index in range(2):
+        editor._toggle_draft_channel(0, index, False)
+
+    run(editor.apply_draft(0, new_mode=False))
+
+    assert editor.screen == "scan" and "Отметьте хотя бы один канал" in shown(editor)
+
+
+def test_a_page_without_a_table_explains_what_to_do_and_stays_on_the_mode():
+    from gmagc_common.scan_draft import ScanDraft
+
+    async def scan():
+        return ScanDraft((), ("no_table",))
+
+    editor = make_scanning_editor(scan)
+
+    run(editor.on_scan())
+
+    assert editor.screen == "mode" and "не найдена таблица" in shown(editor)
+
+
+def test_cancelling_the_file_choice_changes_nothing():
+    async def scan():
+        return None
+
+    editor = make_scanning_editor(scan)
+
+    run(editor.on_scan())
+
+    assert editor.screen == "mode" and editor.draft is None and not editor.scanning
+
+
+def test_a_pc_error_during_scanning_is_shown_and_the_button_is_usable_again():
+    async def scan():
+        raise ClientError("scan_unavailable", "нет модуля")
+
+    editor = make_scanning_editor(scan)
+
+    run(editor.on_scan())
+
+    assert "нет модуля" in shown(editor) and not editor.scanning
+
+
+def test_scanning_without_a_connection_says_so():
+    editor = make_scanning_editor(None)
+
+    run(editor.on_scan())
+
+    assert "Нет подключения к ПК" in shown(editor)
+
+
+def test_back_from_the_review_screen_returns_to_the_mode_without_adding():
+    async def scan():
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+
+    assert editor.go_back() and editor.screen == "mode" and editor.draft is None and not editor.mode.channels

@@ -34,6 +34,10 @@ def error_text(error: ClientError) -> str:
         return t("На ПК не найдена папка для grandMA3 или grandMA2: укажите её на экране «Настройки» ПК-приложения.")
     if kind == client.BAD_PROFILE:
         return t("ПК не принял профиль: {message}", message=error.message)
+    if kind == client.BAD_SCAN:
+        return t("ПК не смог прочитать файл инструкции: {message}", message=error.message)
+    if kind == client.SCAN_UNAVAILABLE:
+        return t("На ПК не установлено распознавание текста: {message}", message=error.message)
     if kind == client.PROTOCOL:
         return error.message
     return t("Ошибка на ПК: {message}", message=error.message)

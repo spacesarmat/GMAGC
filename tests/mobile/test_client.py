@@ -251,3 +251,36 @@ def test_send_fixture_reports_an_unreachable_pc():
         client.send_fixture(profile_to_dict(fixture_profile()))
 
     assert error.value.kind == UNREACHABLE
+
+
+def test_scan_fixture_returns_the_draft_recognised_on_the_pc(running):
+    import json as _json
+    from pathlib import Path
+
+    from gmagc_desktop.scan.engine import LocalScanner
+    from gmagc_desktop.scan.table import items_from_dict
+
+    path = Path(__file__).resolve().parents[1] / "data" / "ocr" / "led_bar_photo_4ch.json"
+    items = items_from_dict(_json.loads(path.read_text(encoding="utf-8")))
+    running.server._context.scanner = LocalScanner(ocr=lambda _image: items)
+
+    draft = make_client(running).scan_fixture(b"\xff\xd8photo")
+
+    assert [m.name for m in draft.modes] == ["4CH"] and len(draft.modes[0].channels) == 4
+
+
+def test_scan_fixture_reports_missing_recognition_on_the_pc():
+    body = json.dumps({"error": "scan_unavailable", "message": "нет модуля"}, ensure_ascii=False).encode("utf-8")
+    with stub_server(status=409, body=body) as connection:
+        with pytest.raises(ClientError) as error:
+            GmagcClient(connection).scan_fixture(b"photo")
+
+    assert error.value.kind == "scan_unavailable"
+
+
+def test_scan_fixture_rejects_a_reply_that_is_not_a_draft():
+    with stub_server(body=b'{"modes": 5}') as connection:
+        with pytest.raises(ClientError) as error:
+            GmagcClient(connection).scan_fixture(b"photo")
+
+    assert error.value.kind == "protocol"

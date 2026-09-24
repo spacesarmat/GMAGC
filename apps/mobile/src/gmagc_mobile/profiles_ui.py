@@ -32,6 +32,8 @@ from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, parse_skip
+from gmagc_common.scan_apply import add_draft_channels
+from gmagc_common.scan_draft import WARN_NO_TABLE, DraftChannel, ScanDraft
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.profile_store import ProfileStore
 from gmagc_mobile.texts import error_text
@@ -40,6 +42,7 @@ SCREEN_LIST = "list"
 SCREEN_PROFILE = "profile"
 SCREEN_MODE = "mode"
 SCREEN_CHANNEL = "channel"
+SCREEN_SCAN = "scan"
 
 
 def parse_int(text: str, fallback: int) -> int:
@@ -62,6 +65,24 @@ def skip_text(item: str) -> str:
     return t("{console}: не удалось использовать папку ({detail})", console=console, detail=detail)
 
 
+def warning_text(code: str) -> str:
+    """Предупреждение распознавания словами на языке телефона (код приходит от ПК; неизвестный показывается как есть)."""
+    if code == WARN_NO_TABLE:
+        return t("В инструкции не найдена таблица каналов DMX. Снимите таблицу ближе и ровнее или выберите другой файл.")
+    return code
+
+
+def draft_channel_label(channel: DraftChannel) -> str:
+    """Строка канала на экране проверки: адрес, название и число диапазонов; «?» — распознано неуверенно."""
+    span = f"{channel.dmx}–{channel.dmx + 1}" if channel.bits == 16 and channel.dmx else str(channel.dmx or "?")
+    text = f"{span}  {channel.name}"
+    if channel.ranges:
+        text += " · " + t("диапазонов: {count}", count=len(channel.ranges))
+    if channel.confidence < 1.0:
+        text += " ?"
+    return text
+
+
 def upload_text(result: FixtureUploadResult) -> str:
     """Что записал ПК: пульт и имя каждого файла, затем то, что пришлось пропустить."""
     labels = {"ma3": "grandMA3", "ma2": "grandMA2"}
@@ -80,12 +101,17 @@ class ProfileEditor:
         share,
         on_exit: Callable[[], None] | None = None,
         send: Callable[[FixtureProfile], Awaitable[FixtureUploadResult]] | None = None,
+        scan: Callable[[], Awaitable[ScanDraft | None]] | None = None,
     ):
         self.page = page
         self.store = store
         self.share = share
         self.on_exit = on_exit
         self.send = send  # отправка профиля на ПК; None — нет подключения к ПК
+        self.scan = scan  # выбор файла инструкции и распознавание на ПК; None — нет подключения, ответ None — отмена
+        self.scanning = False
+        self.draft: ScanDraft | None = None
+        self.draft_checked: set[tuple[int, int]] = set()  # (режим черновика, канал), отмеченные галочкой
         self.profiles: list[FixtureProfile] = []
         self.profile: FixtureProfile | None = None
         self.mode_index: int | None = None
@@ -109,7 +135,10 @@ class ProfileEditor:
     def go_back(self) -> bool:
         """Шаг назад внутри редактора. False — уже на списке, выходить должно приложение."""
         self.message = self.notice = ""
-        if self.screen == SCREEN_CHANNEL:
+        if self.screen == SCREEN_SCAN:
+            self.draft = None
+            self.screen = SCREEN_MODE
+        elif self.screen == SCREEN_CHANNEL:
             self.channel_index = None
             self.screen = SCREEN_MODE
         elif self.screen == SCREEN_MODE:
@@ -418,6 +447,106 @@ class ProfileEditor:
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
 
+    # ---- автозаполнение по инструкции ----------------------------------------
+    async def on_scan(self, _event=None) -> None:
+        """Фото или PDF инструкции → распознавание на ПК → экран проверки с галочками."""
+        self.message = self.notice = ""
+        if self.scan is None:
+            self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
+            self.render()
+            return
+        self.scanning = True
+        self.render()
+        try:
+            draft = await self.scan()
+        except ClientError as error:
+            self.scanning = False
+            self.message = error_text(error)
+            self.render()
+            return
+        self.scanning = False
+        if draft is None:  # пользователь закрыл выбор файла
+            self.render()
+            return
+        if not draft.modes:
+            self.message = " ".join(warning_text(code) for code in draft.warnings) or warning_text(WARN_NO_TABLE)
+            self.render()
+            return
+        self.draft = draft
+        self.draft_checked = {(m, c) for m, mode in enumerate(draft.modes) for c in range(len(mode.channels))}
+        self.screen = SCREEN_SCAN
+        self.render()
+
+    def _toggle_draft_channel(self, mode_index: int, channel_index: int, checked: bool) -> None:
+        key = (mode_index, channel_index)
+        if checked:
+            self.draft_checked.add(key)
+        else:
+            self.draft_checked.discard(key)
+
+    def _chosen(self, draft_mode: int) -> list[DraftChannel]:
+        channels = self.draft.modes[draft_mode].channels
+        return [channel for index, channel in enumerate(channels) if (draft_mode, index) in self.draft_checked]
+
+    async def apply_draft(self, draft_mode: int, new_mode: bool) -> None:
+        """Добавляет отмеченные каналы в текущий режим или создаёт из них новый режим."""
+        chosen = self._chosen(draft_mode)
+        if not chosen:
+            self.message = t("Отметьте хотя бы один канал.")
+            self.render()
+            return
+        if new_mode:
+            base = self.draft.modes[draft_mode].name or t("Режим {number}", number=len(self.profile.modes) + 1)
+            name = self._unique_mode_name(base)
+            modes = (*self.profile.modes, add_draft_channels(Mode(name), chosen))
+            self.mode_index = len(modes) - 1
+            await self._commit(replace(self.profile, modes=modes), render=False)
+        else:
+            await self._commit_mode(add_draft_channels(self.mode, chosen), render=False)
+        self.draft = None
+        self.message = ""
+        self.screen = SCREEN_MODE
+        self.notice = t("Добавлено каналов: {count}", count=len(chosen))
+        self.render()
+
+    def _render_scan(self) -> list[ft.Control]:
+        controls: list[ft.Control] = [
+            self._header(t("Найдено в инструкции")),
+            ft.Text(t("Снимите галочки с лишнего. Названия и диапазоны можно поправить после добавления."), size=12),
+        ]
+        if self.message:
+            controls.append(ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
+        for mode_index, draft_mode in enumerate(self.draft.modes):
+            title = draft_mode.name or t("Продолжение таблицы")
+            heading = t("{name} ({count} кан.)", name=title, count=len(draft_mode.channels))
+            controls.append(ft.Text(heading, weight=ft.FontWeight.BOLD))
+            for channel_index, channel in enumerate(draft_mode.channels):
+                controls.append(
+                    ft.Checkbox(
+                        label=draft_channel_label(channel),
+                        value=(mode_index, channel_index) in self.draft_checked,
+                        on_change=partial(self._on_draft_check, mode_index, channel_index),
+                    )
+                )
+            controls.append(
+                ft.Row(
+                    [
+                        ft.Button(
+                            t("В этот режим"), on_click=self._async_click(self.apply_draft, mode_index, False)
+                        ),
+                        ft.Button(
+                            t("Новым режимом"), on_click=self._async_click(self.apply_draft, mode_index, True)
+                        ),
+                    ],
+                    wrap=True,
+                )
+            )
+        controls.extend(ft.Text(warning_text(code), size=12, color=ft.Colors.AMBER_400) for code in self.draft.warnings)
+        return controls
+
+    def _on_draft_check(self, mode_index: int, channel_index: int, event) -> None:
+        self._toggle_draft_channel(mode_index, channel_index, bool(event.control.value))
+
     # ---- режим и каналы -----------------------------------------------------
     @property
     def mode(self) -> Mode:
@@ -456,6 +585,8 @@ class ProfileEditor:
         ]
         if self.message:
             controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
+        if self.notice:
+            controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
         for index, channel in sorted(enumerate(mode.channels), key=lambda pair: pair[1].dmx):
             span = f"{channel.dmx}–{channel.last}" if channel.bits == 16 else str(channel.dmx)
             controls.append(
@@ -475,6 +606,16 @@ class ProfileEditor:
                     ]
                 )
             )
+        controls.append(
+            ft.Button(
+                t("Заполнить по инструкции"),
+                icon=ft.Icons.DOCUMENT_SCANNER,
+                on_click=self.on_scan,
+                disabled=self.scanning,
+            )
+        )
+        if self.scanning:
+            controls.append(ft.Text(t("Распознаю инструкцию на ПК, это может занять минуту…"), size=12))
         controls.append(
             ft.Dropdown(
                 label=t("Добавить канал (шаблон)"),
