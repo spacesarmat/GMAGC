@@ -53,7 +53,7 @@ def test_main_with_a_link_prints_the_outcome_and_the_results(tmp_path, running, 
 
     out = capsys.readouterr().out
     assert code == 0 and "исход:" in out and " 1. " in out and ".png" in out
-    assert len(running.records) == 1
+    assert len(running.wait_for_records(1)) == 1
 
 
 def test_main_with_host_port_code_and_top(tmp_path, running, photo_jpeg, capsys):
