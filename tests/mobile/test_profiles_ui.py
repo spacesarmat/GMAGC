@@ -286,24 +286,6 @@ def test_the_channel_screen_shows_range_rows():
     assert "Открыто" in values
 
 
-def test_sharing_a_profile_sends_its_json_through_the_share_sheet():
-    editor, _, _ = make_editor()
-    open_new(editor)
-    run(editor.set_profile_text("name", "380W Beam"))
-
-    run(editor.on_share(None))
-
-    assert json.loads(editor.share.texts[0])["name"] == "380W Beam"
-
-
-def test_a_failing_share_is_reported_on_the_screen_and_does_not_break_the_editor():
-    prefs = FakePrefs()
-    editor = ProfileEditor(StubPage(), ProfileStore(prefs), FakeShare(fail=True), on_exit=lambda: None)
-    open_new(editor)
-
-    run(editor.on_share(None))
-
-    assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"
 
 
 def test_the_redraw_after_typing_happens_later_and_only_if_nothing_else_redrew(monkeypatch):
@@ -340,58 +322,61 @@ def ready_editor():
     return editor
 
 
-def test_sharing_the_ma3_xml_sends_a_fixture_type_through_the_share_sheet():
+def shared(editor):
+    return {name: (data.decode("utf-8"), mime) for name, data, mime in editor.share.files}
+
+
+def test_the_profile_is_shared_as_a_json_file_with_a_proper_name():
+    editor = ready_editor()
+
+    run(editor.on_share(None))
+
+    files = shared(editor)
+    assert list(files) == ["shehds@380w_beam.json"] and editor.share.texts == []
+    text, mime = files["shehds@380w_beam.json"]
+    assert mime == "application/json" and json.loads(text)["name"] == "380W Beam"
+
+
+def test_the_ma3_type_is_shared_as_an_xml_file():
     editor = ready_editor()
 
     run(editor.on_share_ma3(None))
 
-    sent = editor.share.texts[0]
-    assert sent.startswith("<?xml") and 'Name="380W Beam"' in sent and "<DMXMode" in sent
+    files = shared(editor)
+    assert list(files) == ["shehds@380w_beam.xml"]
+    text, mime = files["shehds@380w_beam.xml"]
+    assert mime == "application/xml" and text.startswith("<?xml") and 'Name="380W Beam"' in text
 
 
-def test_the_ma3_xml_of_an_unfinished_profile_is_refused_with_a_reason_on_the_screen():
+def test_the_ma2_types_of_all_modes_are_shared_as_separate_xml_files():
+    editor = ready_editor()
+    run(editor.add_mode())
+    run(editor.open_mode(1))
+    run(editor.add_channel("dimmer"))
+    editor.go_back()
+
+    run(editor.on_share_ma2(None))
+
+    files = shared(editor)
+    assert list(files) == ["shehds@380w_beam@режим_1.xml", "shehds@380w_beam@режим_2.xml"]
+    assert all(mime == "application/xml" and text.startswith("<?xml") for text, mime in files.values())
+
+
+def test_an_unfinished_profile_is_not_shared_and_the_reason_is_shown():
     editor, _, _ = make_editor()
     open_new(editor)
 
-    run(editor.on_share_ma3(None))
+    for handler in (editor.on_share_ma3, editor.on_share_ma2):
+        run(handler(None))
+        assert editor.share.files == [] and "не готов к экспорту" in shown(editor)
+        editor.message = ""
 
-    assert editor.share.texts == [] and "не готов к экспорту" in shown(editor) and editor.screen == "profile"
 
-
-def test_a_failing_share_of_the_ma3_xml_is_reported_on_the_screen():
+def test_a_failing_share_is_reported_on_the_screen_for_every_kind_of_file():
     editor = ready_editor()
     editor.share.fail = True
 
-    run(editor.on_share_ma3(None))
-
-    assert "Не удалось поделиться" in shown(editor)
-
-
-def test_sharing_the_ma2_xml_of_the_open_mode_sends_a_fixture_type_of_that_mode():
-    editor = ready_editor()
-    run(editor.open_mode(0))
-
-    run(editor.on_share_ma2(None))
-
-    sent = editor.share.texts[0]
-    assert sent.startswith("<?xml") and 'name="380W Beam"' in sent and 'mode="Режим 1"' in sent
-
-
-def test_the_ma2_xml_of_an_unfinished_mode_is_refused_with_a_reason_on_the_screen():
-    editor, _, _ = make_editor()
-    open_new(editor)
-    run(editor.open_mode(0))
-
-    run(editor.on_share_ma2(None))
-
-    assert editor.share.texts == [] and "не готов к экспорту" in shown(editor) and editor.screen == "mode"
-
-
-def test_a_failing_share_of_the_ma2_xml_is_reported_on_the_mode_screen():
-    editor = ready_editor()
-    run(editor.open_mode(0))
-    editor.share.fail = True
-
-    run(editor.on_share_ma2(None))
-
-    assert "Не удалось поделиться" in shown(editor)
+    for handler in (editor.on_share, editor.on_share_ma3, editor.on_share_ma2):
+        editor.message = ""
+        run(handler(None))
+        assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"

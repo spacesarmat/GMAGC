@@ -9,9 +9,11 @@ from gmagc_common.fixtures import (
     ProfileError,
     Range,
     channel_from_template,
+    file_part,
     has_errors,
     new_profile,
     next_free_dmx,
+    profile_file_name,
     profile_from_dict,
     profile_to_dict,
     template_by_id,
@@ -170,3 +172,8 @@ def test_a_hole_between_ranges_is_a_warning_and_the_path_names_the_channel():
     issues = validate_profile(profile_with(channel, mode_name="Стандарт"))
 
     assert len(issues) == 1 and not issues[0].error and issues[0].path == "Стандарт → Гобо"
+
+
+def test_file_names_follow_the_library_style():
+    assert file_part('A&B Co. "Мой" режим') == "a_b_co_мой_режим"
+    assert profile_file_name(sample_profile(), "json") == "shehds@380w_beam.json"
