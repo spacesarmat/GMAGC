@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
+from gmagc_common import i18n
 from gmagc_desktop.matcher.synthetic import simulate_photo
 from gmagc_desktop.server.runner import PhoneServer
 from gmagc_desktop.service.search_service import SearchService
@@ -51,3 +52,14 @@ def running(service):
         server=server, port=port, code=service.settings.access_code, records=records, wait_for_records=wait_for_records
     )
     server.stop()
+
+
+@pytest.fixture(autouse=True)
+def russian_by_default(monkeypatch):
+    """Язык интерфейса общий на весь процесс: каждый тест начинает и заканчивает по-русски.
+
+    «Авто» в тестах видит русскую систему, а не настоящую локаль машины (на CI она английская)."""
+    monkeypatch.setattr(i18n, "detect_system_locale", lambda: "ru_RU")
+    i18n.set_language("ru")
+    yield
+    i18n.set_language("ru")

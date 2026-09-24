@@ -14,6 +14,8 @@ import cv2
 import flet as ft
 import numpy as np
 
+from gmagc_common import i18n
+from gmagc_common.i18n import CHOICES, language_name, t
 from gmagc_common.protocol import build_link, format_code
 from gmagc_common.theme import (
     DESKTOP_ACCENT,
@@ -27,6 +29,7 @@ from gmagc_common.theme import (
     DESKTOP_STRONG,
     score_band,
 )
+from gmagc_desktop import lang_en  # noqa: F401 - при импорте регистрирует английские переводы
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled, LibraryNotFound, LibraryScanError
 from gmagc_desktop.matcher.adjust import apply_adjustments
@@ -73,7 +76,9 @@ CONTRAST_RANGE = (0.5, 2.0)
 EXPOSURE_RANGE = (-2.0, 2.0)
 
 _VIEW_NAMES = ("search", "phone", "library", "settings")
-_SCREEN_LABELS = {"search": "Поиск гобо", "phone": "Телефон", "library": "Библиотека", "settings": "Настройки"}
+def _screen_label(name: str) -> str:
+    """Название экрана на текущем языке (для заголовка и хлебных крошек)."""
+    return t({"search": "Поиск гобо", "phone": "Телефон", "library": "Библиотека", "settings": "Настройки"}[name])
 
 
 _BADGE_COLORS = {
@@ -175,6 +180,7 @@ class DesktopApp:
         self.service = service
         self.picker = picker or ft.FilePicker()
         self.clipboard = clipboard or ft.Clipboard()
+        self.rebuilt_as: DesktopApp | None = None  # новый экземпляр после смены языка (этот уже не используется)
         self.reveal = reveal
         self._open_url = open_url
         self._log_path = log_path or (service.data_dir / "gmagc.log")
@@ -193,6 +199,24 @@ class DesktopApp:
             if updates is not None
             else None
         )
+        # всё, что нужно, чтобы собрать приложение заново на тех же службах (смена языка без перезапуска);
+        # окно поддержки и счётчик запусков при пересборке не повторяются
+        self._kwargs = {
+            "picker": self.picker,
+            "clipboard": self.clipboard,
+            "reveal": reveal,
+            "check": check,
+            "server": self.server,
+            "addresses": addresses,
+            "qr": qr,
+            "updates": updates,
+            "open_url": open_url,
+            "quit_app": quit_app,
+            "update_delay": update_delay,
+            "support": False,
+            "support_delay": support_delay,
+            "log_path": self._log_path,
+        }
         self.history: list[RequestRecord] = []
         self._busy = False
         self._cancel = False
@@ -215,7 +239,7 @@ class DesktopApp:
 
         # ---- навигация -----------------------------------------------------------
         self.current_view = "search"
-        self.breadcrumb = ft.Text("GMAGC / Поиск гобо", size=12, color=DESKTOP_MUTED)
+        self.breadcrumb = ft.Text(f"GMAGC / {_screen_label('search')}", size=12, color=DESKTOP_MUTED)
         self._nav_containers: dict[str, ft.Container] = {}
 
         # ---- метрики и статус-строка ------------------------------------------------
@@ -375,6 +399,13 @@ class DesktopApp:
             on_submit=self.on_fixture_dirs_change,
             width=520,
         )
+        self.language_dropdown = ft.Dropdown(
+            label="Язык / Language",
+            value=self.service.settings.language,
+            options=[ft.DropdownOption(key=choice, text=language_name(choice)) for choice in CHOICES],
+            on_select=self.on_language_change,
+            width=240,
+        )
         self.results_count_dropdown = ft.Dropdown(
             label="Число результатов поиска",
             value="50",
@@ -416,16 +447,16 @@ class DesktopApp:
 
     def _build_sidebar(self) -> ft.Container:
         nav_specs = [
-            (ft.Icons.SEARCH, "Поиск гобо", "search"),
-            (ft.Icons.SMARTPHONE, "Телефон", "phone"),
-            (ft.Icons.FOLDER_OUTLINED, "Библиотека", "library"),
+            (ft.Icons.SEARCH, _screen_label("search"), "search"),
+            (ft.Icons.SMARTPHONE, _screen_label("phone"), "phone"),
+            (ft.Icons.FOLDER_OUTLINED, _screen_label("library"), "library"),
         ]
         nav_items = []
         for icon, label, name in nav_specs:
             item = _nav_item(icon, label, lambda _e, n=name: self._show(n))
             self._nav_containers[name] = item
             nav_items.append(item)
-        settings_item = _nav_item(ft.Icons.SETTINGS_OUTLINED, "Настройки", lambda _e: self._show("settings"))
+        settings_item = _nav_item(ft.Icons.SETTINGS_OUTLINED, _screen_label("settings"), lambda _e: self._show("settings"))
         self._nav_containers["settings"] = settings_item
 
         return ft.Container(
@@ -446,14 +477,14 @@ class DesktopApp:
                     ft.Container(height=1, bgcolor=DESKTOP_LINE),
                     ft.Container(
                         ft.Column(
-                            [ft.Text("РАБОЧАЯ ОБЛАСТЬ", size=9, color=DESKTOP_DIM), *nav_items],
+                            [ft.Text(t("РАБОЧАЯ ОБЛАСТЬ"), size=9, color=DESKTOP_DIM), *nav_items],
                             spacing=6,
                         ),
                         padding=ft.Padding.symmetric(horizontal=10, vertical=14),
                     ),
                     ft.Container(height=40),
                     ft.Container(
-                        ft.Column([ft.Text("СИСТЕМА", size=9, color=DESKTOP_DIM), settings_item], spacing=6),
+                        ft.Column([ft.Text(t("СИСТЕМА"), size=9, color=DESKTOP_DIM), settings_item], spacing=6),
                         padding=ft.Padding.symmetric(horizontal=10, vertical=6),
                     ),
                     ft.Container(height=1, bgcolor=DESKTOP_LINE),
@@ -463,7 +494,7 @@ class DesktopApp:
                                 ft.Row(
                                     [
                                         ft.Icon(ft.Icons.CIRCLE, size=7, color=DESKTOP_OK),
-                                        ft.Text("Система готова", size=11, color=DESKTOP_MUTED),
+                                        ft.Text(t("Система готова"), size=11, color=DESKTOP_MUTED),
                                     ],
                                     spacing=7,
                                 ),
@@ -662,6 +693,7 @@ class DesktopApp:
         if autostart.is_supported():
             items.append(self.autostart_switch)
         items.append(self.results_count_dropdown)
+        items.append(self.language_dropdown)
         items += [ft.Divider(color=DESKTOP_LINE), self.ma3_dir_field, self.ma2_dir_field]
         items += [
             ft.Divider(color=DESKTOP_LINE),
@@ -704,7 +736,7 @@ class DesktopApp:
             getattr(self, f"{view_name}_view").visible = view_name == name
         for nav_name, container in self._nav_containers.items():
             container.bgcolor = DESKTOP_PANEL2 if nav_name == name else None
-        self.breadcrumb.value = f"GMAGC / {_SCREEN_LABELS[name]}"
+        self.breadcrumb.value = f"GMAGC / {_screen_label(name)}"
         self.page.update()
 
     def _update_metrics(self) -> None:
@@ -729,6 +761,7 @@ class DesktopApp:
             self.update_bar.switch.value = self.service.settings.check_updates
         self.large_text_switch.value = self.service.settings.large_text
         self.results_count_dropdown.value = str(self.service.settings.results_count)
+        self.language_dropdown.value = self.service.settings.language
         self.ma3_dir_field.value = self.service.settings.ma3_fixture_dir
         self.ma2_dir_field.value = self.service.settings.ma2_fixture_dir
         self.ma3_dir_field.hint_text = self._fixture_hint(default_ma3_dir())
@@ -736,7 +769,9 @@ class DesktopApp:
         self._apply_theme()
         if autostart.is_supported():
             self.autostart_switch.value = autostart.is_autostart_enabled()
-        self.page.services.extend([self.picker, self.clipboard])
+        for service in (self.picker, self.clipboard):
+            if service not in self.page.services:  # при пересборке те же службы уже добавлены
+                self.page.services.append(service)
         self.page.on_keyboard_event = self.on_key
         if self.service.settings.server_enabled:
             self.server_switch.value = True
@@ -973,6 +1008,23 @@ class DesktopApp:
 
     def on_fixture_dirs_change(self, _event) -> None:
         self.service.set_fixture_dirs(self.ma3_dir_field.value or "", self.ma2_dir_field.value or "")
+
+    def on_language_change(self, _event) -> None:
+        """Выбор языка: сохраняется и применяется сразу, интерфейс собирается заново на новом языке."""
+        choice = self.language_dropdown.value or "auto"
+        self.service.set_language(choice)
+        i18n.set_language(choice)
+        self.rebuild("settings")
+
+    def rebuild(self, view: str = "settings") -> DesktopApp:
+        """Собирает приложение заново на тех же службах (индекс, сервер, настройки сохраняются) и открывает экран `view`.
+
+        Временное состояние экрана (текущее фото и результаты) теряется."""
+        fresh = DesktopApp(self.page, self.service, **self._kwargs)
+        fresh.build()
+        fresh._show(view)
+        self.rebuilt_as = fresh
+        return fresh
 
     def on_results_count_change(self, _event) -> None:
         self.service.set_results_count(int(self.results_count_dropdown.value))
@@ -1380,6 +1432,7 @@ def build_page(page: ft.Page, service: SearchService | None = None, **services) 
     if window is not None:
         window.width, window.height = 1100, 760
     service = service or SearchService(data_dir())
+    i18n.set_language(service.saved_language())  # до сборки: тексты берутся при создании элементов
     if "updates" not in services:  # updates=None в тестах отключает обновления
         services["updates"] = UpdateManager(service, data_dir())
     services.setdefault("log_path", setup_logging(service.data_dir))

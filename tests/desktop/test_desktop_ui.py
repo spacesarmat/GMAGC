@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import gmagc_desktop.ui.app as app_module
+from gmagc_common import i18n
 from gmagc_desktop.about import AUTHOR, NAME, VERSION
 from gmagc_desktop.library.index import IndexCancelled
 from gmagc_desktop.matcher.synthetic import simulate_photo
@@ -757,3 +758,66 @@ def test_the_fixture_folder_fields_start_from_the_saved_settings(tmp_path):
     app, _ = make_app(tmp_path)
 
     assert (app.ma3_dir_field.value, app.ma2_dir_field.value) == ("D:/ma3", "D:/ma2")
+
+
+def all_texts(app):
+    return [c.value for c in walk(app.page.added[-1]) if isinstance(c, ft.Text)]
+
+
+def test_the_language_dropdown_offers_auto_russian_and_english_and_shows_the_saved_choice(tmp_path):
+    app, _ = make_app(tmp_path)
+
+    assert app.language_dropdown in list(walk(app.settings_view))
+    assert [o.key for o in app.language_dropdown.options] == ["auto", "ru", "en"]
+    assert app.language_dropdown.value == "auto"
+
+
+def test_switching_to_english_rebuilds_the_interface_in_english_and_opens_settings(tmp_path):
+    app, page = make_app(tmp_path)
+    old_services = list(page.services)
+
+    app.language_dropdown.value = "en"
+    app.on_language_change(None)
+
+    new = app.rebuilt_as
+    assert new is not None and new is not app and new.current_view == "settings"
+    assert app.service.settings.language == "en" and i18n.current_language() == "en"
+    texts_now = all_texts(new)
+    assert "Settings" in texts_now and "Library" in texts_now and new.breadcrumb.value == "GMAGC / Settings"
+    assert new.language_dropdown.value == "en"
+    assert page.services == old_services  # выбор файлов и буфер обмена не задваиваются
+    assert new.server is app.server and new.picker is app.picker and new.clipboard is app.clipboard
+
+
+def test_switching_back_to_russian_restores_the_russian_labels(tmp_path):
+    app, _ = make_app(tmp_path)
+    app.language_dropdown.value = "en"
+    app.on_language_change(None)
+    english = app.rebuilt_as
+
+    english.language_dropdown.value = "ru"
+    english.on_language_change(None)
+
+    assert i18n.current_language() == "ru" and "Настройки" in all_texts(english.rebuilt_as)
+
+
+def test_the_saved_language_is_applied_when_the_app_starts(tmp_path):
+    from gmagc_desktop.service.search_service import SearchService
+
+    first = SearchService(tmp_path / "data")
+    first.load()
+    first.set_language("en")
+
+    app, _ = make_app(tmp_path)
+
+    assert i18n.current_language() == "en" and "Settings" in all_texts(app)
+
+
+def test_a_rebuild_does_not_create_a_new_support_prompt(tmp_path):
+    app, _ = make_app(tmp_path, support=True, support_delay=999)
+    assert app.support is not None
+
+    app.language_dropdown.value = "en"
+    app.on_language_change(None)
+
+    assert app.rebuilt_as.support is None  # повторный показ окна поддержки и счётчик запусков не нужны
