@@ -35,3 +35,4 @@ models/
 
 # graphify: локальный граф знаний и выгрузка для Obsidian
 graphify-out/
+apps/*/uv.lock
