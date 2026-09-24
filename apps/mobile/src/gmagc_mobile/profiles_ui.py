@@ -20,11 +20,12 @@ from gmagc_common.fixtures import (
     channel_from_template,
     new_profile,
     next_free_dmx,
+    profile_file_name,
     profile_to_dict,
     template_by_id,
     validate_profile,
 )
-from gmagc_common.ma2_export import export_ma2
+from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_mobile.profile_store import ProfileStore
 
@@ -255,20 +256,30 @@ class ProfileEditor:
             controls.append(ft.Text(text, size=12, color=color))
         return controls
 
-    async def on_share(self, _event) -> None:
-        """Отправляет профиль как JSON через системное «Поделиться»: до появления экспорта это единственный выход."""
-        if self.profile is None:
-            return
-        text = json.dumps(profile_to_dict(self.profile), ensure_ascii=False, indent=2)
-        subject = f"{self.profile.manufacturer} {self.profile.name}".strip() or "Профиль прибора"
+    async def _share_files(self, files: list[tuple[str, str, str]], subject: str) -> None:
+        """Отправляет файлы (имя, текст, mime-тип) через системное «Поделиться»: приложение получает готовый файл."""
         try:
-            await self.share.share_text(text, subject=subject)
+            await self.share.share_files(
+                [ft.ShareFile.from_bytes(text.encode("utf-8"), mime_type=mime, name=name) for name, text, mime in files],
+                subject=subject,
+            )
         except Exception as error:  # noqa: BLE001 - недоступное «Поделиться» не должно ломать редактор
             self.message = f"Не удалось поделиться: {error}"
             self.render()
 
+    def _subject(self) -> str:
+        return f"{self.profile.manufacturer} {self.profile.name}".strip() or "Профиль прибора"
+
+    async def on_share(self, _event) -> None:
+        """Профиль файлом .json: его можно открыть в GMAGC на другом телефоне или превратить в файл пульта скриптом."""
+        if self.profile is None:
+            return
+        text = json.dumps(profile_to_dict(self.profile), ensure_ascii=False, indent=2)
+        name = profile_file_name(self.profile, "json")
+        await self._share_files([(name, text, "application/json")], self._subject())
+
     async def on_share_ma3(self, _event) -> None:
-        """Отправляет готовый тип прибора grandMA3 (XML) через «Поделиться»: получателю остаётся сохранить как .xml."""
+        """Готовый тип прибора grandMA3 файлом .xml: остаётся положить его в fixturetypes и импортировать."""
         if self.profile is None:
             return
         try:
@@ -277,29 +288,22 @@ class ProfileEditor:
             self.message = str(error)
             self.render()
             return
-        subject = f"{self.profile.manufacturer} {self.profile.name}".strip() or "Тип прибора grandMA3"
-        try:
-            await self.share.share_text(text, subject=f"{subject} (grandMA3 XML)")
-        except Exception as error:  # noqa: BLE001
-            self.message = f"Не удалось поделиться: {error}"
-            self.render()
+        name = profile_file_name(self.profile, "xml")
+        await self._share_files([(name, text, "application/xml")], f"{self._subject()} (grandMA3)")
 
     async def on_share_ma2(self, _event) -> None:
-        """Отправляет тип прибора grandMA2 (XML) открытого режима: в MA2 один файл описывает один режим."""
-        if self.profile is None or self.mode_index is None:
+        """Типы прибора grandMA2 файлами .xml, по одному на режим (в MA2 один файл описывает один режим)."""
+        if self.profile is None:
             return
         try:
-            text = export_ma2(self.profile, self.mode_index)
+            files = export_ma2_files(self.profile)
         except ExportError as error:
             self.message = str(error)
             self.render()
             return
-        subject = f"{self.profile.manufacturer} {self.profile.name} {self.mode.name}".strip()
-        try:
-            await self.share.share_text(text, subject=f"{subject} (grandMA2 XML)")
-        except Exception as error:  # noqa: BLE001
-            self.message = f"Не удалось поделиться: {error}"
-            self.render()
+        await self._share_files(
+            [(name, text, "application/xml") for name, text in files], f"{self._subject()} (grandMA2)"
+        )
 
     async def _set_text(self, field: str, value: str, *, render: bool = True) -> None:
         await self.set_profile_text(field, value, render=render)
@@ -338,8 +342,13 @@ class ProfileEditor:
                 )
             )
         controls.append(ft.Button("Добавить режим", icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
-        controls.append(ft.TextButton("Поделиться профилем (JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
-        controls.append(ft.TextButton("Поделиться для grandMA3 (XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma3))
+        controls.append(ft.TextButton("Поделиться профилем (файл JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
+        controls.append(ft.TextButton("Поделиться для grandMA3 (файл XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma3))
+        controls.append(
+            ft.TextButton(
+                "Поделиться для grandMA2 (файлы XML режимов)", icon=ft.Icons.SHARE, on_click=self.on_share_ma2
+            )
+        )
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
 
@@ -409,9 +418,6 @@ class ProfileEditor:
         )
         issues = [i for i in validate_profile(self.profile) if i.path == mode.name or i.path.startswith(f"{mode.name} → ")]
         controls.extend(self._issue_controls(issues))
-        controls.append(
-            ft.TextButton("Поделиться режим для grandMA2 (XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma2)
-        )
         return controls
 
     # ---- канал и диапазоны --------------------------------------------------

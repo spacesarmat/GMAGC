@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -260,3 +261,13 @@ def validate_profile(profile: FixtureProfile) -> list[Issue]:
                 issues.append(Issue(path, "значение по умолчанию должно быть 0–255", True))
             _check_ranges(channel, path, issues)
     return issues
+
+
+def file_part(text: str) -> str:
+    """Часть имени файла в стиле библиотек MA: нижний регистр, всё лишнее заменено на «_»."""
+    return re.sub(r"[^\w]+", "_", text.lower()).strip("_")
+
+
+def profile_file_name(profile: FixtureProfile, extension: str) -> str:
+    """Имя файла профиля «производитель@модель.расширение»."""
+    return f"{file_part(profile.manufacturer)}@{file_part(profile.name)}.{extension}"

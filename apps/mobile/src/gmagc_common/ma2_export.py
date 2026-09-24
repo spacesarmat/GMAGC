@@ -7,12 +7,11 @@
 
 from __future__ import annotations
 
-import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 
-from gmagc_common.fixtures import Channel, FixtureProfile, Mode, has_errors, validate_profile
+from gmagc_common.fixtures import Channel, FixtureProfile, Mode, file_part, has_errors, validate_profile
 from gmagc_common.ma3_export import ExportError
 
 MA_NAMESPACE = "http://schemas.malighting.de/grandma2/xml/MA"
@@ -91,10 +90,7 @@ def _resolve(mode: Mode) -> list[Ma2Attr]:
 def ma2_file_name(profile: FixtureProfile, mode: Mode) -> str:
     """Имя файла по правилу библиотеки MA: производитель@модель@режим.xml, нижний регистр, всё лишнее — «_»."""
 
-    def part(text: str) -> str:
-        return re.sub(r"[^\w]+", "_", text.lower()).strip("_")
-
-    return f"{part(profile.manufacturer)}@{part(profile.name)}@{part(mode.name)}.xml"
+    return f"{file_part(profile.manufacturer)}@{file_part(profile.name)}@{file_part(mode.name)}.xml"
 
 
 def _sets(function: ET.Element, channel: Channel, spec: Ma2Attr) -> None:

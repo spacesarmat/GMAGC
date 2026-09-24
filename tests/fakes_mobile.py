@@ -108,16 +108,22 @@ def frame_event(width=300, height=300, encoded_format="jpeg", data=b"JPEG-frame"
 
 
 class FakeShare:
-    """Замена ft.Share: запоминает вызовы share_text, не открывает системное окно."""
+    """Замена ft.Share: запоминает вызовы share_text и share_files, не открывает системное окно."""
 
     def __init__(self, fail=False):
         self.fail = fail
         self.texts = []
+        self.files = []  # (имя файла, содержимое в байтах, mime-тип) по порядку отправки
 
     async def share_text(self, text, **kwargs):
         if self.fail:
             raise RuntimeError("нет приложения для отправки")
         self.texts.append(text)
+
+    async def share_files(self, files, **kwargs):
+        if self.fail:
+            raise RuntimeError("нет приложения для отправки")
+        self.files.extend((item.name, item.data, item.mime_type) for item in files)
 
 
 class FakePermission:
