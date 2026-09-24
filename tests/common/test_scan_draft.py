@@ -137,3 +137,13 @@ def test_a_draft_survives_a_dict_round_trip():
 def test_a_malformed_draft_dict_is_rejected():
     with pytest.raises(ValueError):
         ScanDraft.from_dict({"modes": "x"})
+
+
+def test_a_channel_without_a_number_continues_the_last_channel_of_the_mode():
+    first = ScanDraft((DraftMode("9CH", (channel(3, "macro", [Range(0, 5, "null")]), channel(4, "Speed"))),), (), "local")
+    orphan = ScanDraft((DraftMode("", (DraftChannel(0, "", "custom", 8, (Range(226, 229, "effect 56"),)),)),), (), "local")
+
+    merged = merge_drafts(first, orphan)
+
+    channels = {c.dmx: c for c in merged.modes[0].channels}
+    assert [(r.start, r.end) for r in channels[4].ranges] == [(226, 229)] and channels[3].ranges[0].start == 0

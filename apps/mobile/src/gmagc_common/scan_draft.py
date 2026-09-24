@@ -13,6 +13,7 @@ from gmagc_common.fixtures import Range
 
 ENGINE_LOCAL = "local"
 ENGINE_CLOUD = "cloud"
+WARN_NO_TABLE = "no_table"  # на странице не найдено таблицы DMX (коды предупреждений телефон переводит сам)
 
 _DASH = "-–—‒~"
 _RANGE = re.compile(rf"^\s*(\d{{1,3}})\s*[{_DASH}]+\s*(\d{{1,3}})\s*[:：;.]?\s*(.*)$")
@@ -30,7 +31,10 @@ def parse_range_line(text: str) -> Range | None:
     start, end = int(match.group(1)), int(match.group(2))
     if not 0 <= start <= end <= 255:
         return None
-    return Range(start, end, match.group(3).strip(" ;.,"))
+    name = match.group(3).strip(" ;.,")
+    if not name or name.startswith(("(", "（")):  # «000-255» и «20-255(default235)» — диапазоны меню, не таблицы каналов
+        return None
+    return Range(start, end, name)
 
 
 def guess_template(name: str) -> str:
@@ -148,16 +152,23 @@ class ScanDraft:
             raise ValueError(f"неверный черновик: {error!r}") from error
 
 
-def _merge_channels(existing: tuple[DraftChannel, ...], extra: tuple[DraftChannel, ...]) -> tuple[DraftChannel, ...]:
+def merge_channels(existing: tuple[DraftChannel, ...], extra: tuple[DraftChannel, ...]) -> tuple[DraftChannel, ...]:
     by_dmx = {c.dmx: c for c in existing}
     for channel in extra:
+        if channel.dmx == 0 and by_dmx:  # диапазоны без метки канала: продолжение последнего канала предыдущей страницы
+            channel = replace(channel, dmx=max(by_dmx))
         known = by_dmx.get(channel.dmx)
         if known is None:
             by_dmx[channel.dmx] = channel
             continue
         ranges = sorted(
-            {(r.start, r.end, r.name): r for r in (*known.ranges, *channel.ranges)}.values(), key=lambda r: (r.start, r.end)
+            {(r.start, r.end, r.name): r for r in (*known.ranges, *channel.ranges)}.values(),
+            key=lambda r: (r.start, r.end),
         )
+        if channel.confidence > known.confidence:  # запасное название «Channel N» уступает настоящему
+            known = replace(
+                known, name=channel.name, template=channel.template, bits=channel.bits, confidence=channel.confidence
+            )
         by_dmx[channel.dmx] = replace(
             known,
             name=known.name or channel.name,
@@ -181,5 +192,5 @@ def merge_drafts(first: ScanDraft, second: ScanDraft) -> ScanDraft:
         if target is None:
             modes.append(mode)
         else:
-            modes[target] = DraftMode(modes[target].name, _merge_channels(modes[target].channels, mode.channels))
+            modes[target] = DraftMode(modes[target].name, merge_channels(modes[target].channels, mode.channels))
     return ScanDraft(tuple(modes), first.warnings + second.warnings, first.engine or second.engine)
