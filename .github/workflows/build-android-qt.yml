@@ -26,6 +26,10 @@ jobs:
       - name: Инструменты Qt for Python
         run: |
           python -m pip install "pyside6==$PYSIDE_VERSION" "shiboken6==$PYSIDE_VERSION" pip setuptools wheel
+      - name: Зависимости pyside6-android-deploy
+        run: |
+          REQ="$(python -c 'import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), "scripts", "requirements-android.txt"))')"
+          python -m pip install -r "$REQ"
       - name: Android SDK и NDK
         run: |
           git clone --depth 1 --branch "v$PYSIDE_VERSION" https://code.qt.io/pyside/pyside-setup "$RUNNER_TEMP/pyside-setup"
