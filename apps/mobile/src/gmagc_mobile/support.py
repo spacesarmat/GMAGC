@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 import flet as ft
 
+from gmagc_common.i18n import t
 from gmagc_common.support import (
     AUTHOR_TELEGRAM_URL,
     CHANNEL_URL,
@@ -85,9 +86,9 @@ class SupportPrompt:
                 title=ft.Text(DIALOG_TITLE),
                 content=ft.Text(DIALOG_TEXT),
                 actions=[
-                    ft.Button("Поддержать", on_click=self.on_support),
-                    ft.TextButton(content=ft.Text("Позже"), on_click=self.on_later),
-                    ft.TextButton(content=ft.Text("Больше не показывать"), on_click=self.on_never),
+                    ft.Button(t("Поддержать"), on_click=self.on_support),
+                    ft.TextButton(content=ft.Text(t("Позже")), on_click=self.on_later),
+                    ft.TextButton(content=ft.Text(t("Больше не показывать")), on_click=self.on_never),
                 ],
             )
         )

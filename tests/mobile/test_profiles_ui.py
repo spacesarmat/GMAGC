@@ -441,3 +441,17 @@ def test_the_modes_block_on_the_profile_screen_is_titled_mod():
     open_new(editor)
 
     assert "Мод" in texts(editor.view) and "Режимы" not in texts(editor.view)
+
+
+def test_the_editor_speaks_english_when_the_language_is_english():
+    from gmagc_common import i18n
+
+    i18n.set_language("en")
+    editor, _, _ = make_editor()
+    open_new(editor)
+
+    text = shown(editor)
+    assert "Manufacturer" not in text  # это подпись поля ввода, а не Text: проверяем видимые заголовки и кнопки
+    labels = [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+    assert "Send to PC" in labels and "Add a mode" in labels
+    assert "Modes" in texts(editor.view) and "Мод" not in texts(editor.view)

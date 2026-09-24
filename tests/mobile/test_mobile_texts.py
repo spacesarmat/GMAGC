@@ -2,9 +2,9 @@ from gmagc_common.protocol import Connection, Status
 from gmagc_mobile import client
 from gmagc_mobile.client import ClientError
 from gmagc_mobile.texts import (
-    NO_INDEX_NOTE,
     error_text,
     history_text,
+    no_index_note,
     outcome_message,
     score_text,
     share_text,
@@ -45,7 +45,7 @@ def test_status_line_shows_the_pc_and_the_library_size():
     assert line == "Подключено: 192.168.1.5:8765 · 11\u00a0178 файлов"
     assert "не построен" in status_line(Connection("10.0.0.7", 8766, "ABCD2345"), Status(False, 0, 0, False, 0, 0))
     assert "индексация" in status_line(Connection("10.0.0.7", 8766, "ABCD2345"), Status(True, 5, 5, True, 2, 5))
-    assert "индекс" in NO_INDEX_NOTE
+    assert "индекс" in no_index_note()
 
 
 def test_zoom_text():
@@ -61,3 +61,15 @@ def test_share_text_summarizes_the_top_result_or_says_no_projection():
     text = share_text(sample_response())
     assert "a.png (91.2%)" in text and "C:\\gobos\\vendor\\a.png" in text
     assert share_text(sample_response("no_projection", results=[])) == "GMAGC: проекция на фото не найдена"
+
+
+def test_the_status_line_uses_the_right_word_form_for_the_file_count_in_both_languages():
+    from gmagc_common import i18n
+    from gmagc_common.protocol import Connection, Status
+
+    pc = Connection("192.168.1.5", 8765, "ABCD2345")
+    one, few, many = (Status(True, n, n, False, 0, 0) for n in (1, 2, 5))
+
+    assert [status_line(pc, s).endswith(word) for s, word in ((one, "файл"), (few, "файла"), (many, "файлов"))] == [True] * 3
+    i18n.set_language("en")
+    assert status_line(pc, one).endswith("1 file") and status_line(pc, many).endswith("5 files")

@@ -108,3 +108,7 @@ def test_plural_picks_the_russian_form_by_the_number_and_the_english_one_by_the_
 def test_language_names_are_shown_in_their_own_language():
     assert i18n.language_name("ru") == "Русский" and i18n.language_name("en") == "English"
     assert i18n.language_name("auto").startswith("Авто") or i18n.language_name("auto").startswith("Auto")
+
+
+def test_a_parameter_named_text_does_not_clash_with_the_message_argument():
+    assert i18n.t("Прочитано: {text}", text="привет") == "Прочитано: привет"

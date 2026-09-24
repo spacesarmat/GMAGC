@@ -7,9 +7,10 @@ import asyncio
 import flet_camera as fc
 import flet_permission_handler as ph
 
+from gmagc_common.i18n import t
+
 FOCUS_SETTLE_SECONDS = 0.8  # сколько ждать наведения, прежде чем зафиксировать фокус после касания
 RETRY_SECONDS = 0.5  # пауза перед второй попыткой запуска: виджет камеры мог ещё не появиться на экране
-UNSUPPORTED_TEXT = "Камера доступна только на телефоне (Android): здесь можно выбрать фото из галереи"
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -45,22 +46,22 @@ class CameraController:
         делается вторая попытка: после возврата на экран виджет камеры мог ещё не успеть появиться.
         """
         if not self.supported:
-            self.error = UNSUPPORTED_TEXT
+            self.error = unsupported_text()
             return False
         self.ready = False
         for attempt in (1, 2):
             try:
                 if await self.permission.request(ph.Permission.CAMERA) != ph.PermissionStatus.GRANTED:
-                    self.error = "Нет доступа к камере: разрешите его в настройках телефона"
+                    self.error = t("Нет доступа к камере: разрешите его в настройках телефона")
                     return False
                 cameras = await self.camera.get_available_cameras()
                 if not cameras:
-                    self.error = "Камера не найдена"
+                    self.error = t("Камера не найдена")
                     return False
                 chosen = next((c for c in cameras if c.lens_direction == fc.CameraLensDirection.BACK), cameras[0])
                 await self.camera.initialize(chosen, fc.ResolutionPreset.HIGH, enable_audio=False)
             except Exception as error:  # noqa: BLE001 - экран должен показать причину, а не закрыться
-                self.error = f"Ошибка камеры: {error}"
+                self.error = t("Ошибка камеры: {error}", error=error)
                 if attempt == 1:
                     await asyncio.sleep(self.retry_seconds)
                     continue
@@ -97,7 +98,7 @@ class CameraController:
         try:
             await self.camera.set_zoom_level(target)
         except Exception as error:  # noqa: BLE001
-            self.error = f"Приближение недоступно: {error}"
+            self.error = t("Приближение недоступно: {error}", error=error)
             return self.zoom
         self.zoom = target
         return target
@@ -119,7 +120,7 @@ class CameraController:
                 await asyncio.sleep(self.settle_seconds)
                 await self.camera.set_focus_mode(fc.FocusMode.LOCKED)
         except Exception as error:  # noqa: BLE001 - не все камеры умеют наводить по точке
-            self.error = f"Фокус по точке недоступен: {error}"
+            self.error = t("Фокус по точке недоступен: {error}", error=error)
             return False
         return True
 
@@ -129,7 +130,7 @@ class CameraController:
         try:
             await self.camera.set_focus_mode(fc.FocusMode.LOCKED if target else fc.FocusMode.AUTO)
         except Exception as error:  # noqa: BLE001
-            self.error = f"Фокус недоступен: {error}"
+            self.error = t("Фокус недоступен: {error}", error=error)
             return self.focus_locked
         self.focus_locked = target
         return target
@@ -149,7 +150,7 @@ class CameraController:
             await self.camera.start_image_stream()
         except Exception as error:  # noqa: BLE001 - экран остаётся рабочим, просто без автосканирования
             self.camera.on_stream_image = None
-            self.error = f"Поток камеры недоступен: {error}"
+            self.error = t("Поток камеры недоступен: {error}", error=error)
             return False
         self._scanning = True
         return True
@@ -166,7 +167,7 @@ class CameraController:
 
     async def take_picture(self) -> bytes:
         if not self.ready:
-            raise RuntimeError(self.error or "камера не готова")
+            raise RuntimeError(self.error or t("камера не готова"))
         return await self.camera.take_picture()
 
     async def pause(self) -> None:
@@ -182,3 +183,7 @@ class CameraController:
                 await self.camera.resume_preview()
             except Exception:  # noqa: BLE001
                 pass
+
+
+def unsupported_text() -> str:
+    return t("Камера доступна только на телефоне (Android): здесь можно выбрать фото из галереи")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 
+from gmagc_common.i18n import t
 from gmagc_common.protocol import Connection, parse_link
 
 MAX_SIDE = 1600
@@ -81,7 +82,9 @@ def decode_frame(width: int, height: int, encoded_format: str, data: bytes) -> s
     Image, pyzbar = _load()
     size = width * height
     if width <= 0 or height <= 0 or len(data) < size:
-        raise QrImageError(f"кадр камеры повреждён: {len(data)} байт для {width}×{height}")
+        raise QrImageError(
+            t("кадр камеры повреждён: {count} байт для {width}×{height}", count=len(data), width=width, height=height)
+        )
     picture = Image.frombytes("L", (width, height), data[:size])
     picture.thumbnail((MAX_SIDE, MAX_SIDE))
     return _scan(picture, pyzbar)
@@ -101,19 +104,19 @@ def _image_kind(data: bytes) -> str:
         return "WEBP"
     if data[4:8] == b"ftyp":
         return "HEIF"
-    return "неизвестный формат"
+    return t("неизвестный формат")
 
 
 def describe_shot(data: bytes) -> str:
     """Формат, размер файла и размеры кадра: `JPEG, 212 КБ, 1280×720`."""
-    text = f"{_image_kind(data)}, {len(data) // 1024} КБ"
+    text = t("{kind}, {size} КБ", kind=_image_kind(data), size=len(data) // 1024)
     try:
         from PIL import Image  # только Pillow: размеры видны, даже если библиотека zbar не загрузилась
 
         with Image.open(io.BytesIO(data)) as picture:
             text += f", {picture.width}×{picture.height}"
     except Exception:  # noqa: BLE001 - диагностика не должна падать
-        text += ", Pillow не открывает"
+        text += t(", Pillow не открывает")
     return text
 
 
@@ -122,13 +125,15 @@ def selftest() -> str:
     try:
         text = decode_qr(SELFTEST_PNG)
     except QrUnavailable as error:
-        return f"библиотека недоступна ({error})"
+        return t("библиотека недоступна ({error})", error=error)
     except QrImageError as error:
-        return f"Pillow не открывает PNG ({error})"
+        return t("Pillow не открывает PNG ({error})", error=error)
     except Exception as error:  # noqa: BLE001
-        return f"сбой ({type(error).__name__}: {error})"
-    return "ок" if text == SELFTEST_TEXT else f"не прочитан ({text!r})"
+        return t("сбой ({kind}: {error})", kind=type(error).__name__, error=error)
+    return t("ок") if text == SELFTEST_TEXT else t("не прочитан ({text})", text=repr(text))
 
 
 def diagnose(data: bytes) -> str:
-    return f"снимок: {describe_shot(data)}; самопроверка чтения QR: {selftest()}"
+    return t(
+        "снимок: {describe_shot}; самопроверка чтения QR: {selftest}", describe_shot=describe_shot(data), selftest=selftest()
+    )
