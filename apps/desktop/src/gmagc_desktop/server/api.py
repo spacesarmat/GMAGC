@@ -21,6 +21,7 @@ from gmagc_common.protocol import (
     MAX_PROFILE_BYTES,
     MAX_SCAN_BYTES,
     ApiError,
+    GoboList,
     Health,
     MatchResponse,
     ResultItem,
@@ -36,6 +37,7 @@ from gmagc_desktop.service.search_service import NoIndexError, PhotoError, Searc
 from gmagc_desktop.service.settings import MAX_TOP_N
 
 log = logging.getLogger("gmagc.server")
+MAX_GOBO_LIST = 60  # гобо в одном ответе поиска по имени
 DRAIN_LIMIT = 2 * MAX_IMAGE_BYTES  # столько лишнего тела дочитываем, чтобы клиент увидел ответ, а не обрыв соединения
 
 
@@ -105,6 +107,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._health()
         elif path == "/api/status":
             self._authorized(self._status)
+        elif path == "/api/gobos":
+            self._authorized(self._gobos)
+        elif path == "/api/gobo":
+            self._authorized(self._gobo)
         else:
             self._error("not_found", "нет такого метода")
 
@@ -221,6 +227,34 @@ class ApiHandler(BaseHTTPRequestHandler):
         request_id = secrets.token_hex(4)
         self._send_json(200, match_response(request_id, outcome).to_dict())
         self._notify(RequestRecord(request_id, time.time(), self.client_address[0], data, outcome))
+
+    def _gobos(self) -> None:
+        """Поиск гобо в библиотеке по имени: ?q=слова&limit=N."""
+        query = parse_qs(urlsplit(self.path).query)
+        text = (query.get("q") or [""])[0]
+        try:
+            limit = min(max(int((query.get("limit") or ["30"])[0]), 1), MAX_GOBO_LIST)
+        except ValueError:
+            limit = 30
+        try:
+            items, total = self.context.service.find_gobos(text, limit)
+        except NoIndexError:
+            self._error("no_index", "на ПК не выбрана библиотека или индекс ещё не построен")
+            return
+        self._send_json(200, GoboList(tuple(items), total).to_dict())
+
+    def _gobo(self) -> None:
+        """Одно гобо по пути в библиотеке или полному пути файла (?path=…), например из результата поиска по фото."""
+        path = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+        try:
+            item = self.context.service.gobo_by_path(path) if path else None
+        except NoIndexError:
+            self._error("no_index", "на ПК не выбрана библиотека или индекс ещё не построен")
+            return
+        if item is None:
+            self._error("not_found", "такого гобо нет в библиотеке")
+            return
+        self._send_json(200, item.to_dict())
 
     def _fixture_scan(self) -> None:
         """Фото или PDF инструкции → черновик каналов (`ScanDraft`); распознавание локальное, на этом ПК."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from urllib.parse import quote
 
 from gmagc_common.i18n import t
 from gmagc_common.protocol import (
@@ -12,6 +13,8 @@ from gmagc_common.protocol import (
     ApiError,
     Connection,
     FixtureUploadResult,
+    GoboItem,
+    GoboList,
     Health,
     MatchResponse,
     ProtocolError,
@@ -118,6 +121,22 @@ class GmagcClient:
             return FixtureUploadResult.from_dict(data)
         except ProtocolError as error:
             raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на отправку профиля.")) from error
+
+    def find_gobos(self, query: str, limit: int = 30) -> GoboList:
+        """Гобо библиотеки на ПК по словам из имени файла или папки."""
+        data = self._request("GET", f"/api/gobos?q={quote(query)}&limit={limit}")
+        try:
+            return GoboList.from_dict(data)
+        except ProtocolError as error:
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на поиск гобо.")) from error
+
+    def gobo(self, path: str) -> GoboItem:
+        """Одно гобо по пути в библиотеке или полному пути файла (например, из результата поиска по фото)."""
+        data = self._request("GET", f"/api/gobo?path={quote(path)}")
+        try:
+            return GoboItem.from_dict(data)
+        except ProtocolError as error:
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на поиск гобо.")) from error
 
     def scan_fixture(self, data: bytes, content_type: str = "image/jpeg", engine: str = "local") -> ScanDraft:
         """Отправляет фото или PDF инструкции на ПК и возвращает черновик каналов.

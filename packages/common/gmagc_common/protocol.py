@@ -267,6 +267,57 @@ class FixtureUploadResult:
 
 
 @dataclass(frozen=True)
+class GoboItem:
+    """Гобо из библиотеки на ПК для слота колеса: путь в библиотеке, путь картинки в типе, превью и миниатюра слота."""
+
+    name: str
+    source: str  # путь относительно библиотеки
+    path: str  # путь картинки в файле типа (media_filename)
+    png: bytes  # превью для списка на телефоне
+    thumb: str  # base64(zlib(RGBA 64×64)) для файла типа
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "source": self.source,
+            "path": self.path,
+            "png": _encode(self.png),
+            "thumb": self.thumb,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> GoboItem:
+        return _parse(
+            lambda: cls(
+                str(data["name"]),
+                str(data["source"]),
+                str(data["path"]),
+                _decode(data["png"]) or b"",
+                str(data["thumb"]),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class GoboList:
+    items: tuple[GoboItem, ...]
+    total: int  # сколько нашлось всего (в ответе не больше limit)
+
+    def to_dict(self) -> dict:
+        return {"items": [item.to_dict() for item in self.items], "total": self.total}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> GoboList:
+        def build() -> GoboList:
+            items = data["items"]
+            if not isinstance(items, list):
+                raise TypeError(t("ожидался список"))
+            return cls(tuple(GoboItem.from_dict(item) for item in items), int(data["total"]))
+
+        return _parse(build)
+
+
+@dataclass(frozen=True)
 class Status:
     indexed: bool
     files: int

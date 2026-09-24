@@ -94,6 +94,7 @@ EN = {
     "Ответ GitHub не похож на релиз": "The GitHub reply does not look like a release",
     "миниатюра гобо «{name}» повреждена": "the thumbnail of gobo “{name}” is damaged",
     "миниатюра гобо «{name}» имеет неверный размер": "the thumbnail of gobo “{name}” has the wrong size",
+    "ожидался список": "a list was expected",
 }
 
 register("en", EN)

@@ -252,6 +252,15 @@ EN = {
     "Отмена": "Cancel",
     "Добавление отменено.": "Adding cancelled.",
     "Отменить": "Undo",
+    "Неожиданный ответ ПК на поиск гобо.": "Unexpected reply from the PC to the gobo search.",
+    "Гобо из библиотеки": "Gobo from the library",
+    "Имя гобо": "Gobo name",
+    "Найти по фото": "Find by photo",
+    "Ищу на ПК…": "Searching on the PC…",
+    "Ничего не найдено.": "Nothing found.",
+    "Ещё {count}: уточните запрос.": "{count} more: narrow the query.",
+    "Гобо: {name}": "Gobo: {name}",
+    "Убрать гобо": "Remove the gobo",
 }
 
 register("en", EN)

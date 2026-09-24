@@ -206,6 +206,7 @@ EN = {
     "Необязательно. Файл уходит в облако только по кнопке на телефоне и после подтверждения.": (
         "Optional. A file goes to the cloud only when you press the button on the phone and confirm."
     ),
+    "индекс библиотеки не построен": "the library index is not built",
 }
 
 register("en", EN)

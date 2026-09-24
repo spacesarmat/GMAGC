@@ -726,3 +726,144 @@ def test_undo_is_not_offered_after_a_new_mode_or_after_another_edit_or_leaving()
     run(editor.apply_draft(0, new_mode=False))
     editor.go_back()
     assert editor.undo_mode is None
+
+
+# ---- гобо из библиотеки для диапазона колеса ---------------------------------------------------
+def make_gobo_item(name, thumb=""):
+    from gmagc_common.protocol import GoboItem
+
+    return GoboItem(name, f"Stars/{name}.png", f"GMAGC/{name}_abc123.png", b"\x89PNG", thumb)
+
+
+def make_gobo_editor(search=None, photo=None):
+    from gmagc_common.fixtures import Range as _Range
+
+    editor = ProfileEditor(
+        StubPage(), ProfileStore(FakePrefs()), FakeShare(), on_exit=lambda: None, gobo_search=search, gobo_photo=photo
+    )
+    channel = Channel(1, 8, "Gobo", "gobo_wheel", 0, (_Range(0, 9, "open"), _Range(10, 19, "")))
+    editor.profile = FixtureProfile("a" * 32, "M", "N", "", (Mode("Std", (channel,)),))
+    editor.mode_index = 0
+    editor.channel_index = 0
+    editor.screen = "channel"
+    return editor
+
+
+def test_only_gobo_wheel_ranges_offer_the_library():
+    editor = make_gobo_editor()
+    editor.render()
+    assert [c.content for c in walk(editor.view) if isinstance(c, ft.Button)].count("Гобо из библиотеки") == 2
+
+    editor.profile = replace(
+        editor.profile, modes=(Mode("Std", (replace(editor.channel, template="control"),)),)
+    )
+    editor.render()
+    assert "Гобо из библиотеки" not in [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+
+
+def test_searching_by_name_lists_gobos_and_choosing_one_fills_the_range():
+    from gmagc_common.protocol import GoboList
+
+    async def search(query):
+        assert query == "star"
+        return GoboList((make_gobo_item("star", "T"), make_gobo_item("stars2")), 2)
+
+    editor = make_gobo_editor(search=search)
+    run(editor.open_gobo_picker(1))
+    run(editor.find_gobos("star"))
+    assert editor.screen == "gobo" and len(editor.gobo_items) == 2
+
+    run(editor.pick_gobo(0))
+
+    chosen = editor.channel.ranges[1]
+    assert editor.screen == "channel" and chosen.gobo.name == "star" and chosen.gobo.thumb == "T"
+    assert chosen.gobo.path == "GMAGC/star_abc123.png" and chosen.gobo.source == "Stars/star.png"
+    assert chosen.name == "star"  # пустое название диапазона взято из имени гобо
+    assert "Гобо: star" in shown(editor)
+
+
+def test_choosing_a_gobo_keeps_a_range_name_the_user_already_typed():
+    async def search(query):
+        from gmagc_common.protocol import GoboList
+
+        return GoboList((make_gobo_item("star"),), 1)
+
+    editor = make_gobo_editor(search=search)
+    run(editor.open_gobo_picker(0))
+    run(editor.find_gobos("star"))
+    run(editor.pick_gobo(0))
+
+    assert editor.channel.ranges[0].name == "open" and editor.channel.ranges[0].gobo.name == "star"
+
+
+def test_the_photo_search_lists_the_nearest_gobos():
+    async def photo():
+        return [make_gobo_item("a"), make_gobo_item("b")]
+
+    editor = make_gobo_editor(photo=photo)
+    run(editor.open_gobo_picker(0))
+
+    run(editor.find_gobos_by_photo())
+
+    assert [i.name for i in editor.gobo_items] == ["a", "b"]
+
+
+def test_cancelling_the_photo_keeps_the_list_and_errors_are_shown():
+    async def cancelled():
+        return None
+
+    editor = make_gobo_editor(photo=cancelled)
+    run(editor.open_gobo_picker(0))
+    editor.gobo_items = [make_gobo_item("keep")]
+    run(editor.find_gobos_by_photo())
+    assert [i.name for i in editor.gobo_items] == ["keep"] and not editor.gobo_busy
+
+    async def broken(query):
+        raise ClientError("unreachable", "нет связи")
+
+    editor = make_gobo_editor(search=broken)
+    run(editor.open_gobo_picker(0))
+    run(editor.find_gobos("x"))
+    assert "Нет связи" in shown(editor) and not editor.gobo_busy
+
+
+def test_no_connection_and_an_empty_query_are_handled():
+    editor = make_gobo_editor()
+    run(editor.open_gobo_picker(0))
+    run(editor.find_gobos("x"))
+    assert "Нет подключения к ПК" in shown(editor)
+    run(editor.find_gobos_by_photo())
+    assert "Нет подключения к ПК" in shown(editor)
+
+    async def never(query):
+        raise AssertionError("пустой запрос на ПК не уходит")
+
+    editor = make_gobo_editor(search=never)
+    run(editor.open_gobo_picker(0))
+    run(editor.find_gobos("  "))
+    assert editor.gobo_items == []
+
+
+def test_a_gobo_can_be_removed_and_editing_a_range_keeps_it():
+    async def search(query):
+        from gmagc_common.protocol import GoboList
+
+        return GoboList((make_gobo_item("star"),), 1)
+
+    editor = make_gobo_editor(search=search)
+    run(editor.open_gobo_picker(0))
+    run(editor.find_gobos("star"))
+    run(editor.pick_gobo(0))
+
+    run(editor.set_range(0, end=8))
+    assert editor.channel.ranges[0].gobo is not None and editor.channel.ranges[0].end == 8
+
+    run(editor.clear_gobo(0))
+    assert editor.channel.ranges[0].gobo is None
+
+
+def test_back_from_the_gobo_list_returns_to_the_channel():
+    editor = make_gobo_editor()
+    run(editor.open_gobo_picker(0))
+
+    assert editor.go_back() and editor.screen == "channel" and editor.gobo_range is None
