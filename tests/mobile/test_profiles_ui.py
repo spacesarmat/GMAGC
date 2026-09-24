@@ -541,7 +541,7 @@ def test_only_checked_channels_are_added_to_the_current_mode():
 
     run(editor.apply_draft(0, new_mode=False))
 
-    assert editor.screen == "mode" and [c.name for c in editor.mode.channels] == ["R dimming"]
+    assert editor.screen == "scan" and [c.name for c in editor.mode.channels] == ["R dimming"]
     assert "Добавлено каналов: 1" in shown(editor)
 
 
@@ -555,7 +555,7 @@ def test_a_draft_mode_can_become_a_new_mode_of_the_profile():
     run(editor.apply_draft(1, new_mode=True))
 
     assert [m.name for m in editor.profile.modes] == ["Режим 1", "9CH"]
-    assert editor.mode_index == 1 and len(editor.mode.channels) == 2
+    assert editor.mode_index == 0 and len(editor.profile.modes[1].channels) == 2 and 1 in editor.draft_done
 
 
 def test_applying_with_nothing_checked_asks_to_check_something():
@@ -615,14 +615,14 @@ def test_scanning_without_a_connection_says_so():
     assert "Нет подключения к ПК" in shown(editor)
 
 
-def test_back_from_the_review_screen_returns_to_the_mode_without_adding():
+def test_back_from_the_review_screen_returns_to_the_mode_without_adding_and_keeps_the_draft():
     async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
     run(editor.on_scan())
 
-    assert editor.go_back() and editor.screen == "mode" and editor.draft is None and not editor.mode.channels
+    assert editor.go_back() and editor.screen == "mode" and editor.draft is not None and not editor.mode.channels
 
 
 def test_the_cloud_button_asks_for_confirmation_and_sends_nothing_until_confirmed():
@@ -703,29 +703,121 @@ def test_undo_restores_the_mode_after_adding_channels_from_the_manual():
 
     assert [c.name for c in editor.mode.channels] == ["Old"] and "отменено" in shown(editor)
     after = [c.content for c in walk(editor.view) if isinstance(c, ft.TextButton)]
-    assert editor.undo_mode is None and "Отменить" not in after
+    assert editor.undo_profile is None and "Отменить" not in after
 
 
-def test_undo_is_not_offered_after_a_new_mode_or_after_another_edit_or_leaving():
+def test_undo_closes_after_another_edit_or_after_leaving_the_mode():
+    async def scan(engine="local", reuse=False):
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=False))
+    run(editor.add_channel("dimmer"))
+    assert editor.undo_profile is None
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=False))
+    editor.go_back()  # с экрана проверки на режим: отмена ещё доступна
+    assert editor.screen == "mode" and editor.undo_profile is not None
+    editor.go_back()  # с режима на профиль: закрыта
+    assert editor.undo_profile is None
+
+
+# ---- несколько режимов из одного распознавания -------------------------------------------------
+def test_the_draft_stays_after_adding_so_the_next_mode_needs_no_new_scan():
+    calls = []
+
+    async def scan(engine="local", reuse=False):
+        calls.append(1)
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+
+    run(editor.apply_draft(0, new_mode=True))
+    assert editor.screen == "scan" and editor.draft is not None and editor.draft_done == {0}
+    assert "4CH ✓" in shown(editor) or "4CH (2 кан.) ✓" in shown(editor)
+    run(editor.apply_draft(1, new_mode=True))
+
+    assert [m.name for m in editor.profile.modes] == ["Режим 1", "4CH", "9CH"] and len(calls) == 1
+    assert editor.draft_done == {0, 1}
+
+
+def test_add_all_modes_creates_every_mode_once_with_unique_names_and_can_be_undone():
+    from gmagc_common.scan_draft import DraftChannel, DraftMode, ScanDraft
+
+    async def scan(engine="local", reuse=False):
+        def mode(name, channel):
+            return DraftMode(name, (DraftChannel(1, channel, "custom"),))
+
+        return ScanDraft((mode("9CH", "A"), mode("9CH", "B"), mode("", "C")))
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    editor._toggle_draft_channel(2, 0, False)  # у третьего режима ничего не отмечено
+
+    run(editor.apply_all_new())
+
+    assert [m.name for m in editor.profile.modes] == ["Режим 1", "9CH", "9CH 2"]
+    assert "Создано режимов: 2" in shown(editor) and editor.draft_done == {0, 1}
+
+    run(editor.apply_all_new())  # повтор ничего не добавляет
+    assert len(editor.profile.modes) == 3 and "Нечего добавлять" in shown(editor)
+
+    run(editor.undo_apply())
+    assert [m.name for m in editor.profile.modes] == ["Режим 1"] and editor.draft_done == set()
+
+
+def test_the_add_all_button_is_shown_only_for_several_modes():
+    async def scan(engine="local", reuse=False):
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    run(editor.on_scan())
+    assert "Добавить все режимы новыми" in [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+
+    from gmagc_common.scan_draft import ScanDraft
+
+    editor.draft = ScanDraft(editor.draft.modes[:1])
+    editor.render()
+    assert "Добавить все режимы новыми" not in [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+
+
+def test_the_previous_result_can_be_resumed_from_the_mode_screen_until_the_profile_is_closed():
+    async def scan(engine="local", reuse=False):
+        return draft_with_two_modes()
+
+    editor = make_scanning_editor(scan)
+    editor.render()
+    assert "Продолжить с прошлым результатом" not in [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+    run(editor.on_scan())
+    run(editor.apply_draft(0, new_mode=True))
+    editor.go_back()
+    assert editor.screen == "mode"
+    assert "Продолжить с прошлым результатом" in [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+
+    run(editor.resume_draft())
+    assert editor.screen == "scan" and editor.draft_done == {0}
+
+    editor.go_back()
+    editor.go_back()  # режим → профиль
+    editor.go_back()  # профиль → список
+    assert editor.draft is None and editor.draft_done == set()
+
+
+def test_a_new_scan_replaces_the_previous_result_and_resets_the_added_marks():
     async def scan(engine="local", reuse=False):
         return draft_with_two_modes()
 
     editor = make_scanning_editor(scan)
     run(editor.on_scan())
     run(editor.apply_draft(0, new_mode=True))
-    assert editor.undo_mode is None
 
-    editor = make_scanning_editor(scan)
     run(editor.on_scan())
-    run(editor.apply_draft(0, new_mode=False))
-    run(editor.add_channel("dimmer"))
-    assert editor.undo_mode is None
 
-    editor = make_scanning_editor(scan)
-    run(editor.on_scan())
-    run(editor.apply_draft(0, new_mode=False))
-    editor.go_back()
-    assert editor.undo_mode is None
+    assert editor.draft_done == set() and editor.undo_profile is None and len(editor.draft_checked) == 4
 
 
 # ---- гобо из библиотеки для диапазона колеса ---------------------------------------------------

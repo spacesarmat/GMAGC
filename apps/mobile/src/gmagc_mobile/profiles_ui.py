@@ -123,10 +123,12 @@ class ProfileEditor:
         self.gobo_query = ""
         self.gobo_busy = False
         self.scanning = False
-        self.undo_mode: Mode | None = None  # режим до добавления каналов из инструкции: для кнопки «Отменить»
+        self.undo_profile: FixtureProfile | None = None  # профиль до последнего добавления из инструкции («Отменить»)
+        self.undo_done: set[int] = set()  # и какие режимы черновика были отмечены добавленными до него
         self.confirm_cloud: bool | None = None  # ждём подтверждения отправки в облако; значение — «взять прежний файл»
         self.draft: ScanDraft | None = None
         self.draft_checked: set[tuple[int, int]] = set()  # (режим черновика, канал), отмеченные галочкой
+        self.draft_done: set[int] = set()  # режимы черновика, которые уже добавлены в профиль
         self.profiles: list[FixtureProfile] = []
         self.profile: FixtureProfile | None = None
         self.mode_index: int | None = None
@@ -144,20 +146,28 @@ class ProfileEditor:
         self.profile = None
         self.mode_index = self.channel_index = None
         self.pending_delete = None
+        self._forget_draft()
         self.screen = SCREEN_LIST
         self.render()
+
+    def _forget_draft(self) -> None:
+        """Результат распознавания живёт, пока открыт профиль: при выходе в список он забывается."""
+        self.draft = None
+        self.draft_checked = set()
+        self.draft_done = set()
+        self.undo_profile = None
 
     def go_back(self) -> bool:
         """Шаг назад внутри редактора. False — уже на списке, выходить должно приложение."""
         self.message = self.notice = ""
         self.confirm_cloud = None
-        self.undo_mode = None
+        if self.screen != SCREEN_SCAN:  # с экрана проверки назад — на режим, где отмена добавления ещё доступна
+            self.undo_profile = None
         if self.screen == SCREEN_GOBO:
             self.gobo_range = None
             self.screen = SCREEN_CHANNEL
         elif self.screen == SCREEN_SCAN:
-            self.draft = None
-            self.screen = SCREEN_MODE
+            self.screen = SCREEN_MODE  # черновик остаётся: его можно продолжить кнопкой на экране режима
         elif self.screen == SCREEN_CHANNEL:
             self.channel_index = None
             self.screen = SCREEN_MODE
@@ -166,6 +176,7 @@ class ProfileEditor:
             self.screen = SCREEN_PROFILE
         elif self.screen == SCREEN_PROFILE:
             self.profile = None
+            self._forget_draft()
             self.screen = SCREEN_LIST
         else:
             return False
@@ -273,7 +284,7 @@ class ProfileEditor:
     # ---- профиль и режимы ---------------------------------------------------
     async def _commit(self, profile: FixtureProfile, *, render: bool = True) -> None:
         """Автосохранение: новая версия профиля сразу пишется в хранилище."""
-        self.undo_mode = None  # любая правка, кроме самого добавления, закрывает возможность отмены
+        self.undo_profile = None  # любая правка, кроме самого добавления, закрывает возможность отмены
         self.profile = profile
         await self.store.save(profile)
         self.profiles = await self.store.list()
@@ -496,6 +507,16 @@ class ProfileEditor:
             return
         self.draft = draft
         self.draft_checked = {(m, c) for m, mode in enumerate(draft.modes) for c in range(len(mode.channels))}
+        self.draft_done = set()
+        self.undo_profile = None
+        self.screen = SCREEN_SCAN
+        self.render()
+
+    async def resume_draft(self) -> None:
+        """Возвращается к прошлому результату распознавания: файл выбирать и распознавать заново не нужно."""
+        if self.draft is None:
+            return
+        self.message = self.notice = ""
         self.screen = SCREEN_SCAN
         self.render()
 
@@ -560,28 +581,60 @@ class ProfileEditor:
             self.message = t("Отметьте хотя бы один канал.")
             self.render()
             return
+        before, done = self.profile, set(self.draft_done)
         if new_mode:
-            base = self.draft.modes[draft_mode].name or t("Режим {number}", number=len(self.profile.modes) + 1)
-            name = self._unique_mode_name(base)
+            name = self._new_mode_name(draft_mode)
             modes = (*self.profile.modes, add_draft_channels(Mode(name), chosen))
-            self.mode_index = len(modes) - 1
             await self._commit(replace(self.profile, modes=modes), render=False)
+            self.notice = t("Создан режим «{name}»: каналов {count}", name=name, count=len(chosen))
         else:
-            before = self.mode
-            await self._commit_mode(add_draft_channels(before, chosen), render=False)
-            self.undo_mode = before
-        self.draft = None
+            await self._commit_mode(add_draft_channels(self.mode, chosen), render=False)
+            self.notice = t("Добавлено каналов: {count}", count=len(chosen))
+        self.draft_done.add(draft_mode)
+        self.undo_profile, self.undo_done = before, done  # после _commit, который отмену сбрасывает
         self.message = ""
-        self.screen = SCREEN_MODE
-        self.notice = t("Добавлено каналов: {count}", count=len(chosen))
+        self.render()
+
+    def _new_mode_name(self, draft_mode: int, taken_extra: tuple[str, ...] = ()) -> str:
+        base = self.draft.modes[draft_mode].name or t("Режим {number}", number=len(self.profile.modes) + 1)
+        name = self._unique_mode_name(base)
+        number = 2
+        while name in taken_extra:
+            name = f"{base} {number}"
+            number += 1
+        return name
+
+    async def apply_all_new(self) -> None:
+        """Каждый ещё не добавленный режим черновика — новым режимом профиля (по отмеченным каналам)."""
+        before, done = self.profile, set(self.draft_done)
+        new_modes: list[Mode] = []
+        added: list[int] = []
+        for index in range(len(self.draft.modes)):
+            chosen = self._chosen(index)
+            if index in self.draft_done or not chosen:
+                continue
+            name = self._new_mode_name(index, tuple(m.name for m in new_modes))
+            new_modes.append(add_draft_channels(Mode(name), chosen))
+            added.append(index)
+        if not new_modes:
+            self.message = t("Нечего добавлять: все режимы уже добавлены или ничего не отмечено.")
+            self.render()
+            return
+        await self._commit(replace(self.profile, modes=(*self.profile.modes, *new_modes)), render=False)
+        self.draft_done.update(added)
+        self.undo_profile, self.undo_done = before, done
+        self.message = ""
+        self.notice = t("Создано режимов: {count}", count=len(new_modes))
         self.render()
 
     async def undo_apply(self) -> None:
-        """Отменяет добавление каналов из инструкции в текущий режим: режим возвращается таким, каким был."""
-        before = self.undo_mode
+        """Отменяет последнее добавление из инструкции (в режим, новым режимом или все режимы сразу)."""
+        before = self.undo_profile
         if before is None:
             return
-        await self._commit_mode(before, render=False)
+        done = self.undo_done
+        await self._commit(before, render=False)
+        self.draft_done = done
         self.message = ""
         self.notice = t("Добавление отменено.")
         self.render()
@@ -591,11 +644,25 @@ class ProfileEditor:
             self._header(t("Найдено в инструкции")),
             ft.Text(t("Снимите галочки с лишнего. Названия и диапазоны можно поправить после добавления."), size=12),
         ]
+        if self.notice:
+            controls.append(ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
+            if self.undo_profile is not None:
+                controls.append(ft.TextButton(t("Отменить"), on_click=self._async_click(self.undo_apply)))
         if self.message:
             controls.append(ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
+        if len(self.draft.modes) > 1:
+            controls.append(
+                ft.Button(
+                    t("Добавить все режимы новыми"),
+                    icon=ft.Icons.PLAYLIST_ADD,
+                    on_click=self._async_click(self.apply_all_new),
+                )
+            )
         for mode_index, draft_mode in enumerate(self.draft.modes):
             title = draft_mode.name or t("Продолжение таблицы")
             heading = t("{name} ({count} кан.)", name=title, count=len(draft_mode.channels))
+            if mode_index in self.draft_done:
+                heading += " ✓"
             controls.append(ft.Text(heading, weight=ft.FontWeight.BOLD))
             for channel_index, channel in enumerate(draft_mode.channels):
                 controls.append(
@@ -668,7 +735,7 @@ class ProfileEditor:
             controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
         if self.notice:
             controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
-            if self.undo_mode is not None:
+            if self.undo_profile is not None:
                 controls.insert(2, ft.TextButton(t("Отменить"), on_click=self._async_click(self.undo_apply)))
         for index, channel in sorted(enumerate(mode.channels), key=lambda pair: pair[1].dmx):
             span = f"{channel.dmx}–{channel.last}" if channel.bits == 16 else str(channel.dmx)
@@ -697,6 +764,14 @@ class ProfileEditor:
                 disabled=self.scanning,
             )
         )
+        if self.draft is not None:
+            controls.append(
+                ft.Button(
+                    t("Продолжить с прошлым результатом"),
+                    icon=ft.Icons.HISTORY,
+                    on_click=self._async_click(self.resume_draft),
+                )
+            )
         controls.extend(self._cloud_controls(reuse=False))
         if self.scanning:
             controls.append(ft.Text(t("Распознаю инструкцию на ПК, это может занять минуту…"), size=12))
