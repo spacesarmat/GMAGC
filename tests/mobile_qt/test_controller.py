@@ -220,19 +220,23 @@ def test_prepare_upload_small_file_untouched():
 
 
 def test_prepare_upload_shrinks_big_image():
+    import random
+
     from PySide6.QtCore import QBuffer, QIODevice
 
-    image = QImage(1200, 900, QImage.Format.Format_RGB32)
-    for y in range(0, 900, 3):
-        for x in range(0, 1200, 7):
-            image.setPixelColor(x, y, QColor((x * 3) % 256, (y * 5) % 256, (x + y) % 256))
+    rng = random.Random(1)
+    image = QImage(640, 480, QImage.Format.Format_RGB32)
+    for y in range(480):
+        for x in range(640):
+            image.setPixelColor(x, y, QColor(rng.randrange(256), rng.randrange(256), rng.randrange(256)))
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     image.save(buffer, "PNG")
     raw = bytes(buffer.data())
-    out = prepare_upload(raw, limit=len(raw) - 1)
-    assert len(out) < len(raw)
-    assert out[:2] == b"\xff\xd8"
+    limit = len(raw) // 2
+    out = prepare_upload(raw, limit=limit)
+    assert len(out) <= limit
+    assert out[:2] == bytes([0xFF, 0xD8])
 
 
 def test_prepare_upload_rejects_garbage():
