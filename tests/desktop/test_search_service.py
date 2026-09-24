@@ -346,3 +346,16 @@ def test_the_service_persists_the_fixture_folders(tmp_path):
     other = SearchService(tmp_path / "data")
     other.load()
     assert (other.settings.ma3_fixture_dir, other.settings.ma2_fixture_dir) == ("C:/ma3", "C:/ma2")
+
+
+def test_the_service_persists_the_language_choice(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    service.set_language("en")
+
+    other = SearchService(tmp_path / "data")
+    other.load()
+    assert other.settings.language == "en"
+    service.set_language("klingon")
+    assert service.settings.language == "auto"

@@ -9,6 +9,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from gmagc_common.i18n import normalize_choice
 from gmagc_common.protocol import DEFAULT_PORT, is_valid_code, normalize_code
 from gmagc_common.updates import parse_version
 
@@ -48,6 +49,7 @@ class Settings:
     large_text: bool = False  # крупный шрифт и более контрастные цвета, для тёмных залов
     ma3_fixture_dir: str = ""  # куда класть типы приборов grandMA3 с телефона; пусто — найти папку MA3 самому
     ma2_fixture_dir: str = ""  # то же для grandMA2 (importexport)
+    language: str = "auto"  # язык интерфейса: «auto» (по системе), «ru» или «en»
 
 
 def _is_int(value: object) -> bool:
@@ -89,6 +91,7 @@ def settings_from_json(text: str) -> Settings:
     large_text = raw.get("large_text", False)
     ma3_fixture_dir = raw.get("ma3_fixture_dir", "")
     ma2_fixture_dir = raw.get("ma2_fixture_dir", "")
+    language = raw.get("language", "auto")
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
@@ -119,6 +122,7 @@ def settings_from_json(text: str) -> Settings:
         large_text=large_text if isinstance(large_text, bool) else False,
         ma3_fixture_dir=ma3_fixture_dir if isinstance(ma3_fixture_dir, str) else "",
         ma2_fixture_dir=ma2_fixture_dir if isinstance(ma2_fixture_dir, str) else "",
+        language=normalize_choice(language) if isinstance(language, str) else "auto",
     )
 
 

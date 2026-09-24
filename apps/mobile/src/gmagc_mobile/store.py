@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from gmagc_common.i18n import normalize_choice
 from gmagc_common.protocol import Connection, is_valid_code, normalize_code, parse_address
 
 KEY_HOST = "gmagc.host"
 KEY_PORT = "gmagc.port"
 KEY_CODE = "gmagc.code"
+KEY_LANGUAGE = "gmagc.language"
 
 
 def _as_port(value: object) -> int | None:
@@ -46,3 +48,22 @@ class ConnectionStore:
     async def clear(self) -> None:
         for key in (KEY_HOST, KEY_PORT, KEY_CODE):
             await self._prefs.remove(key)
+
+
+class LanguageStore:
+    """Выбранный язык интерфейса («auto», «ru» или «en») в SharedPreferences."""
+
+    def __init__(self, prefs):
+        self._prefs = prefs
+
+    async def load(self) -> str:
+        try:
+            return normalize_choice(await self._prefs.get(KEY_LANGUAGE))
+        except Exception:  # noqa: BLE001 - недоступное хранилище не должно ронять запуск
+            return "auto"
+
+    async def save(self, choice: str) -> None:
+        try:
+            await self._prefs.set(KEY_LANGUAGE, normalize_choice(choice))
+        except Exception:  # noqa: BLE001 - язык применится и без сохранения, просто не запомнится
+            pass

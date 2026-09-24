@@ -88,3 +88,11 @@ def test_fixture_folders_default_to_empty_and_accept_only_strings():
     restored = settings_from_json('{"ma3_fixture_dir": "C:/a", "ma2_fixture_dir": 5}')
 
     assert restored.ma3_fixture_dir == "C:/a" and restored.ma2_fixture_dir == ""
+
+
+def test_language_defaults_to_auto_and_accepts_only_known_choices():
+    assert Settings().language == "auto"
+    assert settings_from_json('{"language": "en"}').language == "en"
+    assert settings_from_json('{"language": "ru"}').language == "ru"
+    assert settings_from_json('{"language": "klingon"}').language == "auto"
+    assert settings_from_json('{"language": 5}').language == "auto"
