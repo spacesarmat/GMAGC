@@ -959,3 +959,26 @@ def test_back_from_the_gobo_list_returns_to_the_channel():
     run(editor.open_gobo_picker(0))
 
     assert editor.go_back() and editor.screen == "channel" and editor.gobo_range is None
+
+
+def test_the_ma3_type_is_shared_as_a_gdtf_archive():
+    import io
+    import zipfile
+
+    editor = ready_editor()
+
+    run(editor.on_share_gdtf(None))
+
+    (name, data, mime) = editor.share.files[0]
+    assert name == "shehds@380w_beam.gdtf" and mime == "application/octet-stream"
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    assert b'DataVersion="1.2"' in archive.read("description.xml")
+
+
+def test_an_unfinished_profile_is_not_shared_as_gdtf():
+    editor, _, _ = make_editor()
+    open_new(editor)
+
+    run(editor.on_share_gdtf(None))
+
+    assert editor.share.files == [] and "не готов к экспорту" in shown(editor)

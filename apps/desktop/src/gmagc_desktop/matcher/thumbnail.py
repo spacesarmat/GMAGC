@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from gmagc_common.fixtures import GOBO_THUMB_SIDE
+from gmagc_common.png_lite import rgba_to_png
 
 
 def square_pad(gray: np.ndarray) -> np.ndarray:
@@ -34,3 +35,10 @@ def gobo_thumb(gray: np.ndarray) -> str:
     small = cv2.resize(square_pad(gray), (GOBO_THUMB_SIDE, GOBO_THUMB_SIDE), interpolation=cv2.INTER_AREA)
     rgba = np.dstack([small, small, small, np.full_like(small, 255)])
     return base64.b64encode(zlib.compress(rgba.tobytes())).decode("ascii")
+
+
+def gobo_wheel_png(gray: np.ndarray, size: int = 256) -> bytes:
+    """Картинка слота колеса для GDTF: гобо серым в квадрате size×size, вне вписанного круга прозрачно (приложение E)."""
+    small = cv2.resize(square_pad(gray), (size, size), interpolation=cv2.INTER_AREA)
+    rgba = np.dstack([small, small, small, np.full_like(small, 255)])
+    return rgba_to_png(size, size, rgba.tobytes(), circle=True)

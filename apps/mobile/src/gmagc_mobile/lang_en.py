@@ -269,6 +269,7 @@ EN = {
     ),
     "Добавить все режимы новыми": "Add all modes as new",
     "Продолжить с прошлым результатом": "Continue with the previous result",
+    "Поделиться для grandMA3 (файл GDTF)": "Share for grandMA3 (GDTF file)",
 }
 
 register("en", EN)

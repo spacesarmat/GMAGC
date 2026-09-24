@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from PIL import Image
 
 from gmagc_common.fixtures import FixtureProfile, profile_file_name
+from gmagc_common.gdtf_export import export_gdtf, gdtf_file_name
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
@@ -21,6 +22,8 @@ from gmagc_common.protocol import (
     parse_skip,
     skip_item,
 )
+from gmagc_desktop.matcher.imageio import load_library_gray
+from gmagc_desktop.matcher.thumbnail import gobo_wheel_png
 from gmagc_desktop.service.settings import Settings
 
 
@@ -118,6 +121,27 @@ def write_gobo_pictures(profile: FixtureProfile, folder: Path, library_dir: str)
     return written, skipped
 
 
+def library_gobo_pictures(profile: FixtureProfile, library_dir: str) -> dict[str, bytes]:
+    """PNG слотов колёс для GDTF из файлов библиотеки (256×256, крупнее миниатюры в профиле); не найденные пропускаются."""
+    pictures: dict[str, bytes] = {}
+    root = Path(library_dir).resolve() if library_dir else None
+    if root is None:
+        return pictures
+    for mode in profile.modes:
+        for channel in mode.channels:
+            for item in channel.ranges:
+                gobo = item.gobo
+                if gobo is None or not gobo.source or gobo.path in pictures:
+                    continue
+                try:
+                    source = (root / gobo.source).resolve()
+                    if source.is_relative_to(root):
+                        pictures[gobo.path] = gobo_wheel_png(load_library_gray(source))
+                except (OSError, ValueError, SyntaxError):
+                    continue
+    return pictures
+
+
 class FixtureExporter:
     def __init__(self, settings: Callable[[], Settings], environ: Mapping[str, str] | None = None):
         self._settings = settings
@@ -139,8 +163,9 @@ class FixtureExporter:
     def store(self, profile: FixtureProfile) -> FixtureUploadResult:
         """Пишет типы приборов для обоих пультов. ExportError, если профиль не готов; NoTargetError, если некуда писать."""
         ma3_xml = export_ma3(profile)  # ошибки проверки поднимаются до любой записи
-        ma2_files = export_ma2_files(profile)
         settings = self._settings()
+        gdtf = export_gdtf(profile, pictures=library_gobo_pictures(profile, settings.library_dir))
+        ma2_files = export_ma2_files(profile)
         written: list[tuple[str, str]] = []
         skipped: list[str] = []
         ma3_folder, problem = self._folder(settings.ma3_fixture_dir, default_ma3_dir(self._environ), "ma3")
@@ -150,6 +175,9 @@ class FixtureExporter:
             path = ma3_folder / profile_file_name(profile, "xml")
             path.write_text(ma3_xml, encoding="utf-8")
             written.append(("ma3", str(path)))
+            gdtf_path = ma3_folder / gdtf_file_name(profile)
+            gdtf_path.write_bytes(gdtf)  # основной формат обмена MA3: картинки гобо внутри файла
+            written.append(("ma3", str(gdtf_path)))
             pictures, missing = write_gobo_pictures(profile, gobo_folder(ma3_folder), settings.library_dir)
             written.extend(pictures)
             skipped.extend(missing)
