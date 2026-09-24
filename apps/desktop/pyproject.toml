@@ -10,6 +10,8 @@ dependencies = [
   "opencv-python-headless",
   "Pillow",
   "segno",
+  "rapidocr-onnxruntime",  # автозаполнение профиля: распознавание текста инструкции на ПК
+  "pypdfium2",  # страницы PDF в картинки
 ]
 
 [tool.flet]

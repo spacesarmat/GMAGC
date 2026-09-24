@@ -11,6 +11,7 @@ from http.server import ThreadingHTTPServer
 
 from gmagc_common.i18n import t
 from gmagc_common.protocol import DEFAULT_PORT
+from gmagc_desktop.scan.engine import LocalScanner
 from gmagc_desktop.server.api import ApiContext, ApiHandler, RequestRecord
 from gmagc_desktop.service.access import RateLimiter
 from gmagc_desktop.service.fixture_export import FixtureExporter
@@ -55,9 +56,10 @@ class PhoneServer:
         host: str = "0.0.0.0",
         limiter: RateLimiter | None = None,
         fixtures: FixtureExporter | None = None,
+        scanner: LocalScanner | None = None,
     ):
         exporter = fixtures or FixtureExporter(lambda: service.settings)
-        self._context = ApiContext(service, limiter or RateLimiter(), on_request, exporter)
+        self._context = ApiContext(service, limiter or RateLimiter(), on_request, exporter, scanner or LocalScanner())
         self._host = host
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
