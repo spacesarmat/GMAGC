@@ -36,7 +36,8 @@ def test_a_profile_is_stored_for_both_consoles_and_the_reply_lists_the_files(cal
     assert status == 200 and result.skipped == ()
     assert (ma3 / "shehds@380w_beam.xml").exists()
     assert sorted(p.name for p in ma2.glob("*.xml")) == ["shehds@380w_beam@extended.xml", "shehds@380w_beam@standard.xml"]
-    assert sorted(target for target, _ in result.written) == ["ma2", "ma2", "ma3"]
+    assert sorted(target for target, _ in result.written) == ["ma2", "ma2", "ma3", "ma3"]
+    assert (ma3 / "shehds@380w_beam.gdtf").exists()
 
 
 def test_storing_a_profile_requires_the_access_code(call, service, tmp_path):
@@ -119,5 +120,5 @@ def test_one_console_folder_missing_still_stores_the_other_and_reports_the_skip(
         server.stop()
 
     result = FixtureUploadResult.from_dict(reply)
-    assert response.status == 200 and [t for t, _ in result.written] == ["ma3"]
+    assert response.status == 200 and [t for t, _ in result.written] == ["ma3", "ma3"]
     assert result.skipped == ("no_folder:ma2",)

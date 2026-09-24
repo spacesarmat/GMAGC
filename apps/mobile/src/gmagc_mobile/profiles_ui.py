@@ -29,6 +29,7 @@ from gmagc_common.fixtures import (
     template_title,
     validate_profile,
 )
+from gmagc_common.gdtf_export import export_gdtf, gdtf_file_name
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
@@ -376,11 +377,16 @@ class ProfileEditor:
             self.notice = upload_text(result)
         self.render()
 
-    async def _share_files(self, files: list[tuple[str, str, str]], subject: str) -> None:
-        """Отправляет файлы (имя, текст, mime-тип) через системное «Поделиться»: приложение получает готовый файл."""
+    async def _share_files(self, files: list[tuple[str, str | bytes, str]], subject: str) -> None:
+        """Отправляет файлы (имя, текст или байты, mime-тип) через системное «Поделиться»: приложение получает файл."""
         try:
             await self.share.share_files(
-                [ft.ShareFile.from_bytes(text.encode("utf-8"), mime_type=mime, name=name) for name, text, mime in files],
+                [
+                    ft.ShareFile.from_bytes(
+                        data.encode("utf-8") if isinstance(data, str) else data, mime_type=mime, name=name
+                    )
+                    for name, data, mime in files
+                ],
                 subject=subject,
             )
         except Exception as error:  # noqa: BLE001 - недоступное «Поделиться» не должно ломать редактор
@@ -397,6 +403,19 @@ class ProfileEditor:
         text = json.dumps(profile_to_dict(self.profile), ensure_ascii=False, indent=2)
         name = profile_file_name(self.profile, "json")
         await self._share_files([(name, text, "application/json")], self._subject())
+
+    async def on_share_gdtf(self, _event) -> None:
+        """Тип прибора для grandMA3 в основном формате GDTF: картинки гобо внутри файла, все режимы в одном файле."""
+        if self.profile is None:
+            return
+        try:
+            data = export_gdtf(self.profile)
+        except ExportError as error:
+            self.message = str(error)
+            self.render()
+            return
+        name = gdtf_file_name(self.profile)
+        await self._share_files([(name, data, "application/octet-stream")], f"{self._subject()} (GDTF)")
 
     async def on_share_ma3(self, _event) -> None:
         """Готовый тип прибора grandMA3 файлом .xml: остаётся положить его в fixturetypes и импортировать."""
@@ -470,6 +489,9 @@ class ProfileEditor:
         controls.append(ft.Button(t("Добавить режим"), icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
         controls.append(ft.Button(t("Отправить на ПК"), icon=ft.Icons.COMPUTER, on_click=self.on_send_to_pc))
         controls.append(ft.TextButton(t("Поделиться профилем (файл JSON)"), icon=ft.Icons.SHARE, on_click=self.on_share))
+        controls.append(
+            ft.TextButton(t("Поделиться для grandMA3 (файл GDTF)"), icon=ft.Icons.SHARE, on_click=self.on_share_gdtf)
+        )
         controls.append(
             ft.TextButton(t("Поделиться для grandMA3 (файл XML)"), icon=ft.Icons.SHARE, on_click=self.on_share_ma3)
         )

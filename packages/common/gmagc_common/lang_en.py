@@ -95,6 +95,9 @@ EN = {
     "миниатюра гобо «{name}» повреждена": "the thumbnail of gobo “{name}” is damaged",
     "миниатюра гобо «{name}» имеет неверный размер": "the thumbnail of gobo “{name}” has the wrong size",
     "ожидался список": "a list was expected",
+    "в режиме «{name}» шаблон «{template}» повторяется: GDTF не различит эти каналы": (
+        "in the mode “{name}” the template “{template}” is repeated: GDTF cannot tell these channels apart"
+    ),
 }
 
 register("en", EN)

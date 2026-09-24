@@ -213,7 +213,7 @@ def test_send_fixture_stores_the_profile_on_the_pc_and_returns_the_written_files
     result = make_client(running).send_fixture(profile_to_dict(fixture_profile()))
 
     assert isinstance(result, FixtureUploadResult)
-    assert sorted(target for target, _ in result.written) == ["ma2", "ma3"] and result.skipped == ()
+    assert sorted(target for target, _ in result.written) == ["ma2", "ma3", "ma3"] and result.skipped == ()
     assert (tmp_path / "ma3" / "shehds@380w_beam.xml").exists()
 
 

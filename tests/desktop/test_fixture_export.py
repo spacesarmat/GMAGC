@@ -49,11 +49,19 @@ def test_a_profile_is_written_as_one_ma3_file_and_one_ma2_file_per_mode(tmp_path
     result = exporter.store(ready_profile())
 
     targets = sorted(target for target, _ in result.written)
-    assert targets == ["ma2", "ma2", "ma3"] and result.skipped == ()
+    assert targets == ["ma2", "ma2", "ma3", "ma3"] and result.skipped == ()
     names = sorted(path.replace("\\", "/").rsplit("/", 1)[1] for _, path in result.written)
-    assert names == ["shehds@380w_beam.xml", "shehds@380w_beam@extended.xml", "shehds@380w_beam@standard.xml"]
+    assert names == [
+        "shehds@380w_beam.gdtf",
+        "shehds@380w_beam.xml",
+        "shehds@380w_beam@extended.xml",
+        "shehds@380w_beam@standard.xml",
+    ]
     for _, path in result.written:
-        assert open(path, encoding="utf-8").read().startswith("<?xml")
+        if path.endswith(".gdtf"):  # GDTF — ZIP с description.xml
+            assert open(path, "rb").read(2) == b"PK"
+        else:
+            assert open(path, encoding="utf-8").read().startswith("<?xml")
 
 
 def test_configured_folders_win_over_the_defaults_and_are_created(tmp_path):
@@ -74,7 +82,7 @@ def test_a_missing_console_is_skipped_with_a_message_while_the_other_is_written(
 
     result = exporter.store(ready_profile())
 
-    assert [target for target, _ in result.written] == ["ma3"]
+    assert [target for target, _ in result.written] == ["ma3", "ma3"]
     assert result.skipped == ("no_folder:ma2",)
 
 
@@ -116,7 +124,8 @@ def test_a_folder_that_cannot_be_created_is_skipped_with_the_reason(tmp_path):
 
     result = exporter.store(ready_profile())
 
-    assert [target for target, _ in result.written] == ["ma3"] and result.skipped[0].startswith("cannot_use:ma2:")
+    assert [target for target, _ in result.written] == ["ma3", "ma3"]
+    assert result.skipped[0].startswith("cannot_use:ma2:")
 
 
 # ---- картинки гобо для MA3 ---------------------------------------------------------------------
@@ -186,3 +195,34 @@ def test_dangerous_picture_paths_from_the_phone_are_never_written(tmp_path):
         result = exporter.store(gobo_profile(source="star.bmp", path=path))
         assert len(result.skipped) == 1, path
     assert not (tmp_path / "evil.png").exists() and not (tmp_path / "gma3_library" / "evil.png").exists()
+
+
+# ---- GDTF для MA3 ------------------------------------------------------------------------------
+def test_store_writes_a_gdtf_next_to_the_ma3_xml_with_pictures_from_the_library(tmp_path):
+    import io
+    import zipfile
+
+    from PIL import Image
+
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library)
+
+    result = exporter.store(gobo_profile(source="star.bmp"))
+
+    gdtf = ma3 / "acme@spot.gdtf"
+    assert ("ma3", str(gdtf)) in result.written
+    archive = zipfile.ZipFile(gdtf)
+    assert archive.namelist() == ["description.xml", "wheels/star_1a2b3c.png"]
+    picture = Image.open(io.BytesIO(archive.read("wheels/star_1a2b3c.png")))
+    assert picture.size == (256, 256) and picture.getpixel((0, 0))[3] == 0  # крупнее миниатюры, углы прозрачны
+
+
+def test_the_gdtf_still_works_when_the_library_file_is_missing(tmp_path):
+    import zipfile
+
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library)
+
+    exporter.store(gobo_profile(source="gone.bmp"))
+
+    assert zipfile.ZipFile(ma3 / "acme@spot.gdtf").namelist() == ["description.xml"]  # у слота нет ни миниатюры, ни файла
