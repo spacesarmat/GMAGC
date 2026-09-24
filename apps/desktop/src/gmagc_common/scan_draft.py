@@ -190,6 +190,10 @@ def merge_drafts(first: ScanDraft, second: ScanDraft) -> ScanDraft:
         else:
             target = len(modes) - 1 if modes else None
         if target is None:
+            if not mode.name:  # текст без заголовка и без предыдущей таблицы (меню, схемы): диапазоны без канала — мусор
+                mode = DraftMode(mode.name, tuple(c for c in mode.channels if c.dmx > 0))
+                if not mode.channels:
+                    continue
             modes.append(mode)
         else:
             modes[target] = DraftMode(modes[target].name, merge_channels(modes[target].channels, mode.channels))

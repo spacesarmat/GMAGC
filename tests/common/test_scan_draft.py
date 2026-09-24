@@ -147,3 +147,14 @@ def test_a_channel_without_a_number_continues_the_last_channel_of_the_mode():
 
     channels = {c.dmx: c for c in merged.modes[0].channels}
     assert [(r.start, r.end) for r in channels[4].ranges] == [(226, 229)] and channels[3].ranges[0].start == 0
+
+
+def test_orphan_ranges_of_a_first_page_without_any_table_are_dropped():
+    from gmagc_common.scan_draft import DraftChannel, DraftMode, ScanDraft, merge_drafts
+
+    menu = ScanDraft((DraftMode("", (DraftChannel(0, "", "custom", ranges=(Range(1, 63, "Auto"),)),)),))
+    table = ScanDraft((DraftMode("4CH", (DraftChannel(1, "Red", "red"),)),))
+
+    merged = merge_drafts(merge_drafts(ScanDraft(), menu), table)
+
+    assert [m.name for m in merged.modes] == ["4CH"]
