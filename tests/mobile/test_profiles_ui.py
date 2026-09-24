@@ -5,6 +5,8 @@ from dataclasses import replace
 import flet as ft
 
 from gmagc_common.fixtures import Channel, FixtureProfile, Mode, new_profile
+from gmagc_common.protocol import FixtureUploadResult
+from gmagc_mobile.client import NO_TARGET, ClientError
 from gmagc_mobile.profile_store import ProfileStore, profile_key
 from gmagc_mobile.profiles_ui import ProfileEditor, parse_int
 from tests.fakes import StubPage, texts, walk
@@ -380,3 +382,55 @@ def test_a_failing_share_is_reported_on_the_screen_for_every_kind_of_file():
         editor.message = ""
         run(handler(None))
         assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"
+
+
+def make_sending_editor(send):
+    editor = ProfileEditor(StubPage(), ProfileStore(FakePrefs()), FakeShare(), on_exit=lambda: None, send=send)
+    open_new(editor)
+    return editor
+
+
+def test_sending_to_the_pc_passes_the_profile_and_shows_what_the_pc_wrote():
+    sent = []
+
+    async def send(profile):
+        sent.append(profile)
+        return FixtureUploadResult(
+            (("ma3", "C:\\lib\\shehds@380w_beam.xml"), ("ma2", "C:\\imp\\shehds@380w_beam@standard.xml")),
+            ("grandMA2: папка не найдена",),
+        )
+
+    editor = make_sending_editor(send)
+
+    run(editor.on_send_to_pc(None))
+
+    assert len(sent) == 1 and sent[0].id == editor.profile.id
+    text = shown(editor)
+    assert "shehds@380w_beam.xml" in text and "shehds@380w_beam@standard.xml" in text and "папка не найдена" in text
+
+
+def test_a_failed_send_shows_the_reason_and_no_success_notice():
+    async def send(profile):
+        raise ClientError(NO_TARGET, "некуда записать типы приборов")
+
+    editor = make_sending_editor(send)
+
+    run(editor.on_send_to_pc(None))
+
+    assert "некуда записать" in shown(editor) and "Записано на ПК" not in shown(editor)
+
+
+def test_sending_without_a_connection_explains_what_to_do():
+    editor = make_sending_editor(None)
+
+    run(editor.on_send_to_pc(None))
+
+    assert "подключ" in shown(editor).lower()
+
+
+def test_the_profile_screen_has_a_send_to_pc_button():
+    editor = make_sending_editor(None)
+
+    labels = [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
+
+    assert any(isinstance(label, str) and "Отправить на ПК" in label for label in labels)

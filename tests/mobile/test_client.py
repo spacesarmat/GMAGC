@@ -7,12 +7,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from gmagc_common.protocol import MAX_IMAGE_BYTES, Connection, MatchResponse
+from gmagc_common.fixtures import Channel, FixtureProfile, Mode, profile_to_dict
+from gmagc_common.protocol import MAX_IMAGE_BYTES, Connection, FixtureUploadResult, MatchResponse
 from gmagc_desktop.server.runner import PhoneServer
 from gmagc_desktop.service.search_service import SearchService
 from gmagc_mobile.client import (
     BAD_IMAGE,
+    BAD_PROFILE,
     NO_INDEX,
+    NO_TARGET,
     PROTOCOL,
     RATE_LIMITED,
     SERVER,
@@ -197,3 +200,54 @@ def test_a_known_error_code_keeps_the_server_message():
         GmagcClient(connection).match(b"x")
 
     assert error.value.kind == SERVER and error.value.message == "ошибка поиска на ПК"
+
+
+def fixture_profile():
+    modes = (Mode("Standard", (Channel(1, 8, "Диммер", "dimmer"),)),)
+    return FixtureProfile("a" * 32, "SHEHDS", "380W Beam", "", modes)
+
+
+def test_send_fixture_stores_the_profile_on_the_pc_and_returns_the_written_files(running, service, tmp_path):
+    service.set_fixture_dirs(str(tmp_path / "ma3"), str(tmp_path / "ma2"))
+
+    result = make_client(running).send_fixture(profile_to_dict(fixture_profile()))
+
+    assert isinstance(result, FixtureUploadResult)
+    assert sorted(target for target, _ in result.written) == ["ma2", "ma3"] and result.skipped == ()
+    assert (tmp_path / "ma3" / "shehds@380w_beam.xml").exists()
+
+
+def test_send_fixture_reports_a_profile_that_is_not_ready(running, service, tmp_path):
+    service.set_fixture_dirs(str(tmp_path / "ma3"), str(tmp_path / "ma2"))
+    broken = profile_to_dict(FixtureProfile("a" * 32, "", "", "", (Mode("m"),)))
+
+    with pytest.raises(ClientError) as error:
+        make_client(running).send_fixture(broken)
+
+    assert error.value.kind == BAD_PROFILE and "производител" in error.value.message
+
+
+def test_send_fixture_with_a_wrong_code_is_unauthorized(running):
+    with pytest.raises(ClientError) as error:
+        make_client(running, code="ABCD2346").send_fixture(profile_to_dict(fixture_profile()))
+
+    assert error.value.kind == UNAUTHORIZED
+
+
+def test_send_fixture_reports_when_the_pc_has_nowhere_to_write():
+    body = json.dumps({"error": "no_target", "message": "некуда записать"}, ensure_ascii=False).encode("utf-8")
+    with stub_server(status=409, body=body) as connection:
+        client = GmagcClient(connection)
+        with pytest.raises(ClientError) as error:
+            client.send_fixture(profile_to_dict(fixture_profile()))
+
+    assert error.value.kind == NO_TARGET and "некуда" in error.value.message
+
+
+def test_send_fixture_reports_an_unreachable_pc():
+    client = GmagcClient(Connection("127.0.0.1", 1, "ABCD2345"), timeout=0.5)
+
+    with pytest.raises(ClientError) as error:
+        client.send_fixture(profile_to_dict(fixture_profile()))
+
+    assert error.value.kind == UNREACHABLE

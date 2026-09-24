@@ -916,3 +916,25 @@ def test_the_profiles_screen_opens_from_connect_and_returns_there():
     app.on_close_overlay(None)
 
     assert views(app) == ["connect"]
+
+
+def test_a_profile_is_sent_to_the_connected_pc_through_the_client():
+    app, _, script, _, _ = start(prefs=FakePrefs(STORED))
+    run(app.on_open_profiles(None))
+    run(app.editor.on_new_profile(None))
+
+    run(app.editor.on_send_to_pc(None))
+
+    assert len(script.fixtures) == 1 and script.fixtures[0]["id"] == app.editor.profile.id
+    assert "Записано на ПК" in " ".join(t for t in texts(app.profiles_view) if t)
+
+
+def test_sending_a_profile_without_a_connection_says_to_connect_first():
+    app, _, script, _, _ = start()
+    run(app.on_open_profiles(None))
+    run(app.editor.on_new_profile(None))
+
+    run(app.editor.on_send_to_pc(None))
+
+    assert script.fixtures == []
+    assert "подключ" in " ".join(t for t in texts(app.profiles_view) if t).lower()

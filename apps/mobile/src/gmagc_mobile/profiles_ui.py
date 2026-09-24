@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+import re
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from functools import partial
 
@@ -27,6 +28,8 @@ from gmagc_common.fixtures import (
 )
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
+from gmagc_common.protocol import FixtureUploadResult
+from gmagc_mobile.client import ClientError
 from gmagc_mobile.profile_store import ProfileStore
 
 SCREEN_LIST = "list"
@@ -43,12 +46,30 @@ def parse_int(text: str, fallback: int) -> int:
         return fallback
 
 
+def upload_text(result: FixtureUploadResult) -> str:
+    """Что записал ПК: пульт и имя каждого файла, затем то, что пришлось пропустить."""
+    labels = {"ma3": "grandMA3", "ma2": "grandMA2"}
+    lines = ["Записано на ПК:"]
+    for target, path in result.written:
+        lines.append(f"• {labels.get(target, target)}: {re.split(r'[\\\\/]', path)[-1]}")
+    lines.extend(f"Пропущено: {item}" for item in result.skipped)
+    return "\n".join(lines)
+
+
 class ProfileEditor:
-    def __init__(self, page: ft.Page, store: ProfileStore, share, on_exit: Callable[[], None] | None = None):
+    def __init__(
+        self,
+        page: ft.Page,
+        store: ProfileStore,
+        share,
+        on_exit: Callable[[], None] | None = None,
+        send: Callable[[FixtureProfile], Awaitable[FixtureUploadResult]] | None = None,
+    ):
         self.page = page
         self.store = store
         self.share = share
         self.on_exit = on_exit
+        self.send = send  # отправка профиля на ПК; None — нет подключения к ПК
         self.profiles: list[FixtureProfile] = []
         self.profile: FixtureProfile | None = None
         self.mode_index: int | None = None
@@ -56,6 +77,7 @@ class ProfileEditor:
         self.screen = SCREEN_LIST
         self.pending_delete: str | None = None
         self.message = ""
+        self.notice = ""  # успешный итог (зелёным), например «записано на ПК»
         self._render_token = 0  # растёт с каждой отрисовкой: отложенная перерисовка после ввода видит, что уже не нужна
         self.view = ft.Column(spacing=8, visible=False, expand=True, scroll=ft.ScrollMode.AUTO)
 
@@ -70,7 +92,7 @@ class ProfileEditor:
 
     def go_back(self) -> bool:
         """Шаг назад внутри редактора. False — уже на списке, выходить должно приложение."""
-        self.message = ""
+        self.message = self.notice = ""
         if self.screen == SCREEN_CHANNEL:
             self.channel_index = None
             self.screen = SCREEN_MODE
@@ -256,6 +278,23 @@ class ProfileEditor:
             controls.append(ft.Text(text, size=12, color=color))
         return controls
 
+    async def on_send_to_pc(self, _event) -> None:
+        """Отправляет профиль на ПК по Wi-Fi: ПК сам кладёт типы grandMA3 и grandMA2 в папки пультов."""
+        if self.profile is None:
+            return
+        self.message = self.notice = ""
+        if self.send is None:
+            self.message = "Нет подключения к ПК: подключитесь на главном экране и повторите."
+            self.render()
+            return
+        try:
+            result = await self.send(self.profile)
+        except ClientError as error:
+            self.message = error.message
+        else:
+            self.notice = upload_text(result)
+        self.render()
+
     async def _share_files(self, files: list[tuple[str, str, str]], subject: str) -> None:
         """Отправляет файлы (имя, текст, mime-тип) через системное «Поделиться»: приложение получает готовый файл."""
         try:
@@ -318,6 +357,8 @@ class ProfileEditor:
             ),
             ft.Text("Режимы", size=14, weight=ft.FontWeight.BOLD),
         ]
+        if self.notice:
+            controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
         if self.message:
             controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
         for index, mode in enumerate(profile.modes):
@@ -342,6 +383,7 @@ class ProfileEditor:
                 )
             )
         controls.append(ft.Button("Добавить режим", icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
+        controls.append(ft.Button("Отправить на ПК", icon=ft.Icons.COMPUTER, on_click=self.on_send_to_pc))
         controls.append(ft.TextButton("Поделиться профилем (файл JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
         controls.append(ft.TextButton("Поделиться для grandMA3 (файл XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma3))
         controls.append(

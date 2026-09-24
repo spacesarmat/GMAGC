@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import flet_camera as fc
 import flet_permission_handler as ph
 
-from gmagc_common.protocol import Health, MatchResponse, ResultItem, Status
+from gmagc_common.protocol import FixtureUploadResult, Health, MatchResponse, ResultItem, Status
 
 
 def cam(direction: str):
@@ -190,6 +190,8 @@ class Script:
         self.match_result = sample_response()
         self.connections = []
         self.matches = []
+        self.fixture_result = FixtureUploadResult((('ma3', 'C:/lib/a.xml'), ('ma2', 'C:/imp/b.xml')), ())
+        self.fixtures = []  # профили (словари), отправленные на ПК
 
     def factory(self, connection):
         self.connections.append(connection)
@@ -209,6 +211,13 @@ class ScriptedClient:
     def match(self, image, top=None):
         self.script.matches.append(image)
         result = self.script.match_result
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def send_fixture(self, profile):
+        self.script.fixtures.append(profile)
+        result = self.script.fixture_result
         if isinstance(result, Exception):
             raise result
         return result

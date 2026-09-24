@@ -10,6 +10,7 @@ from gmagc_common.protocol import (
     APP_NAME,
     ApiError,
     Connection,
+    FixtureUploadResult,
     Health,
     MatchResponse,
     ProtocolError,
@@ -22,6 +23,8 @@ RATE_LIMITED = "rate_limited"
 NO_INDEX = "no_index"
 BAD_IMAGE = "bad_image"
 TOO_LARGE = "too_large"
+BAD_PROFILE = "bad_profile"
+NO_TARGET = "no_target"
 SERVER = "server"
 PROTOCOL = "protocol"
 
@@ -32,6 +35,8 @@ _KIND_BY_CODE = {
     "bad_image": BAD_IMAGE,
     "bad_request": BAD_IMAGE,
     "too_large": TOO_LARGE,
+    "bad_profile": BAD_PROFILE,
+    "no_target": NO_TARGET,
 }
 _NOT_GMAGC = "Это не сервер GMAGC: проверьте адрес и порт."
 
@@ -87,14 +92,31 @@ class GmagcClient:
         except ProtocolError as error:
             raise ClientError(PROTOCOL, "Неожиданный ответ ПК на поиск.") from error
 
+    def send_fixture(self, profile: dict) -> FixtureUploadResult:
+        """Отправляет профиль прибора (словарь `profile_to_dict`) на ПК: тот сам запишет типы для grandMA3 и grandMA2."""
+        body = json.dumps(profile, ensure_ascii=False).encode("utf-8")
+        data = self._request(
+            "POST", "/api/fixtures", body=body, timeout=self._match_timeout, content_type="application/json"
+        )
+        try:
+            return FixtureUploadResult.from_dict(data)
+        except ProtocolError as error:
+            raise ClientError(PROTOCOL, "Неожиданный ответ ПК на отправку профиля.") from error
+
     def _request(
-        self, method: str, path: str, body: bytes | None = None, auth: bool = True, timeout: float | None = None
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        auth: bool = True,
+        timeout: float | None = None,
+        content_type: str = "image/jpeg",
     ) -> dict:
         headers: dict[str, str] = {}
         if auth:
             headers["Authorization"] = f"Bearer {self.connection.code}"
         if body is not None:
-            headers["Content-Type"] = "image/jpeg"
+            headers["Content-Type"] = content_type
         client = http.client.HTTPConnection(self.connection.host, self.connection.port, timeout=timeout or self._timeout)
         try:
             client.request(method, path, body=body, headers=headers)
