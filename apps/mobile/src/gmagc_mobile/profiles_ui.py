@@ -24,6 +24,7 @@ from gmagc_common.fixtures import (
     template_by_id,
     validate_profile,
 )
+from gmagc_common.ma2_export import export_ma2
 from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_mobile.profile_store import ProfileStore
 
@@ -283,6 +284,23 @@ class ProfileEditor:
             self.message = f"Не удалось поделиться: {error}"
             self.render()
 
+    async def on_share_ma2(self, _event) -> None:
+        """Отправляет тип прибора grandMA2 (XML) открытого режима: в MA2 один файл описывает один режим."""
+        if self.profile is None or self.mode_index is None:
+            return
+        try:
+            text = export_ma2(self.profile, self.mode_index)
+        except ExportError as error:
+            self.message = str(error)
+            self.render()
+            return
+        subject = f"{self.profile.manufacturer} {self.profile.name} {self.mode.name}".strip()
+        try:
+            await self.share.share_text(text, subject=f"{subject} (grandMA2 XML)")
+        except Exception as error:  # noqa: BLE001
+            self.message = f"Не удалось поделиться: {error}"
+            self.render()
+
     async def _set_text(self, field: str, value: str, *, render: bool = True) -> None:
         await self.set_profile_text(field, value, render=render)
 
@@ -361,6 +379,8 @@ class ProfileEditor:
             self._field("Название режима", mode.name, self._rename_current_mode),
             ft.Text("Каналы", size=14, weight=ft.FontWeight.BOLD),
         ]
+        if self.message:
+            controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
         for index, channel in sorted(enumerate(mode.channels), key=lambda pair: pair[1].dmx):
             span = f"{channel.dmx}–{channel.last}" if channel.bits == 16 else str(channel.dmx)
             controls.append(
@@ -389,6 +409,9 @@ class ProfileEditor:
         )
         issues = [i for i in validate_profile(self.profile) if i.path == mode.name or i.path.startswith(f"{mode.name} → ")]
         controls.extend(self._issue_controls(issues))
+        controls.append(
+            ft.TextButton("Поделиться режим для grandMA2 (XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma2)
+        )
         return controls
 
     # ---- канал и диапазоны --------------------------------------------------
