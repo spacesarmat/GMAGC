@@ -355,7 +355,7 @@ class ProfileEditor:
                 self._field(label, getattr(profile, field), partial(self._set_text, field))
                 for label, field in (("Производитель", "manufacturer"), ("Название", "name"), ("Короткое имя", "short_name"))
             ),
-            ft.Text("Режимы", size=14, weight=ft.FontWeight.BOLD),
+            ft.Text("Мод", size=14, weight=ft.FontWeight.BOLD),
         ]
         if self.notice:
             controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))

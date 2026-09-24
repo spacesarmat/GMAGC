@@ -434,3 +434,10 @@ def test_the_profile_screen_has_a_send_to_pc_button():
     labels = [c.content for c in walk(editor.view) if isinstance(c, ft.Button)]
 
     assert any(isinstance(label, str) and "Отправить на ПК" in label for label in labels)
+
+
+def test_the_modes_block_on_the_profile_screen_is_titled_mod():
+    editor, _, _ = make_editor()
+    open_new(editor)
+
+    assert "Мод" in texts(editor.view) and "Режимы" not in texts(editor.view)
