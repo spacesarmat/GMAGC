@@ -142,6 +142,11 @@ def new_profile(manufacturer: str = "", name: str = "") -> FixtureProfile:
 
 
 # ---- JSON ------------------------------------------------------------------
+def has_gobo_wheel(channel: Channel) -> bool:
+    """Канал «колесо гобо», в диапазонах которого выбраны гобо из библиотеки: для него экспорт строит колесо со слотами."""
+    return channel.template == "gobo_wheel" and any(item.gobo is not None for item in channel.ranges)
+
+
 def gobo_media_path(rel_path: str) -> str:
     """Путь картинки гобо в типе прибора: «GMAGC/имя_хеш.png» (хеш пути различает одинаковые имена в разных папках)."""
     stem = rel_path.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]

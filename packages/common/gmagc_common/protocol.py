@@ -223,6 +223,7 @@ class Health:
 
 SKIP_NO_FOLDER = "no_folder"  # для пульта нет папки: не найдена и не задана
 SKIP_CANNOT_USE = "cannot_use"  # заданную папку нельзя использовать (подробности в третьей части)
+SKIP_NO_GOBO = "no_gobo"  # файла гобо нет в библиотеке на ПК: в пульте у этого слота не будет картинки (имя — в детали)
 SKIP_TARGETS = ("ma3", "ma2")
 
 
@@ -234,7 +235,7 @@ def skip_item(code: str, target: str, detail: str = "") -> str:
 def parse_skip(item: str) -> tuple[str, str, str] | None:
     """(код, пульт, подробности) или None, если запись не в этом виде (старый ПК присылает готовый текст)."""
     parts = item.split(":", 2)
-    if len(parts) >= 2 and parts[0] in (SKIP_NO_FOLDER, SKIP_CANNOT_USE) and parts[1] in SKIP_TARGETS:
+    if len(parts) >= 2 and parts[0] in (SKIP_NO_FOLDER, SKIP_CANNOT_USE, SKIP_NO_GOBO) and parts[1] in SKIP_TARGETS:
         return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
     return None
 

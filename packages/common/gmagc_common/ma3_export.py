@@ -1,7 +1,8 @@
 """Экспорт профиля прибора в файл типа прибора grandMA3 (.xml). Только стандартная библиотека.
 
 Структура и значения сняты с реальных файлов MA3 (`k10test.xml`, `shehds@380w beam.xml`, `generic@moving_head.xml`).
-Слоты колёс (`Wheels`) на этом этапе не создаются: диапазоны колёс уходят обычными `ChannelSet`.
+Колёса гобо (`Wheels`) создаются для каналов «колесо гобо» с выбранными гобо из библиотеки; остальные диапазоны
+колёс уходят обычными `ChannelSet`. Картинки гобо файл только называет (`GOBO/GMAGC/…png`): сами PNG кладёт ПК.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 
-from gmagc_common.fixtures import Channel, FixtureProfile, Mode, has_errors, validate_profile
+from gmagc_common.fixtures import Channel, FixtureProfile, Mode, has_errors, has_gobo_wheel, validate_profile
 from gmagc_common.i18n import t
 
 DATA_VERSION = "2.5.0.3"
@@ -162,35 +163,114 @@ def _resolve_attributes(mode: Mode) -> list[str]:
     return names
 
 
-def _channel_functions(parent: ET.Element, channel: Channel, attribute: str) -> None:
+def _guid(*parts: str) -> str:
+    """Guid слота или картинки: 16 байт hex через пробелы, из имён (повторный экспорт даёт те же значения)."""
+    raw = hashlib.md5("|".join(parts).encode("utf-8")).digest()  # стабильный идентификатор, не защита
+    return " ".join(f"{byte:02X}" for byte in raw)
+
+
+def _wheel_definitions(
+    profile: FixtureProfile, resolved: list[list[str]]
+) -> tuple[dict[str, Channel], dict[tuple[int, int], str]]:
+    """Колёса типа (имя → канал-образец) и имя колеса каждого канала «колесо гобо»; одинаковые колёса режимов — одно."""
+    definitions: dict[str, Channel] = {}
+    keys: dict[tuple, str] = {}
+    names: dict[tuple[int, int], str] = {}
+    for mode_index, (mode, attributes) in enumerate(zip(profile.modes, resolved, strict=True)):
+        for channel_index, (channel, attribute) in enumerate(zip(mode.channels, attributes, strict=True)):
+            if not has_gobo_wheel(channel):
+                continue
+            key = tuple((r.name, r.gobo.path if r.gobo else "") for r in sorted(channel.ranges, key=lambda r: r.start))
+            if key not in keys:
+                name, number = attribute, 1
+                while name in definitions:
+                    number += 1
+                    name = f"{attribute}_{number}"
+                keys[key] = name
+                definitions[name] = channel
+            names[(mode_index, channel_index)] = keys[key]
+    return definitions, names
+
+
+def _slot_name(item, number: int) -> str:
+    return item.name or (item.gobo.name if item.gobo else t("Диапазон {number}", number=number))
+
+
+def _wheels(parent: ET.Element, definitions: dict[str, Channel], profile_id: str) -> None:
+    """Колёса гобо: слот на каждый диапазон; у слота с гобо — картинка (`GoboImage`) в медиа-пуле показа."""
+    wheels = ET.SubElement(parent, "Wheels")
+    picture = 0
+    for wheel_name, channel in definitions.items():
+        wheel = ET.SubElement(wheels, "Wheel", {"Name": wheel_name})
+        for number, item in enumerate(sorted(channel.ranges, key=lambda r: r.start), start=1):
+            values = {"Name": _slot_name(item, number), "Guid": _guid(profile_id, wheel_name, str(number)), "Color": WHITE}
+            if item.gobo is None:
+                ET.SubElement(wheel, "Slot", values)
+                continue
+            folder, _, file_name = item.gobo.path.rpartition("/")
+            values["MediaFileName"] = f"GOBO/{item.gobo.path}"
+            slot = ET.SubElement(wheel, "Slot", values)
+            picture += 1
+            stem = f"[{file_name.replace('.', '_')}]"
+            export = ET.SubElement(slot, "DependencyExport", {"Size": "1"})
+            dependency = ET.SubElement(
+                export,
+                "Dependency",
+                {
+                    "Base": "ShowData.MediaPools.Gobos",
+                    "RelAddr": stem,
+                    "RelAddrNum": str(picture),
+                    "Address": f"ShowData.MediaPools.Gobos.{stem}",
+                    "AddressNum": f"14.2.1.{picture}",
+                },
+            )
+            ET.SubElement(
+                dependency,
+                "GoboImage",
+                {
+                    "Name": stem,
+                    "Guid": _guid(profile_id, "image", item.gobo.path),
+                    "FileName": file_name,
+                    "FilePath": folder,
+                },
+            )
+
+
+def _channel_functions(parent: ET.Element, channel: Channel, attribute: str, wheel: str = "") -> None:
     logical = ET.SubElement(parent, "LogicalChannel", {"Attribute": attribute})
     function_attributes = {"Attribute": attribute, "Default": _hex24(channel.default, channel.bits)}
     if attribute in _PHYSICAL:
         function_attributes["PhysicalFrom"], function_attributes["PhysicalTo"] = _PHYSICAL[attribute]
+    if wheel:
+        function_attributes["PhysicalTo"] = f"{len(channel.ranges)}.0000000000"
+        function_attributes["Wheel"] = wheel
     function = ET.SubElement(logical, "ChannelFunction", function_attributes)
     ranges = sorted(channel.ranges, key=lambda r: r.start)
     if ranges and ranges[0].start > 0:
         ET.SubElement(function, "ChannelSet")  # значения ниже первого диапазона: набор с нуля без имени
-    for item in ranges:
+    for number, item in enumerate(ranges, start=1):
         set_attributes = {}
-        if item.name:
-            set_attributes["Name"] = item.name
+        name = _slot_name(item, number) if wheel else item.name
+        if name:
+            set_attributes["Name"] = name
         if item.start > 0:
             set_attributes["DMXFrom"] = _hex24(item.start, channel.bits)
+        if wheel:  # слот колеса — по порядку диапазонов (номера с 1), как строит колесо `_wheels`
+            set_attributes.update({"WheelSlotIndex": str(number), "PhysicalTo": "0.0000", "HasPhysical": "Yes"})
         ET.SubElement(function, "ChannelSet", set_attributes)
 
 
-def _dmx_mode(parent: ET.Element, mode: Mode, attributes: list[str]) -> None:
+def _dmx_mode(parent: ET.Element, mode: Mode, attributes: list[str], wheels: dict[int, str] | None = None) -> None:
     element = ET.SubElement(parent, "DMXMode", {"Name": mode.name, "Geometry": GEOMETRY, "XYZ": "No", "DiveInto": "Yes"})
     channels = ET.SubElement(element, "DMXChannels")
-    for channel, attribute in zip(mode.channels, attributes, strict=True):
+    for channel_index, (channel, attribute) in enumerate(zip(mode.channels, attributes, strict=True)):
         attributes_of_channel = {"Coarse": str(channel.dmx)}
         if channel.bits == 16:
             attributes_of_channel["Fine"] = str(channel.dmx + 1)
         attributes_of_channel["DefaultChannelFunction"] = f"{attribute}.{attribute} 1"
         attributes_of_channel["Geometry"] = GEOMETRY
         dmx_channel = ET.SubElement(channels, "DMXChannel", attributes_of_channel)
-        _channel_functions(dmx_channel, channel, attribute)
+        _channel_functions(dmx_channel, channel, attribute, (wheels or {}).get(channel_index, ""))
     for name in ("Relations", "FTMacros", "SoftwareVersions", "FTPresets"):
         ET.SubElement(element, name)
 
@@ -255,7 +335,8 @@ def export_ma3(profile: FixtureProfile, now: datetime | None = None) -> str:
         },
     )
     _attribute_definitions(fixture_type, used)
-    ET.SubElement(fixture_type, "Wheels")
+    definitions, wheel_names = _wheel_definitions(profile, resolved)
+    _wheels(fixture_type, definitions, profile.id)
     physical = ET.SubElement(fixture_type, "PhysicalDescriptions")
     for name in ("Emitters", "CRIs", "FTFilters", "PhysicalProperties", "ColorSpaceCollect", "GamutCollect"):
         ET.SubElement(physical, name)
@@ -264,8 +345,9 @@ def export_ma3(profile: FixtureProfile, now: datetime | None = None) -> str:
     geometries = ET.SubElement(fixture_type, "Geometries")
     ET.SubElement(geometries, "Geometry", {"Name": GEOMETRY, "Model": GEOMETRY})
     modes = ET.SubElement(fixture_type, "DMXModes")
-    for mode, attributes in zip(profile.modes, resolved, strict=True):
-        _dmx_mode(modes, mode, attributes)
+    for mode_index, (mode, attributes) in enumerate(zip(profile.modes, resolved, strict=True)):
+        wheels = {c: name for (m, c), name in wheel_names.items() if m == mode_index}
+        _dmx_mode(modes, mode, attributes, wheels)
     revisions = ET.SubElement(fixture_type, "Revisions")
     stamp = (now or datetime.now()).strftime("%d.%m.%Y %H:%M:%S")
     ET.SubElement(revisions, "Revision", {"Text": t("Создано в GMAGC"), "Date": stamp, "UserID": "0"})

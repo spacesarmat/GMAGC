@@ -21,6 +21,7 @@ from gmagc_common.fixtures import (
     file_part,
     gobo_rgba,
     has_errors,
+    has_gobo_wheel,
     validate_profile,
 )
 from gmagc_common.i18n import t
@@ -165,10 +166,6 @@ def _channel_type(module: ET.Element, channel: Channel, spec: Ma2Attr, wheel: in
     _sets(function, channel, spec, wheel)
 
 
-def _has_gobos(channel: Channel) -> bool:
-    return channel.template == "gobo_wheel" and any(item.gobo is not None for item in channel.ranges)
-
-
 def _wheels(fixture_type: ET.Element, wheels: list[tuple[Channel, Ma2Attr]]) -> None:
     """Колёса гобо: слот на каждый диапазон канала, картинка слота — сырые RGBA 64×64 внутри файла типа."""
     element = ET.SubElement(fixture_type, "Wheels")
@@ -247,7 +244,7 @@ def export_ma2(profile: FixtureProfile, mode_index: int = 0, now: datetime | Non
     )
     body = ET.SubElement(module, "Body")
     ET.SubElement(body, "Size", {"x": "0.2", "y": "0.2", "z": "0.2"})
-    wheels = [(channel, spec) for channel, spec in zip(mode.channels, specs, strict=True) if _has_gobos(channel)]
+    wheels = [(channel, spec) for channel, spec in zip(mode.channels, specs, strict=True) if has_gobo_wheel(channel)]
     numbers = {id(channel): number for number, (channel, _) in enumerate(wheels, start=1)}
     for channel, spec in zip(mode.channels, specs, strict=True):
         _channel_type(module, channel, spec, numbers.get(id(channel), 0))
