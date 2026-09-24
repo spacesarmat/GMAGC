@@ -231,6 +231,10 @@ class MobileApp:
                         self.code_field,
                         ft.Row([self.connect_button, self.connect_busy], spacing=12, alignment=ft.MainAxisAlignment.CENTER),
                         ft.Row([self.scan_button], alignment=ft.MainAxisAlignment.CENTER),
+                        ft.Row(
+                            [ft.TextButton("Профили приборов", icon=ft.Icons.TUNE, on_click=self.on_open_profiles)],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                        ),
                         self.connect_error,
                     ],
                     spacing=12,
@@ -241,7 +245,6 @@ class MobileApp:
                 ft.Divider(),
                 _nav_row(
                     [
-                        _nav_item(ft.Icons.TUNE, "Профили", self.on_open_profiles),
                         _nav_item(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
                         _nav_item(ft.Icons.HELP_OUTLINE, "Помощь", self.on_open_help),
                         _nav_item(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),

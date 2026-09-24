@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -52,6 +53,7 @@ class ProfileEditor:
         self.screen = SCREEN_LIST
         self.pending_delete: str | None = None
         self.message = ""
+        self._render_token = 0  # растёт с каждой отрисовкой: отложенная перерисовка после ввода видит, что уже не нужна
         self.view = ft.Column(spacing=8, visible=False, expand=True, scroll=ft.ScrollMode.AUTO)
 
     # ---- навигация ----------------------------------------------------------
@@ -141,6 +143,7 @@ class ProfileEditor:
         return click
 
     def render(self) -> None:
+        self._render_token += 1
         self.view.controls = getattr(self, f"_render_{self.screen}")()
         self.page.update()
 
@@ -225,6 +228,14 @@ class ProfileEditor:
         self.screen = SCREEN_MODE
         self.render()
 
+    async def _redraw_later(self, _event) -> None:
+        """Обновляет сообщения проверки после ввода. С задержкой: мгновенная перерисовка на потере фокуса
+        заменяла бы кнопки под пальцем, и первое касание после ввода пропадало."""
+        token = self._render_token
+        await asyncio.sleep(0.4)
+        if token == self._render_token:
+            self.render()
+
     def _field(self, label: str, value: str, handler, **kwargs) -> ft.TextField:
         """Текстовое поле с автосохранением. Перерисовка только при потере фокуса: иначе на каждой букве
         поле пересоздаётся и клавиатура закрывается."""
@@ -232,10 +243,7 @@ class ProfileEditor:
         async def changed(event) -> None:
             await handler(event.control.value, render=False)
 
-        def blurred(_event) -> None:
-            self.render()
-
-        return ft.TextField(label=label, value=value, on_change=changed, on_blur=blurred, **kwargs)
+        return ft.TextField(label=label, value=value, on_change=changed, on_blur=self._redraw_later, **kwargs)
 
     def _issue_controls(self, issues: list[Issue]) -> list[ft.Control]:
         controls: list[ft.Control] = []
@@ -418,7 +426,7 @@ class ProfileEditor:
             value=str(value),
             keyboard_type=ft.KeyboardType.NUMBER,
             on_change=changed,
-            on_blur=lambda _e: self.render(),
+            on_blur=self._redraw_later,
             width=110,
         )
 

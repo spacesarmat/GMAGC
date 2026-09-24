@@ -304,3 +304,26 @@ def test_a_failing_share_is_reported_on_the_screen_and_does_not_break_the_editor
     run(editor.on_share(None))
 
     assert "Не удалось поделиться" in shown(editor) and editor.screen == "profile"
+
+
+def test_the_redraw_after_typing_happens_later_and_only_if_nothing_else_redrew(monkeypatch):
+    """Мгновенная перерисовка на потере фокуса съедала первое касание по кнопке под пальцем."""
+    editor, _, _ = make_editor()
+    open_new(editor)
+    before = editor.page.updates
+
+    async def quick_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("gmagc_mobile.profiles_ui.asyncio.sleep", quick_sleep)
+    run(editor._redraw_later(None))
+    assert editor.page.updates == before + 1
+
+    async def sleep_with_a_render_in_between(_seconds):
+        editor.render()  # пользователь успел нажать кнопку, экран уже перерисован
+
+    monkeypatch.setattr("gmagc_mobile.profiles_ui.asyncio.sleep", sleep_with_a_render_in_between)
+    before = editor.page.updates
+    run(editor._redraw_later(None))
+
+    assert editor.page.updates == before + 1  # только та перерисовка, что сделал сам пользователь
