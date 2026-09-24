@@ -32,7 +32,7 @@ from gmagc_common.fixtures import (
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
-from gmagc_common.protocol import SKIP_NO_FOLDER, FixtureUploadResult, GoboItem, GoboList, parse_skip
+from gmagc_common.protocol import SKIP_NO_FOLDER, SKIP_NO_GOBO, FixtureUploadResult, GoboItem, GoboList, parse_skip
 from gmagc_common.scan_apply import add_draft_channels
 from gmagc_common.scan_draft import ENGINE_CLOUD, WARN_NO_TABLE, DraftChannel, ScanDraft
 from gmagc_mobile.client import ClientError
@@ -64,6 +64,8 @@ def skip_text(item: str) -> str:
     console = "grandMA3" if target == "ma3" else "grandMA2"
     if code == SKIP_NO_FOLDER:
         return t("{console}: папка не найдена, укажите её в настройках ПК-приложения", console=console)
+    if code == SKIP_NO_GOBO:
+        return t("{console}: файл гобо «{detail}» не найден в библиотеке", console=console, detail=detail)
     return t("{console}: не удалось использовать папку ({detail})", console=console, detail=detail)
 
 

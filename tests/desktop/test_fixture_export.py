@@ -117,3 +117,72 @@ def test_a_folder_that_cannot_be_created_is_skipped_with_the_reason(tmp_path):
     result = exporter.store(ready_profile())
 
     assert [target for target, _ in result.written] == ["ma3"] and result.skipped[0].startswith("cannot_use:ma2:")
+
+
+# ---- картинки гобо для MA3 ---------------------------------------------------------------------
+def gobo_profile(source="star.png", path="GMAGC/star_1a2b3c.png"):
+    from gmagc_common.fixtures import Channel, FixtureProfile, Gobo, Mode, Range
+
+    ranges = (Range(0, 9, "open"), Range(10, 19, "star", Gobo("star", path, "", source)))
+    channel = Channel(1, 8, "Gobo", "gobo_wheel", 0, ranges)
+    return FixtureProfile("a" * 32, "ACME", "Spot", "", (Mode("Std", (channel,)),))
+
+
+def make_gobo_library(tmp_path):
+    from PIL import Image
+
+    library = tmp_path / "lib"
+    library.mkdir()
+    Image.new("L", (40, 30), 200).save(library / "star.bmp")
+    return library
+
+
+def gobo_exporter(tmp_path, library, ma3_name="fixturetypes"):
+    from gmagc_desktop.service.fixture_export import FixtureExporter
+    from gmagc_desktop.service.settings import Settings
+
+    ma3 = tmp_path / "gma3_library" / ma3_name
+    settings = Settings(library_dir=str(library), ma3_fixture_dir=str(ma3), ma2_fixture_dir=str(tmp_path / "ma2"))
+    return FixtureExporter(lambda: settings, {}), ma3
+
+
+def test_store_writes_the_gobo_pictures_next_to_fixturetypes_as_png(tmp_path):
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library)
+
+    result = exporter.store(gobo_profile(source="star.bmp"))
+
+    picture = tmp_path / "gma3_library" / "fixturetyperesources" / "gobos" / "GMAGC" / "star_1a2b3c.png"
+    assert picture.exists() and picture.read_bytes().startswith(b"\x89PNG")
+    assert ("ma3", str(picture)) in result.written and result.skipped == ()
+
+
+def test_a_custom_folder_gets_a_gobos_subfolder(tmp_path):
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library, ma3_name="my_types")
+
+    exporter.store(gobo_profile(source="star.bmp"))
+
+    assert (ma3 / "gobos" / "GMAGC" / "star_1a2b3c.png").exists()
+
+
+def test_a_missing_or_foreign_gobo_file_is_skipped_by_name_and_the_type_is_still_written(tmp_path):
+    from gmagc_common.protocol import parse_skip
+
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library)
+
+    for source in ("gone.bmp", "../outside.bmp", ""):
+        result = exporter.store(gobo_profile(source=source))
+        assert [parse_skip(s) for s in result.skipped] == [("no_gobo", "ma3", "star")], source
+        assert any(path.endswith(".xml") for target, path in result.written if target == "ma3")
+
+
+def test_dangerous_picture_paths_from_the_phone_are_never_written(tmp_path):
+    library = make_gobo_library(tmp_path)
+    exporter, ma3 = gobo_exporter(tmp_path, library)
+
+    for path in ("../evil.png", "GMAGC/../../evil.png", "/abs/evil.png", "C:/evil.png", "GMAGC/a/b.png", "GMAGC/x.exe"):
+        result = exporter.store(gobo_profile(source="star.bmp", path=path))
+        assert len(result.skipped) == 1, path
+    assert not (tmp_path / "evil.png").exists() and not (tmp_path / "gma3_library" / "evil.png").exists()

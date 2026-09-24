@@ -261,6 +261,7 @@ EN = {
     "Ещё {count}: уточните запрос.": "{count} more: narrow the query.",
     "Гобо: {name}": "Gobo: {name}",
     "Убрать гобо": "Remove the gobo",
+    "{console}: файл гобо «{detail}» не найден в библиотеке": "{console}: the gobo file “{detail}” was not found in the library",
 }
 
 register("en", EN)

@@ -5,13 +5,22 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable, Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from PIL import Image
 
 from gmagc_common.fixtures import FixtureProfile, profile_file_name
 from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
-from gmagc_common.protocol import SKIP_CANNOT_USE, SKIP_NO_FOLDER, FixtureUploadResult, parse_skip, skip_item
+from gmagc_common.protocol import (
+    SKIP_CANNOT_USE,
+    SKIP_NO_FOLDER,
+    SKIP_NO_GOBO,
+    FixtureUploadResult,
+    parse_skip,
+    skip_item,
+)
 from gmagc_desktop.service.settings import Settings
 
 
@@ -28,6 +37,8 @@ def describe_skip(item: str) -> str:
     console = "grandMA3" if target == "ma3" else "grandMA2"
     if code == SKIP_NO_FOLDER:
         return t("{console}: папка не найдена, укажите её в настройках ПК-приложения", console=console)
+    if code == SKIP_NO_GOBO:
+        return t("{console}: файл гобо «{detail}» не найден в библиотеке", console=console, detail=detail)
     return t("{console}: не удалось использовать папку ({detail})", console=console, detail=detail)
 
 
@@ -57,6 +68,54 @@ def default_ma2_dir(environ: Mapping[str, str] | None = None) -> Path | None:
 
     candidates = [p for p in base.glob("gma2_V_*") if (p / "importexport").is_dir()]
     return max(candidates, key=version) / "importexport" if candidates else None
+
+
+def gobo_folder(ma3_folder: Path) -> Path:
+    """Куда MA3 кладёт картинки гобо для типов приборов: `fixturetyperesources/gobos` рядом с `fixturetypes`."""
+    if ma3_folder.name.lower() == "fixturetypes":
+        return ma3_folder.parent / "fixturetyperesources" / "gobos"
+    return ma3_folder / "gobos"
+
+
+def _safe_gobo_path(path: str) -> PurePosixPath | None:
+    """Относительный путь картинки из профиля (пришёл с телефона): только «GMAGC/имя.png», без «..» и абсолютных путей."""
+    candidate = PurePosixPath(path)
+    if candidate.is_absolute() or len(candidate.parts) != 2 or candidate.parts[0] != "GMAGC" or candidate.suffix != ".png":
+        return None
+    if ".." in candidate.parts or "\\" in path or ":" in path:
+        return None
+    return candidate
+
+
+def write_gobo_pictures(profile: FixtureProfile, folder: Path, library_dir: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """PNG гобо из библиотеки в папку картинок MA3: возвращает (записанные файлы, пропуски «нет файла гобо»)."""
+    written: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    root = Path(library_dir).resolve() if library_dir else None
+    for mode in profile.modes:
+        for channel in mode.channels:
+            for item in channel.ranges:
+                gobo = item.gobo
+                if gobo is None or gobo.path in seen:
+                    continue
+                seen.add(gobo.path)
+                target = _safe_gobo_path(gobo.path)
+                try:
+                    if target is None or root is None or not gobo.source:
+                        raise OSError("нет исходного файла")
+                    source = (root / gobo.source).resolve()
+                    if not source.is_relative_to(root):
+                        raise OSError("файл вне библиотеки")
+                    destination = folder / Path(*target.parts)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with Image.open(source) as image:
+                        image.convert("RGBA").save(destination, format="PNG")
+                except (OSError, ValueError, SyntaxError):
+                    skipped.append(skip_item(SKIP_NO_GOBO, "ma3", gobo.name))
+                    continue
+                written.append(("ma3", str(destination)))
+    return written, skipped
 
 
 class FixtureExporter:
@@ -91,6 +150,9 @@ class FixtureExporter:
             path = ma3_folder / profile_file_name(profile, "xml")
             path.write_text(ma3_xml, encoding="utf-8")
             written.append(("ma3", str(path)))
+            pictures, missing = write_gobo_pictures(profile, gobo_folder(ma3_folder), settings.library_dir)
+            written.extend(pictures)
+            skipped.extend(missing)
         ma2_folder, problem = self._folder(settings.ma2_fixture_dir, default_ma2_dir(self._environ), "ma2")
         if ma2_folder is None:
             skipped.append(problem)

@@ -207,6 +207,7 @@ EN = {
         "Optional. A file goes to the cloud only when you press the button on the phone and confirm."
     ),
     "индекс библиотеки не построен": "the library index is not built",
+    "{console}: файл гобо «{detail}» не найден в библиотеке": "{console}: the gobo file “{detail}” was not found in the library",
 }
 
 register("en", EN)
