@@ -1,0 +1,52 @@
+name: Build Android (Qt)
+
+on:
+  workflow_dispatch:
+
+env:
+  PYSIDE_VERSION: "6.11.2"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Инструменты Qt for Python
+        run: |
+          python -m pip install "pyside6==$PYSIDE_VERSION" "shiboken6==$PYSIDE_VERSION" pip setuptools wheel
+      - name: Android SDK и NDK
+        run: |
+          git clone --depth 1 --branch "v$PYSIDE_VERSION" https://code.qt.io/pyside/pyside-setup "$RUNNER_TEMP/pyside-setup"
+          cd "$RUNNER_TEMP/pyside-setup"
+          python -m pip install -r tools/cross_compile_android/requirements.txt || true
+          python tools/cross_compile_android/main.py --download-only --skip-update --auto-accept-license
+      - name: Колёса Qt for Python для Android
+        run: |
+          BASE=https://download.qt.io/official_releases/QtForPython
+          mkdir -p "$RUNNER_TEMP/wheels"
+          curl -fsSL -o "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/pyside6/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
+          curl -fsSL -o "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/shiboken6/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
+          ls -la "$RUNNER_TEMP/wheels"
+      - name: Сборка APK
+        working-directory: apps/mobile_qt/src
+        run: |
+          pyside6-android-deploy --name GMAGC \
+            --wheel-pyside "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" \
+            --wheel-shiboken "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" \
+            --force -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GMAGC-android-qt
+          path: |
+            apps/mobile_qt/src/**/*.apk
+            apps/mobile_qt/src/pysidedeploy.spec
+            apps/mobile_qt/src/deployment/**/*.log
+          if-no-files-found: warn
