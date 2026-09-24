@@ -96,7 +96,7 @@ class OnboardingHint(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, controller: AppController, screens: dict[str, QWidget]):
+    def __init__(self, controller: AppController, screens: dict[str, QWidget], top: QWidget | None = None):
         super().__init__()
         self.controller = controller
         self.screens = screens
@@ -115,6 +115,8 @@ class MainWindow(QMainWindow):
         content = QVBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
         content.setSpacing(0)
+        if top is not None:  # полоса обновлений над всем содержимым
+            content.addWidget(top)
         self.breadcrumb = QLabel()
         self.breadcrumb.setProperty("role", "muted")
         self.breadcrumb.setFixedHeight(48)
