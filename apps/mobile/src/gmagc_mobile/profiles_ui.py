@@ -10,12 +10,15 @@ import flet as ft
 
 from gmagc_common.fixtures import (
     TEMPLATES,
+    Channel,
     FixtureProfile,
     Issue,
     Mode,
+    Range,
     channel_from_template,
     new_profile,
     next_free_dmx,
+    template_by_id,
     validate_profile,
 )
 from gmagc_mobile.profile_store import ProfileStore
@@ -24,6 +27,14 @@ SCREEN_LIST = "list"
 SCREEN_PROFILE = "profile"
 SCREEN_MODE = "mode"
 SCREEN_CHANNEL = "channel"
+
+
+def parse_int(text: str, fallback: int) -> int:
+    """Число из поля ввода; пустая или нечисловая строка оставляет прежнее значение."""
+    try:
+        return int(str(text).strip())
+    except ValueError:
+        return fallback
 
 
 class ProfileEditor:
@@ -336,5 +347,134 @@ class ProfileEditor:
         controls.extend(self._issue_controls(issues))
         return controls
 
+    # ---- канал и диапазоны --------------------------------------------------
+    @property
+    def channel(self) -> Channel:
+        return self.mode.channels[self.channel_index]
+
+    async def _commit_channel(self, channel: Channel, *, render: bool = True) -> None:
+        channels = tuple(channel if i == self.channel_index else c for i, c in enumerate(self.mode.channels))
+        await self._commit_mode(replace(self.mode, channels=channels), render=render)
+
+    async def set_channel(self, *, render: bool = True, **changes) -> None:
+        current = self.channel
+        if "template" in changes:  # смена шаблона: разрядность и диапазоны новые, имя и адрес свои
+            template = template_by_id(changes.pop("template"))
+            current = replace(current, template=template.id, bits=template.bits, ranges=template.ranges)
+        await self._commit_channel(replace(current, **changes), render=render)
+
+    async def set_channel_bits(self, bits: int) -> None:
+        await self.set_channel(bits=bits)
+
+    async def add_range(self) -> None:
+        ranges = self.channel.ranges
+        start = min(ranges[-1].end + 1, 255) if ranges else 0
+        await self._commit_channel(replace(self.channel, ranges=(*ranges, Range(start, 255, "Новый диапазон"))))
+
+    async def set_range(self, index: int, start=None, end=None, name=None, *, render: bool = True) -> None:
+        def changed(item: Range) -> Range:
+            return Range(
+                item.start if start is None else start,
+                item.end if end is None else end,
+                item.name if name is None else name,
+            )
+
+        ranges = tuple(changed(r) if i == index else r for i, r in enumerate(self.channel.ranges))
+        await self._commit_channel(replace(self.channel, ranges=ranges), render=render)
+
+    async def delete_range(self, index: int) -> None:
+        ranges = tuple(r for i, r in enumerate(self.channel.ranges) if i != index)
+        await self._commit_channel(replace(self.channel, ranges=ranges))
+
+    async def _on_template_change(self, event) -> None:
+        if event.control.value:
+            await self.set_channel(template=event.control.value)
+
+    def _number_field(self, label: str, value: int, handler) -> ft.TextField:
+        """Числовое поле: пустой ввод не трогает значение; сохраняем на каждый символ, перерисовка при потере фокуса."""
+
+        async def changed(event) -> None:
+            await handler(parse_int(event.control.value, value), render=False)
+
+        return ft.TextField(
+            label=label,
+            value=str(value),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            on_change=changed,
+            on_blur=lambda _e: self.render(),
+            width=110,
+        )
+
+    def _range_row(self, index: int, item: Range) -> ft.Control:
+        async def set_start(value, *, render=True):
+            await self.set_range(index, start=value, render=render)
+
+        async def set_end(value, *, render=True):
+            await self.set_range(index, end=value, render=render)
+
+        async def set_name(value, *, render=True):
+            await self.set_range(index, name=value, render=render)
+
+        return ft.Column(
+            [
+                ft.Row(
+                    [
+                        self._number_field("От", item.start, set_start),
+                        self._number_field("До", item.end, set_end),
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            tooltip="Удалить диапазон",
+                            on_click=self._async_click(self.delete_range, index),
+                        ),
+                    ]
+                ),
+                self._field("Название значения", item.name, set_name),
+            ],
+            spacing=4,
+        )
+
     def _render_channel(self) -> list[ft.Control]:
-        return [self._header("Канал")]  # наполняется в задаче 7
+        channel = self.channel
+
+        async def set_name(value, *, render=True):
+            await self.set_channel(name=value, render=render)
+
+        async def set_dmx(value, *, render=True):
+            await self.set_channel(dmx=value, render=render)
+
+        async def set_default(value, *, render=True):
+            await self.set_channel(default=value, render=render)
+
+        controls: list[ft.Control] = [
+            self._header("Канал"),
+            ft.Dropdown(
+                label="Шаблон",
+                value=channel.template,
+                options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
+                on_select=self._on_template_change,
+            ),
+            self._field("Название", channel.name, set_name),
+            ft.Row(
+                [
+                    self._number_field("DMX", channel.dmx, set_dmx),
+                    self._number_field("По умолчанию", channel.default, set_default),
+                ]
+            ),
+            ft.Row(
+                [
+                    ft.Button(
+                        f"{bits} бит",
+                        disabled=channel.bits == bits,
+                        on_click=self._async_click(self.set_channel_bits, bits),
+                    )
+                    for bits in (8, 16)
+                ]
+            ),
+            ft.Text("Диапазоны значений (0–255)", size=14, weight=ft.FontWeight.BOLD),
+        ]
+        for index, item in enumerate(channel.ranges):
+            controls.append(self._range_row(index, item))
+        controls.append(ft.Button("Добавить диапазон", icon=ft.Icons.ADD, on_click=self._async_click(self.add_range)))
+        path = f"{self.mode.name} → {channel.name.strip() or '(без названия)'}"
+        controls.extend(self._issue_controls([i for i in validate_profile(self.profile) if i.path == path]))
+        return controls

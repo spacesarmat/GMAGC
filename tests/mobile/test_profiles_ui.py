@@ -1,10 +1,12 @@
 import asyncio
 from dataclasses import replace
 
+import flet as ft
+
 from gmagc_common.fixtures import Channel, FixtureProfile, Mode, new_profile
 from gmagc_mobile.profile_store import ProfileStore, profile_key
-from gmagc_mobile.profiles_ui import ProfileEditor
-from tests.fakes import StubPage, texts
+from gmagc_mobile.profiles_ui import ProfileEditor, parse_int
+from tests.fakes import StubPage, texts, walk
 from tests.fakes_mobile import FakePrefs, FakeShare
 
 
@@ -212,3 +214,72 @@ def test_opening_a_channel_switches_to_the_channel_screen():
     run(editor.open_channel(0))
 
     assert editor.screen == "channel" and editor.go_back() is True and editor.screen == "mode"
+
+
+def open_channel_of(editor, template="gobo_wheel"):
+    open_new(editor)
+    run(editor.open_mode(0))
+    run(editor.add_channel(template))
+    run(editor.open_channel(0))
+
+
+def saved_channel(store):
+    return run(store.list())[0].modes[0].channels[0]
+
+
+def test_channel_fields_are_saved():
+    editor, store, _ = make_editor()
+    open_channel_of(editor)
+
+    run(editor.set_channel(name="Гобо 1", dmx=9, bits=16, default=10))
+
+    channel = saved_channel(store)
+    assert (channel.name, channel.dmx, channel.bits, channel.default) == ("Гобо 1", 9, 16, 10)
+
+
+def test_changing_the_template_keeps_name_and_address_but_takes_bits_and_ranges():
+    editor, store, _ = make_editor()
+    open_channel_of(editor, "dimmer")
+    run(editor.set_channel(name="Мой канал", dmx=5))
+
+    run(editor.set_channel(template="pan"))
+
+    channel = saved_channel(store)
+    assert (channel.name, channel.dmx, channel.template, channel.bits) == ("Мой канал", 5, "pan", 16)
+
+
+def test_ranges_can_be_added_edited_and_deleted():
+    editor, store, _ = make_editor()
+    open_channel_of(editor, "control")
+
+    run(editor.add_range())
+    run(editor.set_range(0, start=0, end=9, name="Открыто"))
+    run(editor.add_range())
+    run(editor.set_range(1, start=10, end=255, name="Гобо 1"))
+    assert [(r.start, r.end, r.name) for r in saved_channel(store).ranges] == [(0, 9, "Открыто"), (10, 255, "Гобо 1")]
+
+    run(editor.delete_range(0))
+
+    assert [r.name for r in saved_channel(store).ranges] == ["Гобо 1"]
+
+
+def test_a_new_range_starts_right_after_the_previous_one():
+    editor, store, _ = make_editor()
+    open_channel_of(editor, "gobo_wheel")  # шаблон даёт диапазон 0–9
+
+    run(editor.add_range())
+
+    added = saved_channel(store).ranges[-1]
+    assert (added.start, added.end) == (10, 255)
+
+
+def test_non_numeric_input_keeps_the_previous_value():
+    assert parse_int("12", 5) == 12 and parse_int("x", 5) == 5 and parse_int("", 5) == 5
+
+
+def test_the_channel_screen_shows_range_rows():
+    editor, _, _ = make_editor()
+    open_channel_of(editor, "gobo_wheel")
+
+    values = [c.value for c in walk(editor.view) if isinstance(c, ft.TextField)]
+    assert "Открыто" in values
