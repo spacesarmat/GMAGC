@@ -20,7 +20,6 @@ def test_the_original_artwork_is_kept_next_to_the_docs():
     assert (ROOT / "docs" / "branding" / "icon.png").is_file()
 
 
-def test_the_icon_background_matches_the_artwork_in_both_builds():
-    for app in ("desktop", "mobile"):
-        config = tomllib.loads((ROOT / "apps" / app / "pyproject.toml").read_text(encoding="utf-8"))
-        assert config["tool"]["flet"]["icon_background"] == "#040c1f"
+def test_the_icon_background_matches_the_artwork_in_the_flet_build():
+    config = tomllib.loads((ROOT / "apps" / "mobile" / "pyproject.toml").read_text(encoding="utf-8"))
+    assert config["tool"]["flet"]["icon_background"] == "#040c1f"

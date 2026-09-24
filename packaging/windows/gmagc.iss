@@ -3,13 +3,13 @@
 ; и права администратора ему взять неоткуда.
 ;
 ; Версия и папка со собранным приложением передаются при сборке:
-;   ISCC.exe /DAppVersion=0.6.3 /DSourceDir=C:\path\to\apps\desktop\build\windows gmagc.iss
+;   ISCC.exe /DAppVersion=0.6.3 /DSourceDir=C:\path\to\dist-app\gmagc-desktop gmagc.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\..\apps\desktop\build\windows"
+  #define SourceDir "..\..\dist-app\gmagc-desktop"
 #endif
 
 #define AppName "GMAGC"

@@ -1,0 +1,9 @@
+PySide6-Essentials
+numpy
+opencv-python-headless
+Pillow
+segno
+rapidocr-onnxruntime
+pypdfium2
+anthropic
+pyinstaller
