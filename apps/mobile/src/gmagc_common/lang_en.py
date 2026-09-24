@@ -3,7 +3,6 @@
 from gmagc_common.i18n import register
 
 EN = {
-    # шаблоны каналов: названия и названия диапазонов (тексты хранятся в fixtures.TEMPLATES)
     "Диммер": "Dimmer",
     "Шаттер / строб": "Shutter / strobe",
     "Закрыт": "Closed",
@@ -32,7 +31,6 @@ EN = {
     "Фрост": "Frost",
     "Управление": "Control",
     "Свой канал": "Custom channel",
-    # проверка профиля и разбор данных
     "неизвестный шаблон канала: {template_id}": "unknown channel template: {template_id}",
     "Режим {number}": "Mode {number}",
     "поле «{field}» должно быть строкой": "field “{field}” must be a string",
@@ -44,9 +42,7 @@ EN = {
     "профиль": "profile",
     "режим": "mode",
     "разрядность канала должна быть 8 или 16": "the channel resolution must be 8 or 16 bits",
-    "диапазон «{name}» должен лежать в 0–255 и идти от меньшего к большему": (
-        "range “{name}” must lie within 0–255 and go from smaller to larger"
-    ),
+    "диапазон «{name}» должен лежать в 0–255 и идти от меньшего к большему": "range “{name}” must lie within 0–255 and go from smaller to larger",
     "диапазоны «{name}» и «{name2}» пересекаются": "ranges “{name}” and “{name2}” overlap",
     "между диапазонами «{name}» и «{name2}» есть пропуск": "there is a gap between ranges “{name}” and “{name2}”",
     "не указан производитель": "the manufacturer is not specified",
@@ -59,30 +55,19 @@ EN = {
     "адрес {address} пересекается с каналом «{used}»": "address {address} overlaps with channel “{used}”",
     "пропуск адресов {start}–{end}": "gap in addresses {start}–{end}",
     "значение по умолчанию должно быть 0–255": "the default value must be 0–255",
-    # экспорт в пульты
     "Диапазон {number}": "Range {number}",
     "профиль не готов к экспорту: {details}": "the profile is not ready for export: {details}",
     "нет режима с номером {mode_index}": "there is no mode number {mode_index}",
     "Создано в GMAGC": "Created with GMAGC",
-    "в режиме «{name}» шаблон «{template}» повторяется: MA2 не различит эти каналы": (
-        "in mode “{name}” the template “{template}” is repeated: MA2 cannot tell these channels apart"
-    ),
-    "в режиме «{name}» шаблон «{template}» повторяется: MA3 не различит эти каналы": (
-        "in mode “{name}” the template “{template}” is repeated: MA3 cannot tell these channels apart"
-    ),
+    "в режиме «{name}» шаблон «{template}» повторяется: MA2 не различит эти каналы": "in mode “{name}” the template “{template}” is repeated: MA2 cannot tell these channels apart",
+    "в режиме «{name}» шаблон «{template}» повторяется: MA3 не различит эти каналы": "in mode “{name}” the template “{template}” is repeated: MA3 cannot tell these channels apart",
     "нет определения атрибута {name}": "no definition of the attribute {name}",
-    # протокол
     "повреждённое изображение в ответе": "damaged image in the reply",
     "неверный ответ сервера: {error}": "invalid server reply: {error}",
     "ожидались списки": "lists were expected",
-    # поддержка автора
     "Поддержать автора": "Support the author",
-    "GMAGC бесплатна, её делает один человек. Если программа помогает вам в работе, вы можете поддержать автора добровольным взносом. Спасибо!": (
-        "GMAGC is free and is made by one person. If the program helps you in your work, "
-        "you can support the author with a voluntary donation. Thank you!"
-    ),
+    "GMAGC бесплатна, её делает один человек. Если программа помогает вам в работе, вы можете поддержать автора добровольным взносом. Спасибо!": "GMAGC is free and is made by one person. If the program helps you in your work, you can support the author with a voluntary donation. Thank you!",
     "неизвестный ответ: {answer}": "unknown answer: {answer}",
-    # обновления
     "Переход на недопустимый адрес: обновление отменено": "Redirect to a disallowed address: the update was cancelled",
     "Недопустимый адрес обновления": "Disallowed update address",
     "GitHub временно ограничил число запросов: попробуйте позже": "GitHub has temporarily limited the number of requests: try again later",
@@ -95,9 +80,36 @@ EN = {
     "миниатюра гобо «{name}» повреждена": "the thumbnail of gobo “{name}” is damaged",
     "миниатюра гобо «{name}» имеет неверный размер": "the thumbnail of gobo “{name}” has the wrong size",
     "ожидался список": "a list was expected",
-    "в режиме «{name}» шаблон «{template}» повторяется: GDTF не различит эти каналы": (
-        "in the mode “{name}” the template “{template}” is repeated: GDTF cannot tell these channels apart"
-    ),
+    "в режиме «{name}» шаблон «{template}» повторяется: GDTF не различит эти каналы": "in the mode “{name}” the template “{template}” is repeated: GDTF cannot tell these channels apart",
+    " (идёт индексация)": " (indexing)",
+    " · {number} {files}": " · {number} {files}",
+    " · индекс на ПК не построен": " · the PC index is not built",
+    "GMAGC нашёл: {name} ({score_text})\n{path}": "GMAGC found: {name} ({score_text})\n{path}",
+    "GMAGC: проекция на фото не найдена": "GMAGC: no projection found in the photo",
+    "Версия приложения на ПК (API {api}) не подходит к этому телефону (API {phone_api}): обновите оба приложения.": "The PC app version (API {api}) does not match this phone (API {phone_api}): update both apps.",
+    "Изображение слишком большое для отправки.": "The image is too large to send.",
+    "На ПК ещё не построен индекс: выберите папку библиотеки в приложении на ПК.": "The index is not built on the PC yet: choose the library folder in the PC app.",
+    "На ПК не выбрана библиотека или индекс ещё не построен. Постройте индекс в приложении на ПК.": "No library is selected on the PC or its index is not built yet. Build the index in the PC app.",
+    "На ПК не найдена папка для grandMA3 или grandMA2: укажите её на экране «Настройки» ПК-приложения.": "No folder for grandMA3 or grandMA2 was found on the PC: specify it on the “Settings” screen of the PC app.",
+    "На ПК не установлено распознавание текста: {message}": "Text recognition is not installed on the PC: {message}",
+    "Неверный код доступа. Код показан в приложении на ПК; если его сменили, введите новый.": "Wrong access code. The code is shown in the PC app; if it was changed, enter the new one.",
+    "Неожиданный ответ ПК на запрос состояния.": "Unexpected reply from the PC to the status request.",
+    "Неожиданный ответ ПК на отправку профиля.": "Unexpected reply from the PC to sending the profile.",
+    "Неожиданный ответ ПК на поиск гобо.": "Unexpected reply from the PC to the gobo search.",
+    "Неожиданный ответ ПК на поиск.": "Unexpected reply from the PC to the search.",
+    "Неожиданный ответ ПК на распознавание.": "Unexpected reply from the PC to the recognition request.",
+    "Нет связи с ПК. Телефон и ПК должны быть в одной сети Wi-Fi, GMAGC должен быть запущен на ПК, а брандмауэр Windows должен разрешать доступ. ({message})": "No connection to the PC. The phone and the PC must be on the same Wi-Fi network, GMAGC must be running on the PC and the Windows firewall must allow access. ({message})",
+    "Ответ ПК: HTTP {status}": "PC reply: HTTP {status}",
+    "Ошибка на ПК: {message}": "PC error: {message}",
+    "ПК не принял профиль: {message}": "The PC did not accept the profile: {message}",
+    "ПК не смог прочитать изображение. Попробуйте снять ещё раз.": "The PC could not read the image. Try shooting again.",
+    "ПК не смог прочитать файл инструкции: {message}": "The PC could not read the manual file: {message}",
+    "Подключено: {host}:{port}": "Connected: {host}:{port}",
+    "Проекция на фото не найдена: переснимите ближе, затемните фон.": "No projection found in the photo: shoot closer and darken the background.",
+    "Слишком много неверных кодов. Подождите {seconds} с.": "Too many wrong codes. Wait {seconds} s.",
+    "Совпадение ненадёжно: похоже, такого гобо в библиотеке нет. Ниже самые близкие.": "The match is unreliable: this gobo is probably not in the library. The closest ones are below.",
+    "Это не сервер GMAGC: проверьте адрес и порт.": "This is not a GMAGC server: check the address and port.",
+    "проекция не найдена": "projection not found",
 }
 
 register("en", EN)
