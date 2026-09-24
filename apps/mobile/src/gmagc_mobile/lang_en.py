@@ -242,6 +242,14 @@ EN = {
         "Uncheck what you do not need. Names and ranges can be edited after adding."
     ),
     "диапазонов: {count}": "ranges: {count}",
+    "Улучшить в облаке": "Improve in the cloud",
+    "Распознать в облаке": "Recognize in the cloud",
+    "Файл инструкции будет отправлен через ПК в облако Anthropic (Claude) для распознавания. Нужен ключ Anthropic в настройках ПК-приложения. Отправить?": (
+        "The manual file will be sent through the PC to the Anthropic (Claude) cloud for recognition. "
+        "An Anthropic key must be set in the PC app settings. Send it?"
+    ),
+    "Отправить в облако": "Send to the cloud",
+    "Отмена": "Cancel",
 }
 
 register("en", EN)

@@ -27,6 +27,7 @@ from gmagc_common.protocol import (
     Status,
 )
 from gmagc_desktop.about import VERSION
+from gmagc_desktop.scan.cloud import CloudScanner
 from gmagc_desktop.scan.engine import LocalScanner, ScanError, ScanUnavailableError
 from gmagc_desktop.service.access import RateLimiter, codes_equal
 from gmagc_desktop.service.fixture_export import FixtureExporter, NoTargetError
@@ -56,6 +57,7 @@ class ApiContext:
     on_request: Callable[[RequestRecord], None] | None = None
     fixtures: FixtureExporter | None = None
     scanner: LocalScanner | None = None
+    cloud: CloudScanner | None = None
 
 
 def match_response(request_id: str, outcome: SearchOutcome) -> MatchResponse:
@@ -223,7 +225,7 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _fixture_scan(self) -> None:
         """Фото или PDF инструкции → черновик каналов (`ScanDraft`); распознавание локальное, на этом ПК."""
         engine = parse_qs(urlsplit(self.path).query).get("engine", ["local"])[0]
-        if engine != "local":
+        if engine not in ("local", "cloud"):
             self._error("bad_request", "неизвестный движок распознавания")
             return
         length = self._content_length()
@@ -245,7 +247,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         if len(data) != length:
             self._error("bad_request", "тело запроса получено не полностью")
             return
-        scanner = self.context.scanner
+        scanner = self.context.cloud if engine == "cloud" else self.context.scanner
         if scanner is None:
             self._error("server_error", "распознавание не настроено")
             return

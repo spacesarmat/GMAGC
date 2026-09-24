@@ -119,10 +119,12 @@ class GmagcClient:
         except ProtocolError as error:
             raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на отправку профиля.")) from error
 
-    def scan_fixture(self, data: bytes, content_type: str = "image/jpeg") -> ScanDraft:
-        """Отправляет фото или PDF инструкции на ПК и возвращает черновик каналов (распознавание — на ПК)."""
+    def scan_fixture(self, data: bytes, content_type: str = "image/jpeg", engine: str = "local") -> ScanDraft:
+        """Отправляет фото или PDF инструкции на ПК и возвращает черновик каналов.
+
+        engine="local" — распознаёт сам ПК; "cloud" — ПК отправляет файл в облако Claude (только по просьбе пользователя)."""
         reply = self._request(
-            "POST", "/api/fixture-scan?engine=local", body=data, timeout=self._scan_timeout, content_type=content_type
+            "POST", f"/api/fixture-scan?engine={engine}", body=data, timeout=self._scan_timeout, content_type=content_type
         )
         try:
             return ScanDraft.from_dict(reply)

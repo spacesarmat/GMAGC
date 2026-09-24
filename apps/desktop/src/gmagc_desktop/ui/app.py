@@ -409,6 +409,16 @@ class DesktopApp:
             on_submit=self.on_fixture_dirs_change,
             width=520,
         )
+        # ключ облачного распознавания инструкций: нужен только для кнопки «Распознать в облаке» на телефоне
+        self.cloud_key_field = ft.TextField(
+            label=t("Ключ Anthropic для облачного распознавания инструкций"),
+            helper=t("Необязательно. Файл уходит в облако только по кнопке на телефоне и после подтверждения."),
+            password=True,
+            can_reveal_password=True,
+            on_blur=self.on_cloud_key_change,
+            on_submit=self.on_cloud_key_change,
+            width=520,
+        )
         self.language_dropdown = ft.Dropdown(
             label="Язык / Language",
             value=self.service.settings.language,
@@ -704,7 +714,7 @@ class DesktopApp:
             items.append(self.autostart_switch)
         items.append(self.results_count_dropdown)
         items.append(self.language_dropdown)
-        items += [ft.Divider(color=DESKTOP_LINE), self.ma3_dir_field, self.ma2_dir_field]
+        items += [ft.Divider(color=DESKTOP_LINE), self.ma3_dir_field, self.ma2_dir_field, self.cloud_key_field]
         items += [
             ft.Divider(color=DESKTOP_LINE),
             self._settings_row(t("Экспорт настроек"), t("Экспорт…"), self.on_export_settings),
@@ -775,6 +785,7 @@ class DesktopApp:
         self.language_dropdown.value = self.service.settings.language
         self.ma3_dir_field.value = self.service.settings.ma3_fixture_dir
         self.ma2_dir_field.value = self.service.settings.ma2_fixture_dir
+        self.cloud_key_field.value = self.service.settings.anthropic_api_key
         self.ma3_dir_field.hint_text = self._fixture_hint(default_ma3_dir())
         self.ma2_dir_field.hint_text = self._fixture_hint(default_ma2_dir())
         self._apply_theme()
@@ -1019,6 +1030,9 @@ class DesktopApp:
 
     def on_fixture_dirs_change(self, _event) -> None:
         self.service.set_fixture_dirs(self.ma3_dir_field.value or "", self.ma2_dir_field.value or "")
+
+    def on_cloud_key_change(self, _event) -> None:
+        self.service.set_cloud_key(self.cloud_key_field.value or "")
 
     def on_language_change(self, _event) -> None:
         """Выбор языка: сохраняется и применяется сразу, интерфейс собирается заново на новом языке."""

@@ -42,12 +42,37 @@ def test_an_empty_or_huge_file_is_refused(call, running):
     assert status == 413 and ApiError.from_dict(body).code == "too_large"
 
 
-def test_the_cloud_engine_is_not_available_yet(call, running):
+def test_an_unknown_engine_is_a_bad_request(call, running):
+    use_photo(running)
+
+    status, _, body = call("POST", "/api/fixture-scan?engine=magic", b"photo")
+
+    assert status == 400 and ApiError.from_dict(body).code == "bad_request"
+
+
+def test_the_cloud_engine_without_a_key_says_where_to_enter_it(call, running):
     use_photo(running)
 
     status, _, body = call("POST", "/api/fixture-scan?engine=cloud", b"photo")
 
-    assert status == 400 and ApiError.from_dict(body).code == "bad_request"
+    error = ApiError.from_dict(body)
+    assert status == 409 and error.code == "scan_unavailable" and "ключ" in error.message
+
+
+def test_the_cloud_engine_answers_with_its_own_draft(call, running):
+    from gmagc_common.scan_draft import DraftChannel, DraftMode
+    from gmagc_desktop.scan.cloud import CloudScanner
+
+    class Cloud(CloudScanner):
+        def scan(self, data):
+            return ScanDraft((DraftMode("9CH", (DraftChannel(1, "Dimmer", "dimmer"),)),), (), "cloud")
+
+    running.server._context.cloud = Cloud(lambda: "key")
+
+    status, _, body = call("POST", "/api/fixture-scan?engine=cloud", b"photo")
+
+    draft = ScanDraft.from_dict(body)
+    assert status == 200 and draft.engine == "cloud" and draft.modes[0].name == "9CH"
 
 
 def test_missing_recognition_libraries_are_a_conflict(call, running):
