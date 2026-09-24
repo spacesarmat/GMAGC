@@ -152,6 +152,10 @@ class SearchService:
             self._update_settings(access_code=generate_code())
             return self.settings.access_code
 
+    def saved_language(self) -> str:
+        """Язык из файла настроек: нужен до сборки интерфейса, когда `load()` ещё не выполнялся."""
+        return load_settings(self._settings_path).language
+
     def set_language(self, choice: str) -> None:
         """Язык интерфейса: «auto» (по системе), «ru» или «en»; неизвестное значение сводится к «auto»."""
         self._update_settings(language=normalize_choice(choice))

@@ -5,9 +5,12 @@ from gmagc_common import i18n
 
 @pytest.fixture(autouse=True)
 def restore_language():
+    saved = {language: dict(catalog) for language, catalog in i18n._catalogs.items()}  # noqa: SLF001
     yield
     i18n.set_language("ru")
     i18n.reset_catalogs()
+    for language, catalog in saved.items():  # переводы приложений, зарегистрированные при импорте, возвращаем
+        i18n.register(language, catalog)
 
 
 def test_the_default_language_is_russian_and_text_is_returned_as_is():
