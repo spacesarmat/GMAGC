@@ -81,3 +81,10 @@ def test_data_dir_can_be_overridden_and_follows_the_platform(monkeypatch, tmp_pa
 
     monkeypatch.setattr(sys, "platform", "darwin")
     assert data_dir().parts[-3:] == ("Library", "Application Support", "GMAGC")
+
+
+def test_fixture_folders_default_to_empty_and_accept_only_strings():
+    assert Settings().ma3_fixture_dir == "" and Settings().ma2_fixture_dir == ""
+    restored = settings_from_json('{"ma3_fixture_dir": "C:/a", "ma2_fixture_dir": 5}')
+
+    assert restored.ma3_fixture_dir == "C:/a" and restored.ma2_fixture_dir == ""

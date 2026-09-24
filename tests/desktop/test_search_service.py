@@ -335,3 +335,14 @@ def test_changing_the_library_drops_stale_corrections_too(service, tmp_path, lib
     service.set_library(other)
 
     assert service._corrections == []  # noqa: SLF001 - пути были относительны прежней библиотеки
+
+
+def test_the_service_persists_the_fixture_folders(tmp_path):
+    service = SearchService(tmp_path / "data")
+    service.load()
+
+    service.set_fixture_dirs("C:/ma3", "C:/ma2")
+
+    other = SearchService(tmp_path / "data")
+    other.load()
+    assert (other.settings.ma3_fixture_dir, other.settings.ma2_fixture_dir) == ("C:/ma3", "C:/ma2")

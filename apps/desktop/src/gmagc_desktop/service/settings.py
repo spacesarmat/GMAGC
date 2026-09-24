@@ -46,6 +46,8 @@ class Settings:
     support_last_ask: float = 0.0
     support_muted: bool = False
     large_text: bool = False  # крупный шрифт и более контрастные цвета, для тёмных залов
+    ma3_fixture_dir: str = ""  # куда класть типы приборов grandMA3 с телефона; пусто — найти папку MA3 самому
+    ma2_fixture_dir: str = ""  # то же для grandMA2 (importexport)
 
 
 def _is_int(value: object) -> bool:
@@ -85,6 +87,8 @@ def settings_from_json(text: str) -> Settings:
     support_last_ask = raw.get("support_last_ask", 0.0)
     support_muted = raw.get("support_muted", False)
     large_text = raw.get("large_text", False)
+    ma3_fixture_dir = raw.get("ma3_fixture_dir", "")
+    ma2_fixture_dir = raw.get("ma2_fixture_dir", "")
     return Settings(
         library_dir=library_dir if isinstance(library_dir, str) else "",
         top_n=top_n if _is_int(top_n) and 1 <= top_n <= MAX_TOP_N else 10,
@@ -113,6 +117,8 @@ def settings_from_json(text: str) -> Settings:
         ),
         support_muted=support_muted if isinstance(support_muted, bool) else False,
         large_text=large_text if isinstance(large_text, bool) else False,
+        ma3_fixture_dir=ma3_fixture_dir if isinstance(ma3_fixture_dir, str) else "",
+        ma2_fixture_dir=ma2_fixture_dir if isinstance(ma2_fixture_dir, str) else "",
     )
 
 

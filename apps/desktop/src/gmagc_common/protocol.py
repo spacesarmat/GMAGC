@@ -19,6 +19,7 @@ DEFAULT_PORT = 8765
 CODE_LENGTH = 8
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # без похожих 0/O и 1/I/L
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_PROFILE_BYTES = 1024 * 1024  # профиль прибора в JSON: килобайты, мегабайт с большим запасом
 LINK_SCHEME = "gmagc"
 OUTCOME_FOUND = "found"
 OUTCOME_LOW_CONFIDENCE = "low_confidence"
@@ -32,6 +33,8 @@ ERROR_STATUS = {
     "too_large": 413,
     "rate_limited": 429,
     "no_index": 409,
+    "bad_profile": 400,
+    "no_target": 409,
     "server_error": 500,
 }
 
@@ -211,6 +214,33 @@ class Health:
         return _parse(
             lambda: cls(str(data["app"]), int(data["api"]), str(data["version"]), bool(data["indexed"]), int(data["files"]))
         )
+
+
+@dataclass(frozen=True)
+class FixtureUploadResult:
+    """Итог отправки профиля прибора: какие файлы записал ПК (пульт, путь) и что пропустил (сообщения)."""
+
+    written: tuple[tuple[str, str], ...]
+    skipped: tuple[str, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            "written": [{"target": target, "path": path} for target, path in self.written],
+            "skipped": list(self.skipped),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> FixtureUploadResult:
+        def build() -> FixtureUploadResult:
+            written, skipped = data["written"], data["skipped"]
+            if not isinstance(written, list) or not isinstance(skipped, list):
+                raise TypeError("ожидались списки")
+            return cls(
+                tuple((str(item["target"]), str(item["path"])) for item in written),
+                tuple(str(item) for item in skipped),
+            )
+
+        return _parse(build)
 
 
 @dataclass(frozen=True)
