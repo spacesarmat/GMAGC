@@ -92,6 +92,8 @@ EN = {
     "Слишком большой ответ GitHub": "The GitHub reply is too large",
     "Ответ GitHub не удалось разобрать": "The GitHub reply could not be parsed",
     "Ответ GitHub не похож на релиз": "The GitHub reply does not look like a release",
+    "миниатюра гобо «{name}» повреждена": "the thumbnail of gobo “{name}” is damaged",
+    "миниатюра гобо «{name}» имеет неверный размер": "the thumbnail of gobo “{name}” has the wrong size",
 }
 
 register("en", EN)
