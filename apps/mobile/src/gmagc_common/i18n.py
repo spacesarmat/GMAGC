@@ -18,6 +18,10 @@ CHOICES = (LANG_AUTO, LANG_RU, LANG_EN)
 
 FILES_RU = ("файл", "файла", "файлов")  # слово «файл» в формах для plural(): встречается на многих экранах
 FILES_EN = ("file", "files")
+FAMILIES_RU = ("семейство", "семейства", "семейств")
+FAMILIES_EN = ("family", "families")
+RESULTS_RU = ("результат", "результата", "результатов")
+RESULTS_EN = ("result", "results")
 
 _current = LANG_RU
 _catalogs: dict[str, dict[str, str]] = {}

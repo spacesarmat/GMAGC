@@ -15,7 +15,7 @@ import flet as ft
 import numpy as np
 
 from gmagc_common import i18n
-from gmagc_common.i18n import CHOICES, language_name, t
+from gmagc_common.i18n import CHOICES, FILES_EN, FILES_RU, RESULTS_EN, RESULTS_RU, language_name, plural, t
 from gmagc_common.protocol import build_link, format_code
 from gmagc_common.theme import (
     DESKTOP_ACCENT,
@@ -63,12 +63,6 @@ logger = logging.getLogger("gmagc.desktop")
 SUPPORT_EMAIL = "yodayodaspace@gmail.com"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
-NO_LIBRARY_HINT = "Сначала выберите папку библиотеки и постройте индекс"
-PHONE_HINT = "Телефон и ПК должны быть в одной сети Wi-Fi. При первом запуске разрешите доступ в брандмауэре Windows."
-ONBOARDING_HINT = (
-    "Добро пожаловать! Откройте экран «Библиотека» слева, чтобы выбрать папку гобо и построить индекс — "
-    "после этого можно искать по фото (файл или буфер обмена) или подключить телефон на экране «Телефон»."
-)
 HISTORY_LIMIT = 10
 
 BRIGHTNESS_RANGE = (-80.0, 80.0)
@@ -76,9 +70,27 @@ CONTRAST_RANGE = (0.5, 2.0)
 EXPOSURE_RANGE = (-2.0, 2.0)
 
 _VIEW_NAMES = ("search", "phone", "library", "settings")
+
+
+def no_library_hint() -> str:
+    return t("Сначала выберите папку библиотеки и постройте индекс")
+
+
+def phone_hint() -> str:
+    return t("Телефон и ПК должны быть в одной сети Wi-Fi. При первом запуске разрешите доступ в брандмауэре Windows.")
+
+
+def onboarding_hint() -> str:
+    return t(
+        "Добро пожаловать! Откройте экран «Библиотека» слева, чтобы выбрать папку гобо и построить индекс — "
+        "после этого можно искать по фото (файл или буфер обмена) или подключить телефон на экране «Телефон»."
+    )
+
+
 def _screen_label(name: str) -> str:
     """Название экрана на текущем языке (для заголовка и хлебных крошек)."""
-    return t({"search": "Поиск гобо", "phone": "Телефон", "library": "Библиотека", "settings": "Настройки"}[name])
+    labels = {"search": t("Поиск гобо"), "phone": t("Телефон"), "library": t("Библиотека"), "settings": t("Настройки")}
+    return labels[name]
 
 
 _BADGE_COLORS = {
@@ -249,12 +261,12 @@ class DesktopApp:
         self.statusbar_index = ft.Text("INDEX: NOT BUILT", size=9, color=DESKTOP_DIM)
 
         # ---- подсказка при первом запуске -------------------------------------------
-        self.onboarding_text = ft.Text(ONBOARDING_HINT, size=13)
+        self.onboarding_text = ft.Text(onboarding_hint(), size=13)
         self.onboarding_dismiss_button = ft.TextButton(
-            content=ft.Text("Понятно", size=12), on_click=self.on_dismiss_onboarding
+            content=ft.Text(t("Понятно"), size=12), on_click=self.on_dismiss_onboarding
         )
         self.onboarding_goto_library_button = ft.TextButton(
-            content=ft.Text("Перейти в «Библиотека»", size=12), on_click=lambda _e: self._show("library")
+            content=ft.Text(t("Перейти в «Библиотека»"), size=12), on_click=lambda _e: self._show("library")
         )
         self.onboarding_hint = ft.Container(
             ft.Column(
@@ -269,23 +281,23 @@ class DesktopApp:
         )
 
         # ---- библиотека ------------------------------------------------------------
-        self.library_text = ft.Text("не выбрана", selectable=True)
-        self.status_label = ft.Text("Индекс не построен")
+        self.library_text = ft.Text(t("не выбрана"), selectable=True)
+        self.status_label = ft.Text(t("Индекс не построен"))
         self.progress = ft.ProgressBar(value=0, visible=False)
         self.progress_label = ft.Text(visible=False)
-        self.choose_folder_button = ft.Button("Выбрать папку…", on_click=self.on_choose_folder)
-        self.rebuild_button = ft.Button("Обновить индекс", on_click=self.on_rebuild)
-        self.cancel_button = ft.Button("Отмена", on_click=self.on_cancel, visible=False)
+        self.choose_folder_button = ft.Button(t("Выбрать папку…"), on_click=self.on_choose_folder)
+        self.rebuild_button = ft.Button(t("Обновить индекс"), on_click=self.on_rebuild)
+        self.cancel_button = ft.Button(t("Отмена"), on_click=self.on_cancel, visible=False)
 
         # ---- поиск -------------------------------------------------------------
-        self.pick_photo_button = ft.Button("Выбрать фото…", on_click=self.on_pick_photo)
-        self.paste_button = ft.Button("Вставить из буфера", on_click=self.on_paste)
+        self.pick_photo_button = ft.Button(t("Выбрать фото…"), on_click=self.on_pick_photo)
+        self.paste_button = ft.Button(t("Вставить из буфера"), on_click=self.on_paste)
         self.banner_text = ft.Text(color=ft.Colors.BLACK)
         self.banner = ft.Container(self.banner_text, padding=10, border_radius=2, visible=False)
         self.source_label = ft.Text("", visible=False, size=11, color=DESKTOP_MUTED)
         self.photo_holder = ft.Column(visible=False, spacing=4)
         self.projection_holder = ft.Column(visible=False, spacing=4)
-        self.adjust_brightness_label = ft.Text("Яркость: 0", size=11, color=DESKTOP_MUTED)
+        self.adjust_brightness_label = ft.Text(t("Яркость: 0"), size=11, color=DESKTOP_MUTED)
         self.adjust_brightness_slider = ft.Slider(
             min=BRIGHTNESS_RANGE[0],
             max=BRIGHTNESS_RANGE[1],
@@ -294,7 +306,7 @@ class DesktopApp:
             on_change=self.on_adjust_change,
             on_change_end=self.on_adjust_commit,
         )
-        self.adjust_contrast_label = ft.Text("Контраст: 1.0×", size=11, color=DESKTOP_MUTED)
+        self.adjust_contrast_label = ft.Text(t("Контраст: 1.0×"), size=11, color=DESKTOP_MUTED)
         self.adjust_contrast_slider = ft.Slider(
             min=CONTRAST_RANGE[0],
             max=CONTRAST_RANGE[1],
@@ -303,7 +315,7 @@ class DesktopApp:
             on_change=self.on_adjust_change,
             on_change_end=self.on_adjust_commit,
         )
-        self.adjust_exposure_label = ft.Text("Экспозиция: 0 EV", size=11, color=DESKTOP_MUTED)
+        self.adjust_exposure_label = ft.Text(t("Экспозиция: 0 EV"), size=11, color=DESKTOP_MUTED)
         self.adjust_exposure_slider = ft.Slider(
             min=EXPOSURE_RANGE[0],
             max=EXPOSURE_RANGE[1],
@@ -312,10 +324,10 @@ class DesktopApp:
             on_change=self.on_adjust_change,
             on_change_end=self.on_adjust_commit,
         )
-        self.adjust_reset_button = ft.TextButton(content=ft.Text("Сбросить"), on_click=self.on_reset_adjustments)
+        self.adjust_reset_button = ft.TextButton(content=ft.Text(t("Сбросить")), on_click=self.on_reset_adjustments)
         self.adjust_panel = ft.Column(
             [
-                ft.Text("Поправка фото", size=12, weight=ft.FontWeight.W_600),
+                ft.Text(t("Поправка фото"), size=12, weight=ft.FontWeight.W_600),
                 self.adjust_brightness_label,
                 self.adjust_brightness_slider,
                 self.adjust_contrast_label,
@@ -327,7 +339,7 @@ class DesktopApp:
             spacing=2,
             visible=False,
         )
-        self.proj_adjust_brightness_label = ft.Text("Яркость: 0", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_brightness_label = ft.Text(t("Яркость: 0"), size=11, color=DESKTOP_MUTED)
         self.proj_adjust_brightness_slider = ft.Slider(
             min=BRIGHTNESS_RANGE[0],
             max=BRIGHTNESS_RANGE[1],
@@ -336,7 +348,7 @@ class DesktopApp:
             on_change=self.on_proj_adjust_change,
             on_change_end=self.on_proj_adjust_commit,
         )
-        self.proj_adjust_contrast_label = ft.Text("Контраст: 1.0×", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_contrast_label = ft.Text(t("Контраст: 1.0×"), size=11, color=DESKTOP_MUTED)
         self.proj_adjust_contrast_slider = ft.Slider(
             min=CONTRAST_RANGE[0],
             max=CONTRAST_RANGE[1],
@@ -345,7 +357,7 @@ class DesktopApp:
             on_change=self.on_proj_adjust_change,
             on_change_end=self.on_proj_adjust_commit,
         )
-        self.proj_adjust_exposure_label = ft.Text("Экспозиция: 0 EV", size=11, color=DESKTOP_MUTED)
+        self.proj_adjust_exposure_label = ft.Text(t("Экспозиция: 0 EV"), size=11, color=DESKTOP_MUTED)
         self.proj_adjust_exposure_slider = ft.Slider(
             min=EXPOSURE_RANGE[0],
             max=EXPOSURE_RANGE[1],
@@ -355,11 +367,11 @@ class DesktopApp:
             on_change_end=self.on_proj_adjust_commit,
         )
         self.proj_adjust_reset_button = ft.TextButton(
-            content=ft.Text("Сбросить"), on_click=self.on_reset_proj_adjustments
+            content=ft.Text(t("Сбросить")), on_click=self.on_reset_proj_adjustments
         )
         self.proj_adjust_panel = ft.Column(
             [
-                ft.Text("Поправка найденной проекции", size=12, weight=ft.FontWeight.W_600),
+                ft.Text(t("Поправка найденной проекции"), size=12, weight=ft.FontWeight.W_600),
                 self.proj_adjust_brightness_label,
                 self.proj_adjust_brightness_slider,
                 self.proj_adjust_contrast_label,
@@ -374,27 +386,25 @@ class DesktopApp:
         # GridView (не Row с wrap=True) — переносит карточки по строкам в реально доступной ширине панели,
         # а не только визуально «внутри себя» без учёта родителя (проверено скриншотом: с Row карточки
         # обрезались по правому краю панели вместо переноса)
-        self.results_column = ft.GridView(
-            max_extent=200, spacing=10, run_spacing=10, child_aspect_ratio=0.8, expand=True
-        )
+        self.results_column = ft.GridView(max_extent=200, spacing=10, run_spacing=10, child_aspect_ratio=0.8, expand=True)
         self.results_summary = ft.Text("", size=11, color=DESKTOP_DIM)
         self.copy_label = ft.Text("", size=12, visible=False, selectable=True)
 
         # ---- настройки ---------------------------------------------------------
         self.check_label = ft.Text("", size=12)
-        self.large_text_switch = ft.Switch(label="Крупный текст", value=False, on_change=self.on_toggle_large_text)
+        self.large_text_switch = ft.Switch(label=t("Крупный текст"), value=False, on_change=self.on_toggle_large_text)
         self.autostart_switch = ft.Switch(
-            label="Автозапуск при включении компьютера", value=False, on_change=self.on_toggle_autostart
+            label=t("Автозапуск при включении компьютера"), value=False, on_change=self.on_toggle_autostart
         )
         # папки для типов приборов, присланных с телефона: пусто — приложение ищет папки grandMA само
         self.ma3_dir_field = ft.TextField(
-            label="Папка типов приборов grandMA3",
+            label=t("Папка типов приборов grandMA3"),
             on_blur=self.on_fixture_dirs_change,
             on_submit=self.on_fixture_dirs_change,
             width=520,
         )
         self.ma2_dir_field = ft.TextField(
-            label="Папка типов приборов grandMA2 (importexport)",
+            label=t("Папка типов приборов grandMA2 (importexport)"),
             on_blur=self.on_fixture_dirs_change,
             on_submit=self.on_fixture_dirs_change,
             width=520,
@@ -407,7 +417,7 @@ class DesktopApp:
             width=240,
         )
         self.results_count_dropdown = ft.Dropdown(
-            label="Число результатов поиска",
+            label=t("Число результатов поиска"),
             value="50",
             options=[ft.DropdownOption(key=str(n), text=str(n)) for n in RESULTS_COUNT_CHOICES],
             on_select=self.on_results_count_change,
@@ -415,21 +425,21 @@ class DesktopApp:
         )
 
         # ---- сервер для телефона -----------------------------------------------
-        self.server_switch = ft.Switch(label="Сервер для телефона", value=False, on_change=self.on_toggle_server)
-        self.server_status = ft.Text("Выключен")
+        self.server_switch = ft.Switch(label=t("Сервер для телефона"), value=False, on_change=self.on_toggle_server)
+        self.server_status = ft.Text(t("Выключен"))
         self.qr_holder = ft.Column(visible=False)
         self.code_text = ft.Text("", size=16, weight=ft.FontWeight.BOLD, selectable=True, visible=False)
         self.code_row = ft.Row(
             [
-                ft.TextButton(content=ft.Text("Копировать код"), on_click=self.on_copy_code),
-                ft.TextButton(content=ft.Text("Новый код"), on_click=self.on_new_code),
+                ft.TextButton(content=ft.Text(t("Копировать код")), on_click=self.on_copy_code),
+                ft.TextButton(content=ft.Text(t("Новый код")), on_click=self.on_new_code),
             ],
             spacing=4,
             visible=False,
         )
         self.phone_note = ft.Text("", size=12, visible=False)
         self.addresses_text = ft.Text("", size=12, visible=False, selectable=True)
-        self.history_title = ft.Text("Запросы с телефона", size=14, weight=ft.FontWeight.BOLD, visible=False)
+        self.history_title = ft.Text(t("Запросы с телефона"), size=14, weight=ft.FontWeight.BOLD, visible=False)
         self.history_column = ft.Column(spacing=0)
 
     # ---- построение экрана -------------------------------------------------
@@ -519,7 +529,9 @@ class DesktopApp:
 
     def _build_topbar(self) -> ft.Container:
         return ft.Container(
-            self.breadcrumb, padding=ft.Padding.symmetric(horizontal=22, vertical=0), height=48,
+            self.breadcrumb,
+            padding=ft.Padding.symmetric(horizontal=22, vertical=0),
+            height=48,
             alignment=ft.Alignment.CENTER_LEFT,
         )
 
@@ -544,9 +556,9 @@ class DesktopApp:
             [
                 ft.Column(
                     [
-                        ft.Text("Поиск по изображению", size=22, weight=ft.FontWeight.BOLD),
+                        ft.Text(t("Поиск по изображению"), size=22, weight=ft.FontWeight.BOLD),
                         ft.Text(
-                            "Загрузите фотографию проекции, чтобы найти совпадение в библиотеке.",
+                            t("Загрузите фотографию проекции, чтобы найти совпадение в библиотеке."),
                             size=11,
                             color=DESKTOP_MUTED,
                         ),
@@ -555,9 +567,9 @@ class DesktopApp:
                 ),
                 ft.Row(
                     [
-                        self._metric("гобо в базе", self.metric_files),
-                        self._metric("время поиска", self.metric_time),
-                        self._metric("совпадение", self.metric_score),
+                        self._metric(t("гобо в базе"), self.metric_files),
+                        self._metric(t("время поиска"), self.metric_time),
+                        self._metric(t("совпадение"), self.metric_score),
                     ],
                     spacing=22,
                 ),
@@ -567,7 +579,7 @@ class DesktopApp:
         source_panel = ft.Container(
             ft.Column(
                 [
-                    ft.Text("Исходное изображение", size=12, weight=ft.FontWeight.W_600),
+                    ft.Text(t("Исходное изображение"), size=12, weight=ft.FontWeight.W_600),
                     self.source_label,
                     ft.Container(
                         ft.Column(
@@ -600,7 +612,7 @@ class DesktopApp:
             ft.Column(
                 [
                     ft.Row(
-                        [ft.Text("Результаты", size=12, weight=ft.FontWeight.W_600), self.results_summary],
+                        [ft.Text(t("Результаты"), size=12, weight=ft.FontWeight.W_600), self.results_summary],
                         spacing=10,
                     ),
                     self.banner,
@@ -634,24 +646,22 @@ class DesktopApp:
     def _build_phone_view(self) -> ft.Column:
         connection_card = _panel(
             [
-                ft.Text("Параметры подключения", size=14, weight=ft.FontWeight.BOLD),
+                ft.Text(t("Параметры подключения"), size=14, weight=ft.FontWeight.BOLD),
                 self.server_switch,
                 self.server_status,
                 self.code_text,
                 self.code_row,
                 self.phone_note,
                 self.addresses_text,
-                ft.Text(PHONE_HINT, size=12, color=DESKTOP_MUTED),
+                ft.Text(phone_hint(), size=12, color=DESKTOP_MUTED),
             ],
             expand=True,
         )
-        qr_card = _panel(
-            [ft.Text("QR-код подключения", size=14, weight=ft.FontWeight.BOLD), self.qr_holder], width=280
-        )
+        qr_card = _panel([ft.Text(t("QR-код подключения"), size=14, weight=ft.FontWeight.BOLD), self.qr_holder], width=280)
         history_card = _panel([self.history_title, self.history_column])
         return ft.Column(
             [
-                ft.Text("Подключение телефона", size=22, weight=ft.FontWeight.BOLD),
+                ft.Text(t("Подключение телефона"), size=22, weight=ft.FontWeight.BOLD),
                 ft.Row([connection_card, qr_card], spacing=14, vertical_alignment=ft.CrossAxisAlignment.START),
                 history_card,
             ],
@@ -664,7 +674,7 @@ class DesktopApp:
     def _build_library_view(self) -> ft.Column:
         card = _panel(
             [
-                ft.Text("Текущая библиотека", size=14, weight=ft.FontWeight.BOLD),
+                ft.Text(t("Текущая библиотека"), size=14, weight=ft.FontWeight.BOLD),
                 self.library_text,
                 ft.Row([self.choose_folder_button, self.rebuild_button], spacing=8),
                 self.status_label,
@@ -674,7 +684,7 @@ class DesktopApp:
             ]
         )
         return ft.Column(
-            [ft.Text("Библиотека гобо", size=22, weight=ft.FontWeight.BOLD), card],
+            [ft.Text(t("Библиотека гобо"), size=22, weight=ft.FontWeight.BOLD), card],
             spacing=16,
             expand=True,
             visible=False,
@@ -697,22 +707,22 @@ class DesktopApp:
         items += [ft.Divider(color=DESKTOP_LINE), self.ma3_dir_field, self.ma2_dir_field]
         items += [
             ft.Divider(color=DESKTOP_LINE),
-            self._settings_row("Экспорт настроек", "Экспорт…", self.on_export_settings),
-            self._settings_row("Импорт настроек", "Импорт…", self.on_import_settings),
+            self._settings_row(t("Экспорт настроек"), t("Экспорт…"), self.on_export_settings),
+            self._settings_row(t("Импорт настроек"), t("Импорт…"), self.on_import_settings),
             ft.Divider(color=DESKTOP_LINE),
-            self._settings_row("Проверить ядро", "Проверить", self.on_check),
+            self._settings_row(t("Проверить ядро"), t("Проверить"), self.on_check),
             self.check_label,
         ]
         if self.update_bar is not None:
             items += [
                 ft.Divider(color=DESKTOP_LINE),
                 self.update_bar.switch,
-                ft.Row([ft.Text("Проверить сейчас", size=13, expand=True), self.update_bar.check_button]),
+                ft.Row([ft.Text(t("Проверить сейчас"), size=13, expand=True), self.update_bar.check_button]),
                 self.update_bar.status,
             ]
         items += [
             ft.Divider(color=DESKTOP_LINE),
-            self._settings_row("Диагностика", "Отправить лог по почте", self.on_send_log),
+            self._settings_row(t("Диагностика"), t("Отправить лог по почте"), self.on_send_log),
         ]
         if self.support is not None:
             items += [
@@ -723,7 +733,7 @@ class DesktopApp:
             ]
         card = _panel(items)
         return ft.Column(
-            [ft.Text("Настройки", size=22, weight=ft.FontWeight.BOLD), card],
+            [ft.Text(t("Настройки"), size=22, weight=ft.FontWeight.BOLD), card],
             spacing=16,
             expand=True,
             scroll=ft.ScrollMode.AUTO,
@@ -750,11 +760,12 @@ class DesktopApp:
 
     def _update_results_summary(self) -> None:
         count = len(self.results_column.controls)
-        self.results_summary.value = f"{count} результатов" if count else ""
+        results = plural(count, RESULTS_RU, RESULTS_EN)
+        self.results_summary.value = t("{count} {results}", count=count, results=results) if count else ""
 
     def _finish_build(self) -> None:
         status = self.service.load()
-        self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.library_text.value = self.service.settings.library_dir or t("не выбрана")
         self.onboarding_hint.visible = not self.service.settings.library_dir
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
@@ -865,22 +876,22 @@ class DesktopApp:
         for control in (self.qr_holder, self.code_text, self.code_row, self.addresses_text, self.phone_note):
             control.visible = False
         if error:
-            self.server_status.value = f"Не удалось запустить: {error}"
+            self.server_status.value = t("Не удалось запустить: {error}", error=error)
         elif not running:
-            self.server_status.value = "Выключен"
+            self.server_status.value = t("Выключен")
         elif not addresses:
-            self.server_status.value = (
-                f"Работает на порту {self.server.port}, но адрес ПК в сети не найден: подключите ПК к Wi-Fi"
+            self.server_status.value = t(
+                "Работает на порту {port}, но адрес ПК в сети не найден: подключите ПК к Wi-Fi", port=self.server.port
             )
         else:
             host, port = addresses[0], self.server.port
             code = self.service.ensure_access_code()
-            self.server_status.value = f"Работает: {host}:{port}"
+            self.server_status.value = t("Работает: {host}:{port}", host=host, port=port)
             self.qr_holder.controls = [
                 ft.Image(src=self.qr(build_link(host, port, code)), width=220, height=220, fit=ft.BoxFit.CONTAIN)
             ]
-            self.code_text.value = f"Код: {format_code(code)}"
-            self.addresses_text.value = "Другие адреса ПК: " + ", ".join(addresses[1:])
+            self.code_text.value = t("Код: {format_code}", format_code=format_code(code))
+            self.addresses_text.value = t("Другие адреса ПК: ") + ", ".join(addresses[1:])
             self.qr_holder.visible = self.code_text.visible = self.code_row.visible = True
             self.addresses_text.visible = len(addresses) > 1
 
@@ -896,7 +907,7 @@ class DesktopApp:
 
     async def on_copy_code(self, _event) -> None:
         await self.clipboard.set(format_code(self.service.ensure_access_code()))
-        self.phone_note.value = "Код скопирован"
+        self.phone_note.value = t("Код скопирован")
         self.phone_note.visible = True
         self.page.update()
 
@@ -939,7 +950,7 @@ class DesktopApp:
 
     # ---- индексация --------------------------------------------------------
     async def on_choose_folder(self, _event) -> None:
-        folder = await self.picker.get_directory_path(dialog_title="Папка библиотеки гобо")
+        folder = await self.picker.get_directory_path(dialog_title=t("Папка библиотеки гобо"))
         if not folder:
             return
         self.service.set_library(folder)
@@ -958,7 +969,7 @@ class DesktopApp:
         if self._busy:
             return
         if not self.service.settings.library_dir:
-            self._show_banner(NO_LIBRARY_HINT, error=True)
+            self._show_banner(no_library_hint(), error=True)
             return
         self._cancel = False
         self._hide_banner()
@@ -969,11 +980,11 @@ class DesktopApp:
         try:
             self.service.build_index(progress=self._on_progress, cancel=lambda: self._cancel)
         except IndexCancelled:
-            self._show_banner("Индексация отменена", error=False)
+            self._show_banner(t("Индексация отменена"), error=False)
         except (LibraryNotFound, LibraryScanError) as error:
             self._show_banner(str(error), error=True)
         except Exception as error:  # noqa: BLE001 - рабочий поток обязан показать причину, а не пропасть
-            self._show_banner(f"Ошибка индексации: {error}", error=True)
+            self._show_banner(t("Ошибка индексации: {error}", error=error), error=True)
         finally:
             self.status_label.value = status_text(self.service.status())
             self._update_metrics()
@@ -982,12 +993,12 @@ class DesktopApp:
 
     def _on_progress(self, done: int, total: int) -> None:
         self.progress.value = done / total if total else 0
-        self.progress_label.value = f"Индексация: {done} из {total}"
+        self.progress_label.value = t("Индексация: {done} из {total}", done=done, total=total)
         self.page.update()
 
     # ---- поиск -------------------------------------------------------------
     async def on_pick_photo(self, _event) -> None:
-        files = await self.picker.pick_files(dialog_title="Фото проекции", file_type=ft.FilePickerFileType.IMAGE)
+        files = await self.picker.pick_files(dialog_title=t("Фото проекции"), file_type=ft.FilePickerFileType.IMAGE)
         if files and files[0].path:
             self._search_bytes_from(Path(files[0].path))
 
@@ -1004,7 +1015,7 @@ class DesktopApp:
 
     @staticmethod
     def _fixture_hint(found) -> str:
-        return f"по умолчанию: {found}" if found else "папка не найдена, укажите её"
+        return t("по умолчанию: {found}", found=found) if found else t("папка не найдена, укажите её")
 
     def on_fixture_dirs_change(self, _event) -> None:
         self.service.set_fixture_dirs(self.ma3_dir_field.value or "", self.ma2_dir_field.value or "")
@@ -1034,7 +1045,7 @@ class DesktopApp:
         exe = current_executable()
         if exe is None:
             self.autostart_switch.value = False
-            self._show_banner("Не удалось определить путь к приложению", error=True)
+            self._show_banner(t("Не удалось определить путь к приложению"), error=True)
             self.page.update()
             return
         autostart.set_autostart(target, exe)
@@ -1050,24 +1061,24 @@ class DesktopApp:
     async def on_export_settings(self, _event) -> None:
         data = self.service.export_settings_json().encode("utf-8")
         path = await self.picker.save_file(
-            dialog_title="Экспорт настроек", file_name="gmagc-settings.json", allowed_extensions=["json"], src_bytes=data
+            dialog_title=t("Экспорт настроек"), file_name="gmagc-settings.json", allowed_extensions=["json"], src_bytes=data
         )
         if path:
-            self._show_banner(f"Настройки сохранены: {path}", error=False)
+            self._show_banner(t("Настройки сохранены: {path}", path=path), error=False)
 
     async def on_import_settings(self, _event) -> None:
-        files = await self.picker.pick_files(dialog_title="Импорт настроек", allowed_extensions=["json"])
+        files = await self.picker.pick_files(dialog_title=t("Импорт настроек"), allowed_extensions=["json"])
         if not files:
             return
         try:
             raw = files[0].bytes if files[0].bytes else Path(files[0].path).read_bytes()
             text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as error:
-            self._show_banner(f"Не удалось прочитать файл: {error}", error=True)
+            self._show_banner(t("Не удалось прочитать файл: {error}", error=error), error=True)
             return
         self.service.import_settings_json(text)
         status = self.service.load()
-        self.library_text.value = self.service.settings.library_dir or "не выбрана"
+        self.library_text.value = self.service.settings.library_dir or t("не выбрана")
         self.onboarding_hint.visible = not self.service.settings.library_dir
         self.status_label.value = status_text(status)
         if self.update_bar is not None:
@@ -1075,7 +1086,7 @@ class DesktopApp:
         self._update_metrics()
         self._update_statusbar()
         self._show_banner(
-            "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.",
+            t("Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения."),
             error=False,
         )
 
@@ -1088,13 +1099,13 @@ class DesktopApp:
             if Path(name).suffix.lower() in IMAGE_SUFFIXES:
                 self._search_bytes_from(Path(name))
                 return
-        self._show_banner("В буфере обмена нет картинки или файла-изображения", error=True)
+        self._show_banner(t("В буфере обмена нет картинки или файла-изображения"), error=True)
 
     def _search_bytes_from(self, path: Path) -> None:
         try:
             data = path.read_bytes()
         except OSError as error:
-            self._show_banner(f"Не удалось прочитать файл: {error}", error=True)
+            self._show_banner(t("Не удалось прочитать файл: {error}", error=error), error=True)
             return
         self._start_search(data)
 
@@ -1102,7 +1113,7 @@ class DesktopApp:
         if self._busy:
             return
         if self.service.status() is None:
-            self._show_banner(NO_LIBRARY_HINT, error=True)
+            self._show_banner(no_library_hint(), error=True)
             return
         self._hide_banner()
         self.source_label.visible = False
@@ -1116,11 +1127,11 @@ class DesktopApp:
         try:
             outcome = run()
         except NoIndexError:
-            self._show_banner(NO_LIBRARY_HINT, error=True)
+            self._show_banner(no_library_hint(), error=True)
         except PhotoError as error:
-            self._show_banner(f"Не удалось прочитать фото: {error}", error=True)
+            self._show_banner(t("Не удалось прочитать фото: {error}", error=error), error=True)
         except Exception as error:  # noqa: BLE001 - рабочий поток обязан показать причину, а не пропасть
-            self._show_banner(f"Ошибка поиска: {error}", error=True)
+            self._show_banner(t("Ошибка поиска: {error}", error=error), error=True)
         else:
             self._show_outcome(outcome)
         finally:
@@ -1150,7 +1161,7 @@ class DesktopApp:
 
     def _update_photo_preview(self, data: bytes) -> None:
         self.photo_holder.controls = [
-            ft.Text("Фото", size=11, color=DESKTOP_MUTED),
+            ft.Text(t("Фото"), size=11, color=DESKTOP_MUTED),
             ft.Image(src=data, width=150, height=110, fit=ft.BoxFit.CONTAIN),
         ]
         self.photo_holder.visible = True
@@ -1183,7 +1194,7 @@ class DesktopApp:
                 exposure=self._proj_adjust_exposure,
             )
         self.projection_holder.controls = [
-            ft.Text("Найденная проекция", size=11, color=DESKTOP_MUTED),
+            ft.Text(t("Найденная проекция"), size=11, color=DESKTOP_MUTED),
             ft.Image(src=thumbnail_png(normalized, PROJECTION_SIZE), width=75, height=75, fit=ft.BoxFit.CONTAIN),
         ]
         self.projection_holder.visible = True
@@ -1211,14 +1222,16 @@ class DesktopApp:
         self._reset_projection_adjustments()
 
     def _update_adjustment_labels(self) -> None:
-        self.adjust_brightness_label.value = f"Яркость: {_signed(self._adjust_brightness, 0)}"
-        self.adjust_contrast_label.value = f"Контраст: {self._adjust_contrast:.1f}×"
-        self.adjust_exposure_label.value = f"Экспозиция: {_signed(self._adjust_exposure, 1)} EV"
+        self.adjust_brightness_label.value = t("Яркость: {signed}", signed=_signed(self._adjust_brightness, 0))
+        self.adjust_contrast_label.value = t("Контраст: {adjust_contrast:.1f}×", adjust_contrast=self._adjust_contrast)
+        self.adjust_exposure_label.value = t("Экспозиция: {signed} EV", signed=_signed(self._adjust_exposure, 1))
 
     def _update_projection_adjustment_labels(self) -> None:
-        self.proj_adjust_brightness_label.value = f"Яркость: {_signed(self._proj_adjust_brightness, 0)}"
-        self.proj_adjust_contrast_label.value = f"Контраст: {self._proj_adjust_contrast:.1f}×"
-        self.proj_adjust_exposure_label.value = f"Экспозиция: {_signed(self._proj_adjust_exposure, 1)} EV"
+        self.proj_adjust_brightness_label.value = t("Яркость: {signed}", signed=_signed(self._proj_adjust_brightness, 0))
+        self.proj_adjust_contrast_label.value = t(
+            "Контраст: {proj_adjust_contrast:.1f}×", proj_adjust_contrast=self._proj_adjust_contrast
+        )
+        self.proj_adjust_exposure_label.value = t("Экспозиция: {signed} EV", signed=_signed(self._proj_adjust_exposure, 1))
 
     def _decode_last_query_photo(self) -> np.ndarray | None:
         if self._last_query_photo is None:
@@ -1295,7 +1308,7 @@ class DesktopApp:
             self._show_banner(message, error=outcome.kind is Outcome.NO_PROJECTION)
         if outcome.projection_png:
             self.projection_holder.controls = [
-                ft.Text("Найденная проекция", size=11, color=DESKTOP_MUTED),
+                ft.Text(t("Найденная проекция"), size=11, color=DESKTOP_MUTED),
                 ft.Image(src=outcome.projection_png, width=75, height=75, fit=ft.BoxFit.CONTAIN),
             ]
         self.projection_holder.visible = bool(outcome.projection_png)
@@ -1324,20 +1337,25 @@ class DesktopApp:
         ]
         if result.copies:
             details.append(
-                ft.Text(f"ещё {len(result.copies)} файлов", size=9, color=DESKTOP_DIM, tooltip="\n".join(result.copies))
+                ft.Text(
+                    t("ещё {count} {files}", count=len(result.copies), files=plural(len(result.copies), FILES_RU, FILES_EN)),
+                    size=9,
+                    color=DESKTOP_DIM,
+                    tooltip="\n".join(result.copies),
+                )
             )
         actions = ft.Row(
             [
                 ft.IconButton(
                     icon=ft.Icons.FOLDER_OPEN,
                     icon_size=16,
-                    tooltip="Показать в папке",
+                    tooltip=t("Показать в папке"),
                     on_click=lambda _event, path=result.full_path: self.reveal(path),
                 ),
                 ft.IconButton(
                     icon=ft.Icons.THUMB_DOWN_OUTLINED,
                     icon_size=16,
-                    tooltip="Это не то — указать верный файл",
+                    tooltip=t("Это не то — указать верный файл"),
                     data=result,
                     on_click=self.on_report_wrong,
                 ),
@@ -1358,7 +1376,7 @@ class DesktopApp:
             border_radius=2,
             ink=True,
             data=result.full_path,
-            tooltip="Нажмите, чтобы скопировать путь к файлу",
+            tooltip=t("Нажмите, чтобы скопировать путь к файлу"),
             on_click=self.on_card_click,
         )
 
@@ -1369,14 +1387,14 @@ class DesktopApp:
         """Копирует абсолютный путь файла (вместе с именем) в буфер обмена."""
         absolute = os.path.abspath(path)
         await self.clipboard.set(absolute)
-        self.copy_label.value = f"Путь скопирован: {absolute}"
+        self.copy_label.value = t("Путь скопирован: {absolute}", absolute=absolute)
         self.copy_label.visible = True
         self.page.update()
 
     async def on_report_wrong(self, event) -> None:
         """«Это не то»: пользователь указывает верный файл — учитывается при похожих запросах впредь."""
         result: Result = event.control.data
-        files = await self.picker.pick_files(dialog_title="Выберите верный файл", file_type=ft.FilePickerFileType.IMAGE)
+        files = await self.picker.pick_files(dialog_title=t("Выберите верный файл"), file_type=ft.FilePickerFileType.IMAGE)
         if not files or not files[0].path:
             return
         try:
@@ -1384,14 +1402,14 @@ class DesktopApp:
         except CorrectionError as error:
             self._show_banner(str(error), error=True)
             return
-        self._show_banner("Запомнено: при похожих запросах теперь будет показан верный файл", error=False)
+        self._show_banner(t("Запомнено: при похожих запросах теперь будет показан верный файл"), error=False)
         if self._last_query_photo is not None:
             self._start_search(self._last_query_photo)
 
     # ---- прочее ------------------------------------------------------------
     def on_check(self, _event) -> None:
         info = self.check()
-        head = "ОК: ядро работает" if info["ok"] else "ОШИБКА: ядро не сработало"
+        head = t("ОК: ядро работает") if info["ok"] else t("ОШИБКА: ядро не сработало")
         self.check_label.value = head + ", " + ", ".join(f"{name}: {value}" for name, value in info["versions"].items())
         self.page.update()
 
@@ -1409,7 +1427,7 @@ class DesktopApp:
         if self._log_path.exists() and self._log_path.stat().st_size > 0:
             self.reveal(str(self._log_path))
         else:
-            self._show_banner("Файл лога пока пуст: ошибок в этой сессии не было", error=False)
+            self._show_banner(t("Файл лога пока пуст: ошибок в этой сессии не было"), error=False)
 
     def _run_demo(self, library: str, photo: str) -> None:
         """Отладка: GMAGC_DEMO_LIBRARY / GMAGC_DEMO_PHOTO запускают индексацию и поиск при старте."""

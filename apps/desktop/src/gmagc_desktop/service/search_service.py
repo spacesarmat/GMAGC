@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from gmagc_common.i18n import normalize_choice
+from gmagc_common.i18n import normalize_choice, t
 from gmagc_common.protocol import is_valid_code
 from gmagc_common.support import SupportState
 from gmagc_common.updates import parse_version
@@ -113,12 +113,10 @@ class SearchService:
                 self._corrections_path.unlink(missing_ok=True)
             self._update_settings(library_dir=path)
 
-    def build_index(
-        self, progress: ProgressCallback | None = None, cancel: Callable[[], bool] | None = None
-    ) -> IndexStatus:
+    def build_index(self, progress: ProgressCallback | None = None, cancel: Callable[[], bool] | None = None) -> IndexStatus:
         """Строит или дособирает индекс. LibraryNotFound, LibraryScanError, IndexCancelled пробрасываются."""
         if not self.settings.library_dir:
-            raise NoIndexError("папка библиотеки не выбрана")
+            raise NoIndexError(t("папка библиотеки не выбрана"))
         self._indexing, self._done, self._total = True, 0, 0
         try:
             self._use(
@@ -240,14 +238,14 @@ class SearchService:
         with self._lock:
             index = self._index
             if index is None or not self.settings.library_dir:
-                raise CorrectionError("индекс не построен")
+                raise CorrectionError(t("индекс не построен"))
             root = Path(self.settings.library_dir).resolve()
             try:
                 rel = str(Path(correct_full_path).resolve().relative_to(root)).replace("\\", "/")
             except ValueError:
-                raise CorrectionError("выбранный файл не в папке библиотеки") from None
+                raise CorrectionError(t("выбранный файл не в папке библиотеки")) from None
             if not any(f.rel_path == rel for f in index.files):
-                raise CorrectionError("выбранный файл не входит в текущий индекс: обновите его и попробуйте снова")
+                raise CorrectionError(t("выбранный файл не входит в текущий индекс: обновите его и попробуйте снова"))
             self._corrections.append(new_correction(wrong_rel_path, rel))
             save_corrections(self._corrections, self._corrections_path)
 
@@ -300,7 +298,7 @@ class SearchService:
     ) -> SearchOutcome:
         searcher, index = self._searcher, self._index
         if searcher is None or index is None:
-            raise NoIndexError("индекс не построен")
+            raise NoIndexError(t("индекс не построен"))
         started = time.perf_counter()
         normalized = normalize_photo(photo_bgr)
         if normalized is None:
@@ -341,7 +339,7 @@ class SearchService:
     ) -> SearchOutcome:
         photo = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
         if photo is None:
-            raise PhotoError("не удалось прочитать изображение")
+            raise PhotoError(t("не удалось прочитать изображение"))
         return self.search_photo(
             photo,
             top_n,
@@ -362,7 +360,7 @@ class SearchService:
         root = Path(self.settings.library_dir)
         path = root / rel_path
         if not path.resolve().is_relative_to(root.resolve()):
-            raise ValueError(f"путь вне библиотеки: {rel_path}")
+            raise ValueError(t("путь вне библиотеки: {rel_path}", rel_path=rel_path))
         return str(path)
 
     @staticmethod

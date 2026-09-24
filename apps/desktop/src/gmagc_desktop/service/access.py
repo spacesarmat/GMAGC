@@ -26,9 +26,7 @@ def codes_equal(expected: str, given: str) -> bool:
 class RateLimiter:
     """После max_failures неверных кодов подряд адрес блокируется на block_seconds."""
 
-    def __init__(
-        self, max_failures: int = 5, block_seconds: float = 30.0, clock: Callable[[], float] = time.monotonic
-    ):
+    def __init__(self, max_failures: int = 5, block_seconds: float = 30.0, clock: Callable[[], float] = time.monotonic):
         if max_failures < 1:
             raise ValueError("max_failures должен быть положительным")
         self._max_failures = max_failures

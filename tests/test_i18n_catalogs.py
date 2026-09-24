@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from gmagc_desktop.lang_en import EN as DESKTOP_EN
 from gmagc_mobile.lang_en import EN as MOBILE_EN
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,10 @@ def used_keys(pattern: str) -> set[str]:
     return keys
 
 
-CATALOGS = [("телефон", "apps/mobile/src/gmagc_mobile/*.py", MOBILE_EN)]
+CATALOGS = [
+    ("телефон", "apps/mobile/src/gmagc_mobile/*.py", MOBILE_EN),
+    ("ПК", "apps/desktop/src/gmagc_desktop/**/*.py", DESKTOP_EN),
+]
 
 
 @pytest.mark.parametrize(("name", "pattern", "catalog"), CATALOGS, ids=[c[0] for c in CATALOGS])

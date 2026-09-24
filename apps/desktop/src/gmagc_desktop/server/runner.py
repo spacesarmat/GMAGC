@@ -9,6 +9,7 @@ import threading
 from collections.abc import Callable
 from http.server import ThreadingHTTPServer
 
+from gmagc_common.i18n import t
 from gmagc_common.protocol import DEFAULT_PORT
 from gmagc_desktop.server.api import ApiContext, ApiHandler, RequestRecord
 from gmagc_desktop.service.access import RateLimiter
@@ -91,7 +92,14 @@ class PhoneServer:
             except OSError as error:
                 last_error = error
         if httpd is None:
-            raise ServerStartError(f"порт {port} занят (проверено портов: {len(candidates)}): {last_error}")
+            raise ServerStartError(
+                t(
+                    "порт {port} занят (проверено портов: {count}): {last_error}",
+                    port=port,
+                    count=len(candidates),
+                    last_error=last_error,
+                )
+            )
         self._httpd = httpd
         self._thread = threading.Thread(
             target=httpd.serve_forever, kwargs={"poll_interval": 0.2}, name="gmagc-phone-server", daemon=True
