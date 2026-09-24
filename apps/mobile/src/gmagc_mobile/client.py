@@ -17,6 +17,7 @@ from gmagc_common.protocol import (
     ProtocolError,
     Status,
 )
+from gmagc_common.scan_draft import ScanDraft
 
 UNREACHABLE = "unreachable"
 UNAUTHORIZED = "unauthorized"
@@ -26,6 +27,8 @@ BAD_IMAGE = "bad_image"
 TOO_LARGE = "too_large"
 BAD_PROFILE = "bad_profile"
 NO_TARGET = "no_target"
+BAD_SCAN = "bad_scan"
+SCAN_UNAVAILABLE = "scan_unavailable"
 SERVER = "server"
 PROTOCOL = "protocol"
 
@@ -38,6 +41,8 @@ _KIND_BY_CODE = {
     "too_large": TOO_LARGE,
     "bad_profile": BAD_PROFILE,
     "no_target": NO_TARGET,
+    "bad_scan": BAD_SCAN,
+    "scan_unavailable": SCAN_UNAVAILABLE,
 }
 
 
@@ -56,10 +61,13 @@ class ClientError(Exception):
 
 
 class GmagcClient:
-    def __init__(self, connection: Connection, timeout: float = 10.0, match_timeout: float = 15.0):
+    def __init__(
+        self, connection: Connection, timeout: float = 10.0, match_timeout: float = 15.0, scan_timeout: float = 240.0
+    ):
         self.connection = connection
         self._timeout = timeout
         self._match_timeout = match_timeout
+        self._scan_timeout = scan_timeout  # распознавание многостраничного PDF на ПК идёт минуты
 
     def health(self) -> Health:
         data = self._request("GET", "/api/health", auth=False)
@@ -110,6 +118,16 @@ class GmagcClient:
             return FixtureUploadResult.from_dict(data)
         except ProtocolError as error:
             raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на отправку профиля.")) from error
+
+    def scan_fixture(self, data: bytes, content_type: str = "image/jpeg") -> ScanDraft:
+        """Отправляет фото или PDF инструкции на ПК и возвращает черновик каналов (распознавание — на ПК)."""
+        reply = self._request(
+            "POST", "/api/fixture-scan?engine=local", body=data, timeout=self._scan_timeout, content_type=content_type
+        )
+        try:
+            return ScanDraft.from_dict(reply)
+        except ValueError as error:
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на распознавание.")) from error
 
     def _request(
         self,

@@ -179,6 +179,7 @@ class MobileApp:
             self.share,
             on_exit=lambda: self._show(self._return_view),
             send=self._send_profile,
+            scan=self._scan_instruction,
         )
         self.profiles_view = self.editor.view
         self.language_store = language_store or LanguageStore(prefs or MemoryPrefs())
@@ -701,6 +702,25 @@ class MobileApp:
         if self.client is None:
             raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
         return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
+
+    async def _scan_instruction(self):
+        """Выбор фото или PDF инструкции и распознавание на ПК; None — файл не выбран."""
+        if self.client is None:
+            raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
+        files = await self.picker.pick_files(
+            dialog_title=t("Инструкция прибора (фото или PDF)"),
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["jpg", "jpeg", "png", "pdf"],
+        )
+        if not files:
+            return None
+        picked = files[0]
+        try:
+            raw = picked.bytes if picked.bytes else await asyncio.to_thread(Path(picked.path).read_bytes)
+        except (OSError, TypeError) as error:
+            raise ClientError(UNREACHABLE, t("Не удалось прочитать файл: {error}", error=error)) from error
+        content_type = "application/pdf" if raw[:1024].lstrip().startswith(b"%PDF") else "image/jpeg"
+        return await asyncio.to_thread(self.client.scan_fixture, raw, content_type)
 
     async def on_language_change(self, _event) -> None:
         """Выбор языка: сохраняется и применяется сразу, интерфейс собирается заново на новом языке."""
