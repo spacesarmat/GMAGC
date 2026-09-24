@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 
+from gmagc_common.i18n import t
 from gmagc_common.protocol import (
     API_VERSION,
     APP_NAME,
@@ -38,7 +39,10 @@ _KIND_BY_CODE = {
     "bad_profile": BAD_PROFILE,
     "no_target": NO_TARGET,
 }
-_NOT_GMAGC = "Это не сервер GMAGC: проверьте адрес и порт."
+
+
+def _not_gmagc() -> str:
+    return t("Это не сервер GMAGC: проверьте адрес и порт.")
 
 
 class ClientError(Exception):
@@ -62,14 +66,18 @@ class GmagcClient:
         try:
             health = Health.from_dict(data)
         except ProtocolError as error:
-            raise ClientError(PROTOCOL, _NOT_GMAGC) from error
+            raise ClientError(PROTOCOL, _not_gmagc()) from error
         if health.app != APP_NAME:
-            raise ClientError(PROTOCOL, _NOT_GMAGC)
+            raise ClientError(PROTOCOL, _not_gmagc())
         if health.api != API_VERSION:
             raise ClientError(
                 PROTOCOL,
-                f"Версия приложения на ПК (API {health.api}) не подходит к этому телефону (API {API_VERSION}): "
-                "обновите оба приложения.",
+                t(
+                    "Версия приложения на ПК (API {api}) не подходит к этому телефону (API {phone_api}): "
+                    "обновите оба приложения.",
+                    api=health.api,
+                    phone_api=API_VERSION,
+                ),
             )
         return health
 
@@ -78,7 +86,7 @@ class GmagcClient:
         try:
             return Status.from_dict(data)
         except ProtocolError as error:
-            raise ClientError(PROTOCOL, "Неожиданный ответ ПК на запрос состояния.") from error
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на запрос состояния.")) from error
 
     def verify(self) -> tuple[Health, Status]:
         """Проверяет адрес (health без кода) и код доступа (status с кодом)."""
@@ -90,7 +98,7 @@ class GmagcClient:
         try:
             return MatchResponse.from_dict(data)
         except ProtocolError as error:
-            raise ClientError(PROTOCOL, "Неожиданный ответ ПК на поиск.") from error
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на поиск.")) from error
 
     def send_fixture(self, profile: dict) -> FixtureUploadResult:
         """Отправляет профиль прибора (словарь `profile_to_dict`) на ПК: тот сам запишет типы для grandMA3 и grandMA2."""
@@ -101,7 +109,7 @@ class GmagcClient:
         try:
             return FixtureUploadResult.from_dict(data)
         except ProtocolError as error:
-            raise ClientError(PROTOCOL, "Неожиданный ответ ПК на отправку профиля.") from error
+            raise ClientError(PROTOCOL, t("Неожиданный ответ ПК на отправку профиля.")) from error
 
     def _request(
         self,
@@ -131,14 +139,14 @@ class GmagcClient:
         try:
             data = json.loads(raw) if raw else {}
         except ValueError as error:
-            raise ClientError(PROTOCOL, _NOT_GMAGC) from error
+            raise ClientError(PROTOCOL, _not_gmagc()) from error
         if not isinstance(data, dict):
-            raise ClientError(PROTOCOL, _NOT_GMAGC)
+            raise ClientError(PROTOCOL, _not_gmagc())
         if status == 200:
             return data
         try:
             api_error = ApiError.from_dict(data)
         except ProtocolError as error:
-            raise ClientError(SERVER, f"Ответ ПК: HTTP {status}") from error
+            raise ClientError(SERVER, t("Ответ ПК: HTTP {status}", status=status)) from error
         retry_after = int(retry_header) if retry_header and retry_header.isdigit() else 0
         raise ClientError(_KIND_BY_CODE.get(api_error.code, SERVER), api_error.message, retry_after)

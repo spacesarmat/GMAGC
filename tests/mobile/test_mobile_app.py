@@ -431,7 +431,7 @@ def test_capture_sends_the_shot_and_shows_the_results():
     assert script.matches == [b"JPEG-shot"] and views(app) == ["results"]
     assert len(app.results_column.controls) == 2 and app.results_photo.visible and app.results_projection.visible
     first = texts(app.results_column.controls[0])
-    assert "a.png" in first and "C:\\gobos\\vendor\\a.png" in first and "91.2%" in first and "ещё 1 файлов" in first
+    assert "a.png" in first and "C:\\gobos\\vendor\\a.png" in first and "91.2%" in first and "ещё 1 файл" in first
     assert not app.results_banner.visible and not app.camera.ready  # вид камеры скрыт: контроллер камеры потерян
     assert not app.capture_button.disabled
 

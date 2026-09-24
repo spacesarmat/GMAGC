@@ -26,6 +26,7 @@ from gmagc_common.fixtures import (
     template_by_id,
     validate_profile,
 )
+from gmagc_common.i18n import t
 from gmagc_common.ma2_export import export_ma2_files
 from gmagc_common.ma3_export import ExportError, export_ma3
 from gmagc_common.protocol import FixtureUploadResult
@@ -49,10 +50,10 @@ def parse_int(text: str, fallback: int) -> int:
 def upload_text(result: FixtureUploadResult) -> str:
     """Что записал ПК: пульт и имя каждого файла, затем то, что пришлось пропустить."""
     labels = {"ma3": "grandMA3", "ma2": "grandMA2"}
-    lines = ["Записано на ПК:"]
+    lines = [t("Записано на ПК:")]
     for target, path in result.written:
         lines.append(f"• {labels.get(target, target)}: {re.split(r'[\\\\/]', path)[-1]}")
-    lines.extend(f"Пропущено: {item}" for item in result.skipped)
+    lines.extend(t("Пропущено: {item}", item=item) for item in result.skipped)
     return "\n".join(lines)
 
 
@@ -173,23 +174,23 @@ class ProfileEditor:
         self.page.update()
 
     def _render_list(self) -> list[ft.Control]:
-        controls: list[ft.Control] = [self._header("Профили приборов")]
+        controls: list[ft.Control] = [self._header(t("Профили приборов"))]
         if not self.profiles:
-            controls.append(ft.Text("Нет профилей. Создайте первый.", size=13, color=ft.Colors.GREY_500))
+            controls.append(ft.Text(t("Нет профилей. Создайте первый."), size=13, color=ft.Colors.GREY_500))
         for profile in self.profiles:
             controls.append(self._profile_card(profile))
-        controls.append(ft.Button("Новый профиль", icon=ft.Icons.ADD, on_click=self.on_new_profile))
+        controls.append(ft.Button(t("Новый профиль"), icon=ft.Icons.ADD, on_click=self.on_new_profile))
         return controls
 
     def _profile_card(self, profile: FixtureProfile) -> ft.Control:
         title = f"{profile.manufacturer or '(без производителя)'} — {profile.name or '(без названия)'}"
-        subtitle = f"Режимов: {len(profile.modes)}"
+        subtitle = t("Режимов: {count}", count=len(profile.modes))
         if self.pending_delete == profile.id:
             return ft.Row(
                 [
-                    ft.Text(f"Удалить «{title}»?", expand=True),
-                    ft.TextButton("Да", on_click=self._async_click(self.on_confirm_delete, profile.id)),
-                    ft.TextButton("Нет", on_click=lambda _e: self.on_cancel_delete()),
+                    ft.Text(t("Удалить «{title}»?", title=title), expand=True),
+                    ft.TextButton(t("Да"), on_click=self._async_click(self.on_confirm_delete, profile.id)),
+                    ft.TextButton(t("Нет"), on_click=lambda _e: self.on_cancel_delete()),
                 ]
             )
         return ft.Container(
@@ -198,9 +199,7 @@ class ProfileEditor:
                     ft.Column(
                         [ft.Text(title, weight=ft.FontWeight.BOLD), ft.Text(subtitle, size=12)], expand=True, spacing=2
                     ),
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _e, pid=profile.id: self.on_ask_delete(pid)
-                    ),
+                    ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, on_click=lambda _e, pid=profile.id: self.on_ask_delete(pid)),
                 ]
             ),
             on_click=self._async_click(self.on_open_profile, profile.id),
@@ -229,12 +228,12 @@ class ProfileEditor:
         return f"{base} {number}"
 
     async def add_mode(self) -> None:
-        name = self._unique_mode_name(f"Режим {len(self.profile.modes) + 1}")
+        name = self._unique_mode_name(t("Режим {number}", number=len(self.profile.modes) + 1))
         await self._commit(replace(self.profile, modes=(*self.profile.modes, Mode(name))))
 
     async def duplicate_mode(self, index: int) -> None:
         source = self.profile.modes[index]
-        copy = replace(source, name=self._unique_mode_name(f"{source.name} (копия)"))
+        copy = replace(source, name=self._unique_mode_name(t("{name} (копия)", name=source.name)))
         modes = (*self.profile.modes[: index + 1], copy, *self.profile.modes[index + 1 :])
         await self._commit(replace(self.profile, modes=modes))
 
@@ -284,7 +283,7 @@ class ProfileEditor:
             return
         self.message = self.notice = ""
         if self.send is None:
-            self.message = "Нет подключения к ПК: подключитесь на главном экране и повторите."
+            self.message = t("Нет подключения к ПК: подключитесь на главном экране и повторите.")
             self.render()
             return
         try:
@@ -303,11 +302,11 @@ class ProfileEditor:
                 subject=subject,
             )
         except Exception as error:  # noqa: BLE001 - недоступное «Поделиться» не должно ломать редактор
-            self.message = f"Не удалось поделиться: {error}"
+            self.message = t("Не удалось поделиться: {error}", error=error)
             self.render()
 
     def _subject(self) -> str:
-        return f"{self.profile.manufacturer} {self.profile.name}".strip() or "Профиль прибора"
+        return f"{self.profile.manufacturer} {self.profile.name}".strip() or t("Профиль прибора")
 
     async def on_share(self, _event) -> None:
         """Профиль файлом .json: его можно открыть в GMAGC на другом телефоне или превратить в файл пульта скриптом."""
@@ -340,9 +339,7 @@ class ProfileEditor:
             self.message = str(error)
             self.render()
             return
-        await self._share_files(
-            [(name, text, "application/xml") for name, text in files], f"{self._subject()} (grandMA2)"
-        )
+        await self._share_files([(name, text, "application/xml") for name, text in files], f"{self._subject()} (grandMA2)")
 
     async def _set_text(self, field: str, value: str, *, render: bool = True) -> None:
         await self.set_profile_text(field, value, render=render)
@@ -350,12 +347,16 @@ class ProfileEditor:
     def _render_profile(self) -> list[ft.Control]:
         profile = self.profile
         controls: list[ft.Control] = [
-            self._header("Профиль прибора"),
+            self._header(t("Профиль прибора")),
             *(
                 self._field(label, getattr(profile, field), partial(self._set_text, field))
-                for label, field in (("Производитель", "manufacturer"), ("Название", "name"), ("Короткое имя", "short_name"))
+                for label, field in (
+                    (t("Производитель"), "manufacturer"),
+                    (t("Название"), "name"),
+                    (t("Короткое имя"), "short_name"),
+                )
             ),
-            ft.Text("Мод", size=14, weight=ft.FontWeight.BOLD),
+            ft.Text(t("Мод"), size=14, weight=ft.FontWeight.BOLD),
         ]
         if self.notice:
             controls.insert(1, ft.Text(self.notice, size=12, color=ft.Colors.GREEN_400, selectable=True))
@@ -366,30 +367,32 @@ class ProfileEditor:
                 ft.Row(
                     [
                         ft.Container(
-                            ft.Text(f"{mode.name} ({len(mode.channels)} кан.)"),
+                            ft.Text(t("{name} ({count} кан.)", name=mode.name, count=len(mode.channels))),
                             on_click=self._async_click(self.open_mode, index),
                             padding=8,
                             expand=True,
                         ),
                         ft.IconButton(
-                            icon=ft.Icons.COPY, tooltip="Дублировать", on_click=self._async_click(self.duplicate_mode, index)
+                            icon=ft.Icons.COPY,
+                            tooltip=t("Дублировать"),
+                            on_click=self._async_click(self.duplicate_mode, index),
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
-                            tooltip="Удалить",
+                            tooltip=t("Удалить"),
                             on_click=self._async_click(self.delete_mode, index),
                         ),
                     ]
                 )
             )
-        controls.append(ft.Button("Добавить режим", icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
-        controls.append(ft.Button("Отправить на ПК", icon=ft.Icons.COMPUTER, on_click=self.on_send_to_pc))
-        controls.append(ft.TextButton("Поделиться профилем (файл JSON)", icon=ft.Icons.SHARE, on_click=self.on_share))
-        controls.append(ft.TextButton("Поделиться для grandMA3 (файл XML)", icon=ft.Icons.SHARE, on_click=self.on_share_ma3))
+        controls.append(ft.Button(t("Добавить режим"), icon=ft.Icons.ADD, on_click=self._async_click(self.add_mode)))
+        controls.append(ft.Button(t("Отправить на ПК"), icon=ft.Icons.COMPUTER, on_click=self.on_send_to_pc))
+        controls.append(ft.TextButton(t("Поделиться профилем (файл JSON)"), icon=ft.Icons.SHARE, on_click=self.on_share))
         controls.append(
-            ft.TextButton(
-                "Поделиться для grandMA2 (файлы XML режимов)", icon=ft.Icons.SHARE, on_click=self.on_share_ma2
-            )
+            ft.TextButton(t("Поделиться для grandMA3 (файл XML)"), icon=ft.Icons.SHARE, on_click=self.on_share_ma3)
+        )
+        controls.append(
+            ft.TextButton(t("Поделиться для grandMA2 (файлы XML режимов)"), icon=ft.Icons.SHARE, on_click=self.on_share_ma2)
         )
         controls.extend(self._issue_controls(validate_profile(profile)))
         return controls
@@ -426,9 +429,9 @@ class ProfileEditor:
     def _render_mode(self) -> list[ft.Control]:
         mode = self.mode
         controls: list[ft.Control] = [
-            self._header("Режим"),
-            self._field("Название режима", mode.name, self._rename_current_mode),
-            ft.Text("Каналы", size=14, weight=ft.FontWeight.BOLD),
+            self._header(t("Режим")),
+            self._field(t("Название режима"), mode.name, self._rename_current_mode),
+            ft.Text(t("Каналы"), size=14, weight=ft.FontWeight.BOLD),
         ]
         if self.message:
             controls.insert(1, ft.Text(self.message, size=12, color=ft.Colors.RED_400, selectable=True))
@@ -445,7 +448,7 @@ class ProfileEditor:
                         ),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
-                            tooltip="Удалить",
+                            tooltip=t("Удалить"),
                             on_click=self._async_click(self.delete_channel, index),
                         ),
                     ]
@@ -453,7 +456,7 @@ class ProfileEditor:
             )
         controls.append(
             ft.Dropdown(
-                label="Добавить канал (шаблон)",
+                label=t("Добавить канал (шаблон)"),
                 options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
                 on_select=self._on_template_pick,
             )
@@ -484,7 +487,7 @@ class ProfileEditor:
     async def add_range(self) -> None:
         ranges = self.channel.ranges
         start = min(ranges[-1].end + 1, 255) if ranges else 0
-        await self._commit_channel(replace(self.channel, ranges=(*ranges, Range(start, 255, "Новый диапазон"))))
+        await self._commit_channel(replace(self.channel, ranges=(*ranges, Range(start, 255, t("Новый диапазон")))))
 
     async def set_range(self, index: int, start=None, end=None, name=None, *, render: bool = True) -> None:
         def changed(item: Range) -> Range:
@@ -534,16 +537,16 @@ class ProfileEditor:
             [
                 ft.Row(
                     [
-                        self._number_field("От", item.start, set_start),
-                        self._number_field("До", item.end, set_end),
+                        self._number_field(t("От"), item.start, set_start),
+                        self._number_field(t("До"), item.end, set_end),
                         ft.IconButton(
                             icon=ft.Icons.DELETE_OUTLINE,
-                            tooltip="Удалить диапазон",
+                            tooltip=t("Удалить диапазон"),
                             on_click=self._async_click(self.delete_range, index),
                         ),
                     ]
                 ),
-                self._field("Название значения", item.name, set_name),
+                self._field(t("Название значения"), item.name, set_name),
             ],
             spacing=4,
         )
@@ -561,35 +564,35 @@ class ProfileEditor:
             await self.set_channel(default=value, render=render)
 
         controls: list[ft.Control] = [
-            self._header("Канал"),
+            self._header(t("Канал")),
             ft.Dropdown(
-                label="Шаблон",
+                label=t("Шаблон"),
                 value=channel.template,
                 options=[ft.DropdownOption(key=t.id, text=t.title) for t in TEMPLATES],
                 on_select=self._on_template_change,
             ),
-            self._field("Название", channel.name, set_name),
+            self._field(t("Название"), channel.name, set_name),
             ft.Row(
                 [
                     self._number_field("DMX", channel.dmx, set_dmx),
-                    self._number_field("По умолчанию", channel.default, set_default),
+                    self._number_field(t("По умолчанию"), channel.default, set_default),
                 ]
             ),
             ft.Row(
                 [
                     ft.Button(
-                        f"{bits} бит",
+                        t("{bits} бит", bits=bits),
                         disabled=channel.bits == bits,
                         on_click=self._async_click(self.set_channel_bits, bits),
                     )
                     for bits in (8, 16)
                 ]
             ),
-            ft.Text("Диапазоны значений (0–255)", size=14, weight=ft.FontWeight.BOLD),
+            ft.Text(t("Диапазоны значений (0–255)"), size=14, weight=ft.FontWeight.BOLD),
         ]
         for index, item in enumerate(channel.ranges):
             controls.append(self._range_row(index, item))
-        controls.append(ft.Button("Добавить диапазон", icon=ft.Icons.ADD, on_click=self._async_click(self.add_range)))
+        controls.append(ft.Button(t("Добавить диапазон"), icon=ft.Icons.ADD, on_click=self._async_click(self.add_range)))
         path = f"{self.mode.name} → {channel.name.strip() or '(без названия)'}"
         controls.extend(self._issue_controls([i for i in validate_profile(self.profile) if i.path == path]))
         return controls

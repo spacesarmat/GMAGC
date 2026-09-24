@@ -15,7 +15,7 @@ import flet_permission_handler as ph
 
 from gmagc_common import i18n
 from gmagc_common.fixtures import profile_to_dict
-from gmagc_common.i18n import CHOICES, language_name, t
+from gmagc_common.i18n import CHOICES, FILES_EN, FILES_RU, language_name, plural, t
 from gmagc_common.protocol import (
     OUTCOME_NO_PROJECTION,
     Connection,
@@ -38,9 +38,9 @@ from gmagc_mobile.qr import QrImageError, QrUnavailable, connection_from_frame, 
 from gmagc_mobile.store import ConnectionStore, LanguageStore
 from gmagc_mobile.support import SupportPrompt
 from gmagc_mobile.texts import (
-    NO_INDEX_NOTE,
     error_text,
     history_text,
+    no_index_note,
     outcome_message,
     score_text,
     share_text,
@@ -56,13 +56,20 @@ MARKER_SIZE = 64
 HISTORY_LIMIT = 10  # снимков за сессию, самый новый первым; дальше старые записи забываются
 PAGE_PADDING = 12  # общий отступ страницы; кадр камеры вычитает его отрицательным полем, чтобы быть во всю ширину
 SCAN_INTERVAL = 0.4  # пауза между попытками распознать QR в потоке кадров камеры: бережёт батарею и процессор
-SCAN_HINT = (
-    "Наведите камеру на QR-код в приложении на ПК — считается автоматически (приближение и касание для фокуса помогают)"
-)
-SCAN_HINT_MANUAL = (
-    "Автосканирование недоступно на этом телефоне. Наведите камеру на QR-код в приложении на ПК "
-    "(приближение и касание для фокуса помогают) и нажмите «Считать QR»"
-)
+
+
+def scan_hint() -> str:
+    return t(
+        "Наведите камеру на QR-код в приложении на ПК — считается автоматически (приближение и касание для фокуса помогают)"
+    )
+
+
+def scan_hint_manual() -> str:
+    return t(
+        "Автосканирование недоступно на этом телефоне. Наведите камеру на QR-код в приложении на ПК "
+        "(приближение и касание для фокуса помогают) и нажмите «Считать QR»"
+    )
+
 
 _BADGE_COLORS = {
     "good": (ft.Colors.GREEN_100, ft.Colors.GREEN_900),
@@ -240,16 +247,16 @@ class MobileApp:
         self._marker_token = 0
 
         # подключение
-        self.address_field = ft.TextField(label="Адрес ПК", hint_text="192.168.1.5 или 192.168.1.5:8765")
+        self.address_field = ft.TextField(label=t("Адрес ПК"), hint_text=t("192.168.1.5 или 192.168.1.5:8765"))
         self.code_field = ft.TextField(
-            label="Код доступа",
+            label=t("Код доступа"),
             hint_text="ABCD-2345",
             capitalization=ft.TextCapitalization.CHARACTERS,
             max_length=9,
             on_submit=self.on_connect,
         )
-        self.scan_button = ft.Button("Считать QR-код с ПК", on_click=self.on_scan_qr)
-        self.connect_button = ft.Button("Подключиться", on_click=self.on_connect)
+        self.scan_button = ft.Button(t("Считать QR-код с ПК"), on_click=self.on_scan_qr)
+        self.connect_button = ft.Button(t("Подключиться"), on_click=self.on_connect)
         self.connect_busy = ft.ProgressRing(visible=False, width=24, height=24)
         self.connect_error = ft.Text("", color=ft.Colors.RED_700, visible=False, selectable=True)
         self.connect_view = ft.Column(
@@ -269,7 +276,7 @@ class MobileApp:
                         ft.Row([self.connect_button, self.connect_busy], spacing=12, alignment=ft.MainAxisAlignment.CENTER),
                         ft.Row([self.scan_button], alignment=ft.MainAxisAlignment.CENTER),
                         ft.Row(
-                            [ft.TextButton("Профили приборов", icon=ft.Icons.TUNE, on_click=self.on_open_profiles)],
+                            [ft.TextButton(t("Профили приборов"), icon=ft.Icons.TUNE, on_click=self.on_open_profiles)],
                             alignment=ft.MainAxisAlignment.CENTER,
                         ),
                         self.connect_error,
@@ -287,7 +294,7 @@ class MobileApp:
                         _nav_item(ft.Icons.INFO_OUTLINE, t("О программе"), self.on_open_about),
                     ]
                 ),
-                ft.Text(f"Версия {VERSION}", size=11, color=ft.Colors.GREY_600),
+                ft.Text(t("Версия {VERSION}", VERSION=VERSION), size=11, color=ft.Colors.GREY_600),
             ],
             spacing=12,
             visible=True,
@@ -319,13 +326,13 @@ class MobileApp:
         self.zoom_in_button = ft.IconButton(
             icon=ft.Icons.ZOOM_IN, disabled=True, on_click=self.on_zoom_in, icon_color=ft.Colors.WHITE
         )
-        self.focus_text = ft.Text("Фокус: авто")  # хранит состояние; на экране виден только значок (его tooltip)
+        self.focus_text = ft.Text(t("Фокус: авто"))  # хранит состояние; на экране виден только значок (его tooltip)
         self.focus_button = _camera_icon_button(ft.Icons.CENTER_FOCUS_WEAK, self.focus_text.value, self.on_focus_lock)
-        self.capture_title = ft.Text("СФОТОГРАФИРОВАТЬ", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
-        self.capture_subtitle = ft.Text("Готово к съёмке", size=11, color=ft.Colors.GREY_300)
+        self.capture_title = ft.Text(t("СФОТОГРАФИРОВАТЬ"), size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE)
+        self.capture_subtitle = ft.Text(t("Готово к съёмке"), size=11, color=ft.Colors.GREY_300)
         self.capture_button = ft.FloatingActionButton(
             icon=ft.Icons.CAMERA_ALT,
-            tooltip="Снять",
+            tooltip=t("Снять"),
             bgcolor=ft.Colors.WHITE,
             foreground_color=ft.Colors.BLACK,
             on_click=self.on_capture,
@@ -337,19 +344,19 @@ class MobileApp:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=2,
         )
-        self.gallery_button = _camera_icon_button(ft.Icons.PHOTO_LIBRARY, "Выбрать фото", self.on_gallery)
-        self.scan_now_button = ft.Button("Считать QR", on_click=self.on_scan_now, visible=False)
-        self.cancel_scan_button = ft.Button("Ввести вручную", on_click=self.on_cancel_scan, visible=False)
-        self.change_pc_button = ft.TextButton(content=ft.Text("Сменить ПК", size=12), on_click=self.on_change_pc)
+        self.gallery_button = _camera_icon_button(ft.Icons.PHOTO_LIBRARY, t("Выбрать фото"), self.on_gallery)
+        self.scan_now_button = ft.Button(t("Считать QR"), on_click=self.on_scan_now, visible=False)
+        self.cancel_scan_button = ft.Button(t("Ввести вручную"), on_click=self.on_cancel_scan, visible=False)
+        self.change_pc_button = ft.TextButton(content=ft.Text(t("Сменить ПК"), size=12), on_click=self.on_change_pc)
         self.camera_message = ft.Text(
             "", visible=False, selectable=True, color=ft.Colors.WHITE, text_align=ft.TextAlign.CENTER
         )
-        self.retry_button = ft.Button("Повторить", on_click=self.on_retry, visible=False)
+        self.retry_button = ft.Button(t("Повторить"), on_click=self.on_retry, visible=False)
         self.busy_ring = ft.ProgressRing(visible=False, width=24, height=24)
         self._retry_data: bytes | None = None
         self.history: list[tuple[bytes, MatchResponse]] = []  # снимки этой сессии, самый новый первым
         self._current_response: MatchResponse | None = None  # для кнопки «Поделиться» на экране результатов
-        self.history_empty = ft.Text("Пока нет снимков в этой сессии", size=13, color=ft.Colors.GREY_500)
+        self.history_empty = ft.Text(t("Пока нет снимков в этой сессии"), size=13, color=ft.Colors.GREY_500)
         self.history_column = ft.Column(spacing=0)
         self.gesture = ft.GestureDetector(
             content=ft.Stack([self.preview, self.marker], expand=True),
@@ -389,10 +396,10 @@ class MobileApp:
             [
                 ft.Row(
                     [
-                        _camera_icon_button(ft.Icons.PHOTO_LIBRARY, "Галерея", self.on_open_gallery),
-                        _camera_icon_button(ft.Icons.TUNE, "Профили приборов", self.on_open_profiles),
-                        _camera_icon_button(ft.Icons.SETTINGS, "Настройки", self.on_open_settings),
-                        _camera_icon_button(ft.Icons.INFO_OUTLINE, "О программе", self.on_open_about),
+                        _camera_icon_button(ft.Icons.PHOTO_LIBRARY, t("Галерея"), self.on_open_gallery),
+                        _camera_icon_button(ft.Icons.TUNE, t("Профили приборов"), self.on_open_profiles),
+                        _camera_icon_button(ft.Icons.SETTINGS, t("Настройки"), self.on_open_settings),
+                        _camera_icon_button(ft.Icons.INFO_OUTLINE, t("О программе"), self.on_open_about),
                     ],
                     spacing=4,
                 ),
@@ -413,9 +420,7 @@ class MobileApp:
             height=230,
             alignment=ft.Alignment.CENTER,
         )
-        capture_slot = ft.Column(
-            [self.capture_group], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER
-        )
+        capture_slot = ft.Column([self.capture_group], expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
         bottom_row = ft.Row(
             [self.focus_button, capture_slot, self.gallery_button],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -454,7 +459,7 @@ class MobileApp:
         # вложенные экраны (Галерея / Настройки / О программе / Помощь) — открываются с экранов
         # подключения и камеры через нижнюю навигацию, «назад» возвращает туда, откуда открыли
         self.gallery_view = ft.Column(
-            [_back_row("Галерея", self.on_close_overlay), self.history_empty, self.history_column],
+            [_back_row(t("Галерея"), self.on_close_overlay), self.history_empty, self.history_column],
             spacing=8,
             visible=False,
             expand=True,
@@ -481,9 +486,9 @@ class MobileApp:
         )
         self.about_view = ft.Column(
             [
-                _back_row("О программе", self.on_close_overlay),
+                _back_row(t("О программе"), self.on_close_overlay),
                 ft.Text(NAME, size=22, weight=ft.FontWeight.BOLD),
-                ft.Text(f"Версия {VERSION}. Автор: {AUTHOR}", size=13),
+                ft.Text(t("Версия {VERSION}. Автор: {AUTHOR}", VERSION=VERSION, AUTHOR=AUTHOR), size=13),
                 *self._support_links(),
             ],
             spacing=8,
@@ -493,18 +498,22 @@ class MobileApp:
         )
         self.help_view = ft.Column(
             [
-                _back_row("Помощь", self.on_close_overlay),
+                _back_row(t("Помощь"), self.on_close_overlay),
                 ft.Text(
-                    "Подключитесь к ПК с запущенным GMAGC в той же сети Wi-Fi: наведите камеру на QR-код в его "
-                    "окне (подключение произойдёт само) или введите адрес и код вручную. Дальше наводите камеру "
-                    "на проекцию и снимайте — совпадения из библиотеки на ПК придут в ответ.",
+                    t(
+                        "Подключитесь к ПК с запущенным GMAGC в той же сети Wi-Fi: наведите камеру на QR-код в его "
+                        "окне (подключение произойдёт само) или введите адрес и код вручную. Дальше наводите камеру "
+                        "на проекцию и снимайте — совпадения из библиотеки на ПК придут в ответ."
+                    ),
                     size=13,
                 ),
                 ft.Text(
-                    "«Профили»: создание профиля прибора для grandMA2 и grandMA3 с нуля (режимы, каналы из шаблонов, "
-                    "диапазоны значений). Все правки сохраняются сразу. Кнопки «Поделиться» отправляют готовые файлы: "
-                    "JSON профиля, XML для grandMA3 и по одному XML на режим для grandMA2 (положите их в fixturetypes "
-                    "библиотеки MA3 или в importexport MA2 и импортируйте в пульте).",
+                    t(
+                        "«Профили»: создание профиля прибора для grandMA2 и grandMA3 с нуля (режимы, каналы из шаблонов, "
+                        "диапазоны значений). Все правки сохраняются сразу. Кнопки «Поделиться» отправляют готовые файлы: "
+                        "JSON профиля, XML для grandMA3 и по одному XML на режим для grandMA2 (положите их в fixturetypes "
+                        "библиотеки MA3 или в importexport MA2 и импортируйте в пульте)."
+                    ),
                     size=13,
                 ),
             ],
@@ -521,8 +530,8 @@ class MobileApp:
         self.results_projection = ft.Column(visible=False, spacing=4)
         self.copy_note = ft.Text("", size=12, visible=False, selectable=True)
         self.results_column = ft.Column(spacing=8)
-        self.again_button = ft.Button("Снять ещё", on_click=self.on_again)
-        self.share_button = ft.TextButton(content=ft.Text("Поделиться"), on_click=self.on_share)
+        self.again_button = ft.Button(t("Снять ещё"), on_click=self.on_again)
+        self.share_button = ft.TextButton(content=ft.Text(t("Поделиться")), on_click=self.on_share)
         self.results_view = ft.Column(
             [
                 ft.Row([self.again_button, self.share_button], spacing=8, wrap=True),
@@ -532,7 +541,7 @@ class MobileApp:
                     spacing=12,
                     vertical_alignment=ft.CrossAxisAlignment.START,
                 ),
-                ft.Text("Результаты (нажмите на карточку, чтобы скопировать путь)", size=14, weight=ft.FontWeight.BOLD),
+                ft.Text(t("Результаты (нажмите на карточку, чтобы скопировать путь)"), size=14, weight=ft.FontWeight.BOLD),
                 self.copy_note,
                 self.results_column,
             ],
@@ -543,7 +552,7 @@ class MobileApp:
         )
 
         self.diag_text = ft.Text("", size=10, color=ft.Colors.GREY_600, selectable=True, visible=False)
-        self.back_hint_text = ft.Text("Нажмите «Назад» ещё раз, чтобы выйти", size=12)
+        self.back_hint_text = ft.Text(t("Нажмите «Назад» ещё раз, чтобы выйти"), size=12)
         # Container сам visible=False (а не только текст внутри): иначе прозрачный expand=True слой оверлея
         # остаётся в дереве и перехватывает касания по всему экрану, хотя визуально ничего не видно.
         self.back_hint = ft.Container(
@@ -613,9 +622,9 @@ class MobileApp:
         return [
             ft.Row(
                 [
-                    ft.TextButton(content=ft.Text("Поддержать автора", size=12), on_click=self.support.on_open_link),
-                    ft.TextButton(content=ft.Text("Telegram автора", size=12), on_click=self.support.on_open_telegram),
-                    ft.TextButton(content=ft.Text("Канал GMAGC", size=12), on_click=self.support.on_open_channel),
+                    ft.TextButton(content=ft.Text(t("Поддержать автора"), size=12), on_click=self.support.on_open_link),
+                    ft.TextButton(content=ft.Text(t("Telegram автора"), size=12), on_click=self.support.on_open_telegram),
+                    ft.TextButton(content=ft.Text(t("Канал GMAGC"), size=12), on_click=self.support.on_open_channel),
                 ],
                 wrap=True,
             )
@@ -690,7 +699,7 @@ class MobileApp:
     async def _send_profile(self, profile):
         """Отправка профиля на ПК из редактора; без подключения (client is None) редактор сам подскажет."""
         if self.client is None:
-            raise ClientError(UNREACHABLE, "Нет подключения к ПК: подключитесь на главном экране и повторите.")
+            raise ClientError(UNREACHABLE, t("Нет подключения к ПК: подключитесь на главном экране и повторите."))
         return await asyncio.to_thread(self.client.send_fixture, profile_to_dict(profile))
 
     async def on_language_change(self, _event) -> None:
@@ -734,7 +743,7 @@ class MobileApp:
 
     def _remember(self, text: str) -> None:
         self.last_error = text
-        self.diag_text.value = f"Последняя ошибка: {text}"
+        self.diag_text.value = t("Последняя ошибка: {text}", text=text)
         # на экране камеры строка не показывается (см. _show()); тут же — на случай, если ошибка
         # пришла уже после ухода с камеры (например, «Назад» во время долгого запроса) и нового _show() не будет
         self.diag_text.visible = not self.camera_view.visible
@@ -753,7 +762,7 @@ class MobileApp:
     def _show_camera(self, mode: str, note: str | None = None) -> None:
         self.mode = mode
         scanning = mode == MODE_SCAN
-        self.camera_title.value = SCAN_HINT if scanning else ""
+        self.camera_title.value = scan_hint() if scanning else ""
         self.camera_title.visible = scanning
         # заголовок и подпись съёмки прячутся вместе с кнопкой — иначе при сканировании они бы зависли
         # без кнопки под ними (кнопка скрыта, надписи «СФОТОГРАФИРОВАТЬ»/«Готово к съёмке» — нет)
@@ -813,11 +822,11 @@ class MobileApp:
             return
         address = parse_address(self.address_field.value or "")
         if address is None:
-            self._show_connect("Введите адрес ПК, например 192.168.1.5 или 192.168.1.5:8765")
+            self._show_connect(t("Введите адрес ПК, например 192.168.1.5 или 192.168.1.5:8765"))
             return
         code = self.code_field.value or ""
         if not is_valid_code(code):
-            self._show_connect("Код доступа состоит из 8 символов (буквы и цифры), он показан в приложении на ПК")
+            self._show_connect(t("Код доступа состоит из 8 символов (буквы и цифры), он показан в приложении на ПК"))
             return
         await self._connect(Connection(address[0], address[1], normalize_code(code)))
 
@@ -832,16 +841,18 @@ class MobileApp:
             return False
         except Exception as error:  # noqa: BLE001 - подключение обязано показать причину
             self._set_busy(False)
-            self._show_connect(f"Ошибка подключения: {error}")
+            self._show_connect(t("Ошибка подключения: {error}", error=error))
             return False
         self.connection, self.client = connection, client
         await self.store.save(connection)
         self._fill(connection)
         self._clear_diag()
         self._set_busy(False)
-        self._show_camera(MODE_SHOOT, note=None if status.indexed else NO_INDEX_NOTE)
+        self._show_camera(MODE_SHOOT, note=None if status.indexed else no_index_note())
         if announce:  # по QR подключение происходит без ручного ввода: коротко подтвердить, что оно удалось
-            self.page.show_dialog(ft.SnackBar(ft.Text(f"Подключено к ПК: {connection.host}:{connection.port}")))
+            self.page.show_dialog(
+                ft.SnackBar(ft.Text(t("Подключено к ПК: {host}:{port}", host=connection.host, port=connection.port)))
+            )
         await self._ensure_camera()
         return True
 
@@ -851,7 +862,7 @@ class MobileApp:
             await asyncio.sleep(self.mount_seconds)
             await self.camera.start()
             if not self.camera.ready:
-                self._camera_note(self.camera.error or "Камера недоступна")
+                self._camera_note(self.camera.error or t("Камера недоступна"))
         self._sync_zoom()
         self._set_busy(self._busy)
 
@@ -861,7 +872,7 @@ class MobileApp:
             return await self.camera.take_picture()
         except Exception:  # noqa: BLE001 - любая ошибка снимка: пробуем восстановить камеру
             if not await self.camera.restart():
-                raise RuntimeError(self.camera.error or "камера недоступна") from None
+                raise RuntimeError(self.camera.error or t("камера недоступна")) from None
             self._sync_zoom()
             return await self.camera.take_picture()
 
@@ -884,7 +895,7 @@ class MobileApp:
         started = self.camera.ready and await self.camera.start_scanning(self._on_scan_frame)
         self.scan_now_button.visible = not started
         if not started:
-            self.camera_title.value = SCAN_HINT_MANUAL
+            self.camera_title.value = scan_hint_manual()
         self.page.update()
 
     async def _on_scan_frame(self, event) -> None:
@@ -902,8 +913,8 @@ class MobileApp:
         except QrUnavailable:
             await self.camera.stop_scanning()
             self.scan_now_button.visible = True
-            self.camera_title.value = SCAN_HINT_MANUAL
-            self._camera_note("Автоматическое чтение QR недоступно на этом телефоне: введите адрес и код вручную.")
+            self.camera_title.value = scan_hint_manual()
+            self._camera_note(t("Автоматическое чтение QR недоступно на этом телефоне: введите адрес и код вручную."))
         except QrImageError:
             pass  # нечитаемый кадр — обычное дело на видео с камеры, просто ждём следующий
         except Exception:  # noqa: BLE001 - поток не должен падать экран, просто пробуем следующий кадр
@@ -972,17 +983,17 @@ class MobileApp:
             data = await self._take_picture()
             connection = await asyncio.to_thread(self.qr_reader, data)
         except QrUnavailable:
-            failure = "Чтение QR недоступно на этом телефоне: введите адрес и код вручную."
+            failure = t("Чтение QR недоступно на этом телефоне: введите адрес и код вручную.")
         except QrImageError as error:
-            failure = f"Снимок камеры не удалось прочитать ({error}). Введите адрес и код вручную."
+            failure = t("Снимок камеры не удалось прочитать ({error}). Введите адрес и код вручную.", error=error)
         except Exception as error:  # noqa: BLE001
-            failure = f"Ошибка камеры: {error}"
+            failure = t("Ошибка камеры: {error}", error=error)
         self._set_busy(False)
         if connection is not None:
             await self._connect(connection, announce=True)
             return
         if not failure:
-            failure = (
+            failure = t(
                 "QR-код не найден. Поднесите камеру ближе (приближение и касание для фокуса помогают): "
                 "код должен быть целиком в кадре и чётким. Если не выходит, введите адрес и код вручную."
             )
@@ -999,14 +1010,14 @@ class MobileApp:
             data = await self._take_picture()
         except Exception as error:  # noqa: BLE001
             self._set_busy(False)
-            self._camera_note(f"Не удалось снять: {error}")
+            self._camera_note(t("Не удалось снять: {error}", error=error))
             return
         await self._search(data)
 
     async def on_gallery(self, _event) -> None:
         if self._busy:
             return
-        files = await self.picker.pick_files(dialog_title="Фото проекции", file_type=ft.FilePickerFileType.IMAGE)
+        files = await self.picker.pick_files(dialog_title=t("Фото проекции"), file_type=ft.FilePickerFileType.IMAGE)
         if not files:
             return
         picked = files[0]
@@ -1014,7 +1025,7 @@ class MobileApp:
             raw = picked.bytes if picked.bytes else Path(picked.path).read_bytes()
             data = await asyncio.to_thread(prepare_upload, raw)
         except (OSError, ValueError, TypeError) as error:
-            self._camera_note(f"Не удалось подготовить фото: {error}")
+            self._camera_note(t("Не удалось подготовить фото: {error}", error=error))
             return
         self._set_busy(True)
         await self._search(data)
@@ -1030,7 +1041,7 @@ class MobileApp:
         except ClientError as error:
             failure = error
         except Exception as error:  # noqa: BLE001
-            message = f"Ошибка: {error}"
+            message = t("Ошибка: {error}", error=error)
         self._set_busy(False)
         if failure is not None:
             self._set_connectivity(failure.kind != UNREACHABLE)
@@ -1041,7 +1052,7 @@ class MobileApp:
             return
         if response is None:
             self._set_connectivity(False)  # локальная ошибка (не ClientError) — тоже похоже на обрыв связи
-            self._offer_retry(data, message or "Ошибка поиска")
+            self._offer_retry(data, message or t("Ошибка поиска"))
             return
         self._set_connectivity(True)
         self._retry_data = None
@@ -1074,7 +1085,7 @@ class MobileApp:
         try:
             await self.share.share_text(share_text(self._current_response), subject="GMAGC")
         except Exception:  # noqa: BLE001 - на телефоне может не быть приложения, куда поделиться
-            self.copy_note.value = "Не удалось поделиться"
+            self.copy_note.value = t("Не удалось поделиться")
             self.copy_note.visible = True
             self.page.update()
 
@@ -1096,11 +1107,11 @@ class MobileApp:
         self.results_banner_text.value = banner or ""
         self.results_banner.bgcolor = ft.Colors.RED_100 if response.outcome == OUTCOME_NO_PROJECTION else ft.Colors.AMBER_100
         self.results_banner.visible = bool(banner)
-        self.results_photo.controls = [ft.Text("Фото"), ft.Image(src=photo, width=160, height=120, fit=ft.BoxFit.CONTAIN)]
+        self.results_photo.controls = [ft.Text(t("Фото")), ft.Image(src=photo, width=160, height=120, fit=ft.BoxFit.CONTAIN)]
         self.results_photo.visible = True
         if response.projection_png:
             self.results_projection.controls = [
-                ft.Text("Найденная проекция"),
+                ft.Text(t("Найденная проекция")),
                 ft.Image(src=response.projection_png, width=120, height=120, fit=ft.BoxFit.CONTAIN),
             ]
         self.results_projection.visible = bool(response.projection_png)
@@ -1114,8 +1125,9 @@ class MobileApp:
             ft.Text(item.path, size=12, selectable=False),
         ]
         if item.copies:
-            details.append(ft.Text(f"ещё {len(item.copies)} файлов", tooltip="\n".join(item.copies)))
-        details.append(ft.Button("Копировать путь", data=item.path, on_click=self.on_copy_click))
+            more = t("ещё {count} {files}", count=len(item.copies), files=plural(len(item.copies), FILES_RU, FILES_EN))
+            details.append(ft.Text(more, tooltip="\n".join(item.copies)))
+        details.append(ft.Button(t("Копировать путь"), data=item.path, on_click=self.on_copy_click))
         return ft.Card(
             ft.Container(
                 ft.Row(
@@ -1146,7 +1158,7 @@ class MobileApp:
     async def copy_path(self, path: str) -> None:
         """Копирует путь файла на ПК (как пришёл в ответе, вместе с именем файла) в буфер обмена."""
         await self.clipboard.set(path)
-        self.copy_note.value = f"Путь скопирован: {path}"
+        self.copy_note.value = t("Путь скопирован: {path}", path=path)
         self.copy_note.visible = True
         self.page.update()
 
@@ -1200,7 +1212,7 @@ class MobileApp:
         self.marker.visible = True
         self.page.update()
         if not await self.camera.focus_at(x, y, width, height):
-            self._camera_note(self.camera.error or "Фокус по точке недоступен")
+            self._camera_note(self.camera.error or t("Фокус по точке недоступен"))
         await asyncio.sleep(self.marker_seconds)
         if token == self._marker_token:
             self.marker.visible = False
@@ -1208,7 +1220,7 @@ class MobileApp:
 
     async def on_focus_lock(self, _event) -> None:
         locked = await self.camera.toggle_focus_lock()
-        self.focus_text.value = "Фокус: зафиксирован" if locked else "Фокус: авто"
+        self.focus_text.value = t("Фокус: зафиксирован") if locked else t("Фокус: авто")
         self.focus_button.icon = ft.Icons.CENTER_FOCUS_STRONG if locked else ft.Icons.CENTER_FOCUS_WEAK
         self.focus_button.tooltip = self.focus_text.value
         self.page.update()
@@ -1222,7 +1234,9 @@ def camera_supported(page: ft.Page) -> bool:
 
 
 def _camera_placeholder() -> ft.Control:
-    return ft.Container(ft.Text("Камера доступна только на телефоне (Android)"), alignment=ft.Alignment.CENTER, expand=True)
+    return ft.Container(
+        ft.Text(t("Камера доступна только на телефоне (Android)")), alignment=ft.Alignment.CENTER, expand=True
+    )
 
 
 async def build_page(page: ft.Page, **services) -> MobileApp:

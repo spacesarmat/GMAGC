@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+from gmagc_common.i18n import FILES_EN, FILES_RU, plural, t
 from gmagc_common.protocol import OUTCOME_LOW_CONFIDENCE, OUTCOME_NO_PROJECTION, Connection, MatchResponse, Status
 from gmagc_mobile import client
 from gmagc_mobile.client import ClientError
-
-NO_INDEX_NOTE = "На ПК ещё не построен индекс: выберите папку библиотеки в приложении на ПК."
 
 
 def _number(value: int) -> str:
@@ -16,30 +15,31 @@ def _number(value: int) -> str:
 def error_text(error: ClientError) -> str:
     kind = error.kind
     if kind == client.UNREACHABLE:
-        return (
+        return t(
             "Нет связи с ПК. Телефон и ПК должны быть в одной сети Wi-Fi, GMAGC должен быть запущен на ПК, "
-            f"а брандмауэр Windows должен разрешать доступ. ({error.message})"
+            "а брандмауэр Windows должен разрешать доступ. ({message})",
+            message=error.message,
         )
     if kind == client.UNAUTHORIZED:
-        return "Неверный код доступа. Код показан в приложении на ПК; если его сменили, введите новый."
+        return t("Неверный код доступа. Код показан в приложении на ПК; если его сменили, введите новый.")
     if kind == client.RATE_LIMITED:
-        return f"Слишком много неверных кодов. Подождите {error.retry_after or 30} с."
+        return t("Слишком много неверных кодов. Подождите {seconds} с.", seconds=error.retry_after or 30)
     if kind == client.NO_INDEX:
-        return "На ПК не выбрана библиотека или индекс ещё не построен. Постройте индекс в приложении на ПК."
+        return t("На ПК не выбрана библиотека или индекс ещё не построен. Постройте индекс в приложении на ПК.")
     if kind == client.BAD_IMAGE:
-        return "ПК не смог прочитать изображение. Попробуйте снять ещё раз."
+        return t("ПК не смог прочитать изображение. Попробуйте снять ещё раз.")
     if kind == client.TOO_LARGE:
-        return "Изображение слишком большое для отправки."
+        return t("Изображение слишком большое для отправки.")
     if kind == client.PROTOCOL:
         return error.message
-    return f"Ошибка на ПК: {error.message}"
+    return t("Ошибка на ПК: {message}", message=error.message)
 
 
 def outcome_message(outcome: str) -> str | None:
     if outcome == OUTCOME_LOW_CONFIDENCE:
-        return "Совпадение ненадёжно: похоже, такого гобо в библиотеке нет. Ниже самые близкие."
+        return t("Совпадение ненадёжно: похоже, такого гобо в библиотеке нет. Ниже самые близкие.")
     if outcome == OUTCOME_NO_PROJECTION:
-        return "Проекция на фото не найдена: переснимите ближе, затемните фон."
+        return t("Проекция на фото не найдена: переснимите ближе, затемните фон.")
     return None
 
 
@@ -48,12 +48,12 @@ def score_text(score: float) -> str:
 
 
 def status_line(connection: Connection, status: Status) -> str:
-    line = f"Подключено: {connection.host}:{connection.port}"
+    line = t("Подключено: {host}:{port}", host=connection.host, port=connection.port)
     if not status.indexed:
-        return line + " · индекс на ПК не построен"
-    line += f" · {_number(status.files)} файлов"
+        return line + t(" · индекс на ПК не построен")
+    line += t(" · {number} {files}", number=_number(status.files), files=plural(status.files, FILES_RU, FILES_EN))
     if status.indexing:
-        line += " (идёт индексация)"
+        line += t(" (идёт индексация)")
     return line
 
 
@@ -63,13 +63,19 @@ def zoom_text(zoom: float) -> str:
 
 def history_text(response: MatchResponse) -> str:
     if response.outcome == OUTCOME_NO_PROJECTION or not response.results:
-        return "проекция не найдена"
+        return t("проекция не найдена")
     top = response.results[0]
     return f"{top.name} {score_text(top.score)}"
 
 
 def share_text(response: MatchResponse) -> str:
     if response.outcome == OUTCOME_NO_PROJECTION or not response.results:
-        return "GMAGC: проекция на фото не найдена"
+        return t("GMAGC: проекция на фото не найдена")
     top = response.results[0]
-    return f"GMAGC нашёл: {top.name} ({score_text(top.score)})\n{top.path}"
+    return t(
+        "GMAGC нашёл: {name} ({score_text})\n{path}", name=top.name, score_text=score_text(top.score), path=top.path
+    )
+
+
+def no_index_note() -> str:
+    return t("На ПК ещё не построен индекс: выберите папку библиотеки в приложении на ПК.")

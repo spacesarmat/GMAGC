@@ -16,6 +16,9 @@ LANG_RU = "ru"
 LANG_EN = "en"
 CHOICES = (LANG_AUTO, LANG_RU, LANG_EN)
 
+FILES_RU = ("файл", "файла", "файлов")  # слово «файл» в формах для plural(): встречается на многих экранах
+FILES_EN = ("file", "files")
+
 _current = LANG_RU
 _catalogs: dict[str, dict[str, str]] = {}
 
@@ -74,7 +77,7 @@ def reset_catalogs() -> None:
     _catalogs.clear()
 
 
-def t(text: str, **params: object) -> str:
+def t(text: str, /, **params: object) -> str:
     """Текст на текущем языке; `{имя}` в тексте подставляется из параметров уже после перевода."""
     translated = text if _current == LANG_RU else _catalogs.get(_current, {}).get(text, text)
     if not params:
