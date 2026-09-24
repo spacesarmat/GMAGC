@@ -2,16 +2,27 @@
 
 Структура и значения сняты с реальных файлов MA2 (`ape_labs@mobilight_4@12_channel.xml`,
 `shehds@380w_beam@19_channel.xml`). В MA2 один файл описывает один режим прибора.
-Слоты колёс (`Wheels`) на этом этапе не создаются.
+Слоты колёс (`Wheels`) создаются для каналов «колесо гобо», в диапазонах которых выбраны гобо из библиотеки.
 """
 
 from __future__ import annotations
 
+import base64
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 
-from gmagc_common.fixtures import Channel, FixtureProfile, Mode, file_part, has_errors, validate_profile
+from gmagc_common.fixtures import (
+    GOBO_THUMB_SIDE,
+    Channel,
+    FixtureProfile,
+    Mode,
+    ProfileError,
+    file_part,
+    gobo_rgba,
+    has_errors,
+    validate_profile,
+)
 from gmagc_common.i18n import t
 from gmagc_common.ma3_export import ExportError
 
@@ -98,20 +109,19 @@ def ma2_file_name(profile: FixtureProfile, mode: Mode) -> str:
     return f"{file_part(profile.manufacturer)}@{file_part(profile.name)}@{file_part(mode.name)}.xml"
 
 
-def _sets(function: ET.Element, channel: Channel, spec: Ma2Attr) -> None:
+def _sets(function: ET.Element, channel: Channel, spec: Ma2Attr, wheel: int = 0) -> None:
     top = 65535 if channel.bits == 16 else 255
     scale = 256 if channel.bits == 16 else 1
     if channel.ranges:
         for number, item in enumerate(sorted(channel.ranges, key=lambda r: r.start), start=1):
-            ET.SubElement(
-                function,
-                "ChannelSet",
-                {
-                    "name": item.name or t("Диапазон {number}", number=number),
-                    "from_dmx": str(item.start * scale),
-                    "to_dmx": str(item.end * scale + (scale - 1)),
-                },
-            )
+            values = {
+                "name": item.name or t("Диапазон {number}", number=number),
+                "from_dmx": str(item.start * scale),
+                "to_dmx": str(item.end * scale + (scale - 1)),
+            }
+            if wheel:  # слот колеса — по порядку диапазонов, как строит колесо `_wheel`
+                values.update({"slot_index": str(number - 1), "slot_from": "0", "slot_to": "0"})
+            ET.SubElement(function, "ChannelSet", values)
         return
     points = [("min", 0)]
     if spec.attribute in _PHYSICAL:
@@ -121,7 +131,7 @@ def _sets(function: ET.Element, channel: Channel, spec: Ma2Attr) -> None:
         ET.SubElement(function, "ChannelSet", {"name": name, "from_dmx": str(value), "to_dmx": str(value)})
 
 
-def _channel_type(module: ET.Element, channel: Channel, spec: Ma2Attr) -> None:
+def _channel_type(module: ET.Element, channel: Channel, spec: Ma2Attr, wheel: int = 0) -> None:
     values = {"attribute": spec.attribute, "feature": spec.feature, "preset": spec.preset, "coarse": str(channel.dmx)}
     if channel.bits == 16:
         values["fine"] = str(channel.dmx + 1)
@@ -150,7 +160,47 @@ def _channel_type(module: ET.Element, channel: Channel, spec: Ma2Attr) -> None:
             "preset": spec.preset,
         },
     )
-    _sets(function, channel, spec)
+    if wheel:
+        function.set("wheel", str(wheel))
+    _sets(function, channel, spec, wheel)
+
+
+def _has_gobos(channel: Channel) -> bool:
+    return channel.template == "gobo_wheel" and any(item.gobo is not None for item in channel.ranges)
+
+
+def _wheels(fixture_type: ET.Element, wheels: list[tuple[Channel, Ma2Attr]]) -> None:
+    """Колёса гобо: слот на каждый диапазон канала, картинка слота — сырые RGBA 64×64 внутри файла типа."""
+    element = ET.SubElement(fixture_type, "Wheels")
+    if not wheels:
+        return
+    element.set("index", str(len(wheels)))
+    for index, (channel, spec) in enumerate(wheels):
+        wheel = ET.SubElement(
+            element,
+            "Wheel",
+            {
+                "index": str(index),
+                "subattribute": spec.sub,
+                "attribute": spec.attribute,
+                "feature": spec.feature,
+                "preset": spec.preset,
+            },
+        )
+        for number, item in enumerate(sorted(channel.ranges, key=lambda r: r.start)):
+            values = {"index": str(number), "media_name": item.name or (item.gobo.name if item.gobo else "")}
+            if item.gobo is not None:
+                values["media_filename"] = item.gobo.path
+            slot = ET.SubElement(wheel, "Slot", values)
+            rgba = None
+            if item.gobo is not None:
+                try:
+                    rgba = gobo_rgba(item.gobo)
+                except ProfileError as error:
+                    raise ExportError(str(error)) from error
+            if rgba is not None:
+                media = ET.SubElement(slot, "media", {"width": str(GOBO_THUMB_SIDE), "height": str(GOBO_THUMB_SIDE)})
+                ET.SubElement(media, "Image").text = base64.b64encode(rgba).decode()
 
 
 def export_ma2(profile: FixtureProfile, mode_index: int = 0, now: datetime | None = None) -> str:
@@ -197,11 +247,13 @@ def export_ma2(profile: FixtureProfile, mode_index: int = 0, now: datetime | Non
     )
     body = ET.SubElement(module, "Body")
     ET.SubElement(body, "Size", {"x": "0.2", "y": "0.2", "z": "0.2"})
+    wheels = [(channel, spec) for channel, spec in zip(mode.channels, specs, strict=True) if _has_gobos(channel)]
+    numbers = {id(channel): number for number, (channel, _) in enumerate(wheels, start=1)}
     for channel, spec in zip(mode.channels, specs, strict=True):
-        _channel_type(module, channel, spec)
+        _channel_type(module, channel, spec, numbers.get(id(channel), 0))
     instances = ET.SubElement(fixture_type, "Instances")
     ET.SubElement(instances, "Instance", {"module_index": "0", "patch": "1", "locked": "true"})
-    ET.SubElement(fixture_type, "Wheels")
+    _wheels(fixture_type, wheels)
 
     ET.indent(root, space="\t")
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"

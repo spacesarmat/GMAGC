@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import uuid
+import zlib
 from dataclasses import dataclass
 
 from gmagc_common.i18n import t
 
 MAX_DMX = 512
 BITS_CHOICES = (8, 16)
+GOBO_THUMB_SIDE = 64  # сторона картинки слота колеса в типах MA2/MA3
+GOBO_THUMB_BYTES = GOBO_THUMB_SIDE * GOBO_THUMB_SIDE * 4  # сырые RGBA
 
 
 class ProfileError(ValueError):
@@ -17,10 +22,20 @@ class ProfileError(ValueError):
 
 
 @dataclass(frozen=True)
+class Gobo:
+    """Гобо из библиотеки GMAGC в слоте колеса: имя, путь картинки (в файле типа — media_filename) и миниатюра."""
+
+    name: str
+    path: str
+    thumb: str = ""  # base64(zlib(сырые RGBA 64×64)); пусто — слот без картинки
+
+
+@dataclass(frozen=True)
 class Range:
     start: int
     end: int
     name: str
+    gobo: Gobo | None = None  # только у диапазонов канала «колесо гобо»
 
 
 @dataclass(frozen=True)
@@ -126,6 +141,26 @@ def new_profile(manufacturer: str = "", name: str = "") -> FixtureProfile:
 
 
 # ---- JSON ------------------------------------------------------------------
+def gobo_rgba(gobo: Gobo) -> bytes | None:
+    """Сырые RGBA 64×64 миниатюры гобо; None — картинки нет. Повреждённая миниатюра — ProfileError."""
+    if not gobo.thumb:
+        return None
+    try:
+        raw = zlib.decompress(base64.b64decode(gobo.thumb, validate=True))
+    except (binascii.Error, zlib.error, ValueError) as error:
+        raise ProfileError(t("миниатюра гобо «{name}» повреждена", name=gobo.name)) from error
+    if len(raw) != GOBO_THUMB_BYTES:
+        raise ProfileError(t("миниатюра гобо «{name}» имеет неверный размер", name=gobo.name))
+    return raw
+
+
+def _range_to_dict(item: Range) -> dict:
+    data = {"start": item.start, "end": item.end, "name": item.name}
+    if item.gobo is not None:
+        data["gobo"] = {"name": item.gobo.name, "path": item.gobo.path, "thumb": item.gobo.thumb}
+    return data
+
+
 def profile_to_dict(profile: FixtureProfile) -> dict:
     return {
         "id": profile.id,
@@ -142,7 +177,7 @@ def profile_to_dict(profile: FixtureProfile) -> dict:
                         "name": channel.name,
                         "template": channel.template,
                         "default": channel.default,
-                        "ranges": [{"start": r.start, "end": r.end, "name": r.name} for r in channel.ranges],
+                        "ranges": [_range_to_dict(r) for r in channel.ranges],
                     }
                     for channel in mode.channels
                 ],
@@ -178,7 +213,12 @@ def _dict(value: object, field: str) -> dict:
 
 def _range(data: object) -> Range:
     data = _dict(data, t("диапазон"))
-    return Range(_int(data.get("start"), "start"), _int(data.get("end"), "end"), _text(data.get("name"), "name"))
+    gobo = None
+    if data.get("gobo") is not None:
+        raw = _dict(data["gobo"], "gobo")
+        gobo = Gobo(_text(raw.get("name"), "name"), _text(raw.get("path"), "path"), _text(raw.get("thumb", ""), "thumb"))
+        gobo_rgba(gobo)  # миниатюра проверяется при загрузке, а не при экспорте
+    return Range(_int(data.get("start"), "start"), _int(data.get("end"), "end"), _text(data.get("name"), "name"), gobo)
 
 
 def _channel(data: object) -> Channel:
