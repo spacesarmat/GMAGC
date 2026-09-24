@@ -81,6 +81,7 @@ QScrollArea {{ border: none; }}
 QScrollBar:vertical {{ background: {DESKTOP_BG}; width: 10px; }}
 QScrollBar::handle:vertical {{ background: {DESKTOP_STRONG}; min-height: 24px; border-radius: 4px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
 
 QFrame[role="banner"] {{ border-radius: 2px; }}
 QFrame[role="banner"][error="true"] {{ background: #ffcdd2; }}
