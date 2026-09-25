@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QFile, QIODevice, QTimer, Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QVBoxLayout, QWidget
 
@@ -14,6 +14,7 @@ from gmagc_common.protocol import parse_link
 from gmagc_common.qr_decode import decode_qr
 from gmagc_phone.camera import CameraBackend
 from gmagc_phone.controller import MODE_SCAN, PhoneController, scan_hint
+from gmagc_phone.files import read_file
 from gmagc_phone.imaging import grayscale_frame, prepare_upload
 from gmagc_phone.tasks import Executor, InlineExecutor
 from gmagc_phone.widgets import Preview, button, label
@@ -25,16 +26,6 @@ ZOOM_STOPS = (1.0, 2.0, 4.0)
 def pick_image_file() -> str:
     path, _ = QFileDialog.getOpenFileName(None, t("Выбрать фото"), "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
     return path
-
-
-def read_file(path: str) -> bytes:
-    file = QFile(path)  # QFile понимает и обычные пути, и content:// на Android
-    if not file.open(QIODevice.OpenModeFlag.ReadOnly):
-        raise OSError(file.errorString())
-    try:
-        return bytes(file.readAll())
-    finally:
-        file.close()
 
 
 class CameraScreen(QWidget):

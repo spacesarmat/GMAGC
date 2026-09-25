@@ -14,6 +14,8 @@ from gmagc_common.i18n import t
 from gmagc_phone import lang_en  # noqa: F401 - при импорте регистрирует английские переводы
 from gmagc_phone.camera import CameraBackend, QtCamera, qt_camera_available
 from gmagc_phone.controller import PhoneController
+from gmagc_phone.files import pick_json, pick_photo, pick_scan_file, share_files
+from gmagc_phone.profiles import ProfilesController
 from gmagc_phone.settings import PhoneSettings
 from gmagc_phone.tasks import PoolExecutor
 from gmagc_phone.theme import stylesheet
@@ -54,13 +56,17 @@ class MainWindow(QWidget):
             self.camera_screen.deactivate()
         self.current = name
         self.stack.setCurrentWidget(widget)
+        if name == "profiles":
+            widget.activate()
         if name == "camera" and not leaving_camera:
             self.camera_screen.activate()
 
     def go_back(self) -> None:
         """Кнопка «Назад» телефона: вложенный экран закрывается, с главных — выход по второму нажатию."""
         view = self.controller.view
-        if view in ("gallery", "settings", "about", "help", "profiles"):
+        if view == "profiles":
+            self.screens["profiles"]._back()
+        elif view in ("gallery", "settings", "about", "help"):
             self.controller.close_overlay()
         elif view == "results":
             self.controller.show_camera()
@@ -92,6 +98,7 @@ def build_window(
     quit_app: Callable[[], None] | None = None,
     client_factory=None,
     pick_file=None,
+    profile_share=None,
 ) -> MainWindow:
     from gmagc_phone.screens.camera import CameraScreen
     from gmagc_phone.screens.connect import ConnectScreen
@@ -105,6 +112,13 @@ def build_window(
     backend = backend or (QtCamera() if qt_camera_available() else _NoCamera())
     camera_kwargs = {"pick_file": pick_file} if pick_file else {}
     camera_screen = CameraScreen(controller, backend, executor=controller.executor, **camera_kwargs)
+    profile_editor = ProfilesController(
+        controller,
+        share=profile_share or share_files,
+        pick_scan_file=pick_scan_file,
+        pick_photo=pick_photo,
+        pick_json=pick_json,
+    )
     screens = {
         "connect": ConnectScreen(controller),
         "camera": camera_screen,
@@ -113,7 +127,7 @@ def build_window(
         "settings": SettingsScreen(controller),
         "about": AboutScreen(controller),
         "help": HelpScreen(controller),
-        "profiles": ProfilesScreen(controller),
+        "profiles": ProfilesScreen(controller, profile_editor),
     }
     window = MainWindow(controller, screens, camera_screen, quit_app or QApplication.quit)
     return window

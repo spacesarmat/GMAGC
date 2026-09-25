@@ -177,6 +177,15 @@ EN = {
     "Язык": "Language",
     "Результаты": "Results",
     "Нажмите на карточку, чтобы скопировать путь": "Tap a card to copy the path",
+    "(без названия)": "(no name)",
+    "(без производителя)": "(no manufacturer)",
+    "Выбрать": "Choose",
+    "Импорт профиля из файла (JSON)": "Import a profile from a file (JSON)",
+    "Не удалось прочитать профиль: {error}": "Could not read the profile: {error}",
+    "Открыть": "Open",
+    "Профиль добавлен: {name}": "Profile added: {name}",
+    "двоичные файлы недоступны: отправьте профиль на ПК": "binary files are not available: send the profile to the PC",
+    "недоступно на этом устройстве": "not available on this device",
 }
 
 register("en", EN)
