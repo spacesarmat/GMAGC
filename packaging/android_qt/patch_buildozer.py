@@ -23,6 +23,9 @@ INSERT = f'''
         self.parser.set("app", "orientation", "portrait")
         self.parser.set("app", "android.permissions", "CAMERA, INTERNET, ACCESS_NETWORK_STATE")
         self.parser.set("app", "icon.filename", os.environ["GMAGC_ICON"])
+        # колёса Qt собраны для Python 3.11, а свежий python-for-android собирает 3.14 (libshiboken6 не находит
+        # libpython3.11.so): берём последний коммит develop, где python3 ещё 3.11.13 и уже есть загрузчик qt
+        self.parser.set("app", "p4a.commit", "3762c88c56e3443efb8eba2a02a2604b680240fd")
 '''
 
 
