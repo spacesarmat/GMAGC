@@ -223,3 +223,15 @@ def test_about_links_open_urls(qtbot, settings):
         link.click()
     assert len(opened) == 3
     assert all(url.startswith("https://") for url in opened)
+
+
+def test_camera_stops_in_background_and_resumes(setup):
+    from PySide6.QtCore import Qt
+
+    window, backend, _ = setup
+    window.controller.connect_to(CONN)
+    started = backend.started
+    window._app_state_changed(Qt.ApplicationState.ApplicationSuspended)
+    assert backend.stopped == 1
+    window._app_state_changed(Qt.ApplicationState.ApplicationActive)
+    assert backend.started == started + 1

@@ -48,6 +48,16 @@ class MainWindow(QWidget):
         controller.toast.connect(self.toast.show_text)
         controller.copied.connect(lambda path: self.toast.show_text(t("Путь скопирован: {path}", path=path)))
         self.current = ""
+        QGuiApplication.instance().applicationStateChanged.connect(self._app_state_changed)
+
+    def _app_state_changed(self, state) -> None:
+        """Камера не должна работать в фоне: выключается при сворачивании и включается при возврате."""
+        if self.current != "camera":
+            return
+        if state == Qt.ApplicationState.ApplicationActive:
+            self.camera_screen.activate()
+        elif state in (Qt.ApplicationState.ApplicationSuspended, Qt.ApplicationState.ApplicationHidden):
+            self.camera_screen.deactivate()
 
     def show_screen(self, name: str) -> None:
         widget = self.screens.get(name) or self.screens["connect"]
