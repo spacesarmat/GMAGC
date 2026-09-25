@@ -90,13 +90,6 @@ class MainWindow(QWidget):
 
             QTimer.singleShot(BACK_TWICE_MS, lambda: setattr(self, "_exit_armed", False))
 
-    def keyPressEvent(self, event) -> None:
-        if event.key() in (Qt.Key.Key_Back, Qt.Key.Key_Escape):
-            self.go_back()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.toast.hide()
@@ -175,32 +168,60 @@ def attach_extras(window: MainWindow, settings: PhoneSettings, update_delay: flo
     window.updates, window.support = updates, support
 
 
+class Shell(QWidget):
+    """Единственное окно приложения: внутри него сменяется содержимое (при смене языка оно собирается заново).
+
+    Второе окно на Android недопустимо (лишний прямоугольник, вылет), поэтому окно живёт всё время."""
+
+    def __init__(self, settings: PhoneSettings, make_window=None, extras: bool = True):
+        super().__init__()
+        self.setObjectName("root")
+        self.setWindowTitle("GMAGC")
+        self.settings = settings
+        self._make_window = make_window or (lambda: build_window(settings))
+        self._extras = extras
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.content: MainWindow | None = None
+
+    def open_content(self) -> None:
+        """Собирает содержимое на текущем языке; прежнее (если есть) сначала полностью останавливается."""
+        old = self.content
+        if old is not None:
+            old.camera_screen.deactivate()
+            self._layout.removeWidget(old)
+            old.hide()
+            old.deleteLater()
+        window = self._make_window()
+        if self._extras:
+            attach_extras(window, self.settings)
+        window.controller.language_changed.connect(self._language_changed)
+        self.content = window
+        self._layout.addWidget(window)
+        window.show()
+        window.controller.start()
+
+    def _language_changed(self, _choice: str) -> None:
+        from PySide6.QtCore import QTimer
+
+        QApplication.instance().setStyleSheet(stylesheet())
+        QTimer.singleShot(0, self.open_content)  # после выхода из обработчика выбора языка
+
+    def keyPressEvent(self, event) -> None:
+        if self.content is not None and event.key() in (Qt.Key.Key_Back, Qt.Key.Key_Escape):
+            self.content.go_back()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 def run(argv: list[str] | None = None) -> int:
     app = QApplication(argv if argv is not None else sys.argv)
     settings = PhoneSettings()
     i18n.set_language(settings.load_language())
     app.setStyleSheet(stylesheet())
-    holder: dict[str, MainWindow] = {}
-
-    def open_window() -> None:
-        window = build_window(settings)
-        attach_extras(window, settings)
-        old = holder.get("window")
-        holder["window"] = window
-        window.controller.language_changed.connect(lambda _choice: _rebuild())
-        window.resize(400, 800)
-        window.show()
-        window.controller.start()
-        if old is not None:
-            old.camera_screen.deactivate()
-            old.deleteLater()
-
-    def _rebuild() -> None:
-        from PySide6.QtCore import QTimer
-
-        app.setStyleSheet(stylesheet())
-        QTimer.singleShot(0, open_window)  # после выхода из обработчика выбора языка
-
-    open_window()
+    shell = Shell(settings)
+    shell.resize(400, 800)
+    shell.show()
+    shell.open_content()
     return app.exec()
-
