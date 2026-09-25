@@ -33,7 +33,7 @@ for package in ("rapidocr_onnxruntime", "pypdfium2", "pypdfium2_raw", "onnxrunti
 hiddenimports = collect_submodules("gmagc_desktop") + collect_submodules("gmagc_common")
 hiddenimports += ["anthropic", "PIL.Image", "cv2", "numpy"]
 
-excludes = ["flet", "flet_desktop", "tkinter", "matplotlib", "IPython", "pytest", "PySide6.QtWebEngineCore"]
+excludes = ["tkinter", "matplotlib", "IPython", "pytest", "PySide6.QtWebEngineCore"]
 
 if sys.platform == "win32":
     ICON = os.path.join(ROOT, "packaging", "windows", "gmagc.ico")

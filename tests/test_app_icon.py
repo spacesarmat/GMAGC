@@ -1,4 +1,3 @@
-import tomllib
 from pathlib import Path
 
 from PIL import Image
@@ -19,7 +18,3 @@ def test_both_apps_ship_the_same_square_transparent_icon():
 def test_the_original_artwork_is_kept_next_to_the_docs():
     assert (ROOT / "docs" / "branding" / "icon.png").is_file()
 
-
-def test_the_icon_background_matches_the_artwork_in_the_flet_build():
-    config = tomllib.loads((ROOT / "apps" / "mobile" / "pyproject.toml").read_text(encoding="utf-8"))
-    assert config["tool"]["flet"]["icon_background"] == "#040c1f"

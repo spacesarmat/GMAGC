@@ -1,4 +1,3 @@
-from gmagc_common.protocol import Connection, MatchResponse, ResultItem, Status
 from gmagc_common import phone_client as client
 from gmagc_common.phone_client import ClientError
 from gmagc_common.phone_texts import (
@@ -11,6 +10,7 @@ from gmagc_common.phone_texts import (
     status_line,
     zoom_text,
 )
+from gmagc_common.protocol import Connection, MatchResponse, ResultItem, Status
 
 
 def item(rank, name, path, score, copies=()):
@@ -80,7 +80,7 @@ def test_share_text_summarizes_the_top_result_or_says_no_projection():
 
 def test_the_status_line_uses_the_right_word_form_for_the_file_count_in_both_languages():
     from gmagc_common import i18n
-    from gmagc_common.protocol import Connection, MatchResponse, ResultItem, Status
+    from gmagc_common.protocol import Connection, Status
 
     pc = Connection("192.168.1.5", 8765, "ABCD2345")
     one, few, many = (Status(True, n, n, False, 0, 0) for n in (1, 2, 5))

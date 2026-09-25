@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-pythonpath = ["apps/desktop/src", "apps/mobile/src", "apps/mobile_qt/src", "."]
+pythonpath = ["apps/desktop/src", "apps/mobile/src", "."]
 testpaths = ["tests"]
 # весь набор обычно укладывается в ~70с; таймаут на отдельный тест — чтобы зависший тест падал с трассировкой
 # за секунды, а не молча вешал CI на 15-20 минут (случалось на macOS-раннере, причина не установлена)
@@ -8,7 +8,7 @@ timeout = 30
 [tool.ruff]
 line-length = 125
 target-version = "py312"
-src = ["apps/desktop/src", "apps/mobile/src", "apps/mobile_qt/src", "."]
+src = ["apps/desktop/src", "apps/mobile/src", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
