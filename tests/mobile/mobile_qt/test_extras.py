@@ -4,6 +4,7 @@ from PySide6.QtCore import QSettings
 from gmagc_common import i18n
 from gmagc_common.support import LATER, NEVER, SUPPORT, SUPPORT_URL
 from gmagc_common.updates import Asset, ReleaseInfo, UpdateCheckError
+from gmagc_phone.about import VERSION
 from gmagc_phone.app import build_window
 from gmagc_phone.camera import FakeCamera
 from gmagc_phone.extras import SupportPrompt, UpdateBar, UpdateController
@@ -88,7 +89,7 @@ def test_up_to_date_message_only_on_manual_check(settings):
     assert messages == [""]
     settings.save_last_check(0.0)
     updates.check(force=True)
-    assert "1." in messages[-1]
+    assert VERSION in messages[-1]
 
 
 def test_network_errors_are_silent_unless_manual(settings):

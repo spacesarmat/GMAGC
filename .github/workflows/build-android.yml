@@ -86,6 +86,7 @@ jobs:
             echo "::warning::Ключа подписи нет (запуск из форка): APK остаётся с отладочной подписью"
             cp "$APK" "dist/$NAME"
           fi
+          rm -f dist/*.idsig
           (cd dist && sha256sum "$NAME" > "$NAME.sha256")
       - uses: actions/upload-artifact@v4
         if: always()
