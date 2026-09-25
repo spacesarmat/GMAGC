@@ -1,7 +1,7 @@
-from gmagc_common.protocol import Connection, Status
-from gmagc_mobile import client
-from gmagc_mobile.client import ClientError
-from gmagc_mobile.texts import (
+from gmagc_common.protocol import Connection, MatchResponse, ResultItem, Status
+from gmagc_common import phone_client as client
+from gmagc_common.phone_client import ClientError
+from gmagc_common.phone_texts import (
     error_text,
     history_text,
     no_index_note,
@@ -11,7 +11,22 @@ from gmagc_mobile.texts import (
     status_line,
     zoom_text,
 )
-from tests.fakes_mobile import sample_response
+
+
+def item(rank, name, path, score, copies=()):
+    return ResultItem(rank, name, path, score, tuple(copies), b"\x89PNG-thumb")
+
+
+def sample_response(outcome="found", results=None):
+    items = (
+        results
+        if results is not None
+        else (
+            item(1, "a.png", "C:\\gobos\\vendor\\a.png", 0.912, copies=("C:\\gobos\\other\\a.png",)),
+            item(2, "b.png", "C:\\gobos\\vendor\\b.png", 0.803),
+        )
+    )
+    return MatchResponse("r1", outcome, 12.5, tuple(items), b"\x89PNG-proj")
 
 
 def test_each_error_kind_has_a_clear_text():
@@ -65,7 +80,7 @@ def test_share_text_summarizes_the_top_result_or_says_no_projection():
 
 def test_the_status_line_uses_the_right_word_form_for_the_file_count_in_both_languages():
     from gmagc_common import i18n
-    from gmagc_common.protocol import Connection, Status
+    from gmagc_common.protocol import Connection, MatchResponse, ResultItem, Status
 
     pc = Connection("192.168.1.5", 8765, "ABCD2345")
     one, few, many = (Status(True, n, n, False, 0, 0) for n in (1, 2, 5))

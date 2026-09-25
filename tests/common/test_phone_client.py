@@ -11,7 +11,7 @@ from gmagc_common.fixtures import Channel, FixtureProfile, Mode, profile_to_dict
 from gmagc_common.protocol import MAX_IMAGE_BYTES, Connection, FixtureUploadResult, MatchResponse
 from gmagc_desktop.server.runner import PhoneServer
 from gmagc_desktop.service.search_service import SearchService
-from gmagc_mobile.client import (
+from gmagc_common.phone_client import (
     BAD_IMAGE,
     BAD_PROFILE,
     NO_INDEX,

@@ -1,106 +1,9 @@
-"""Заглушки для тестов экрана: страница, диалог выбора файла, буфер обмена, сервер телефона."""
+"""Заглушки для тестов ПК-приложения: сервер телефона и менеджер обновлений."""
 
 from pathlib import Path
-from types import SimpleNamespace
-
-import flet as ft
 
 from gmagc_desktop.server.runner import ServerStartError
 from gmagc_desktop.update.installer import InstallCancelled
-
-
-class FakeView:
-    """Замена корневого ft.View: запоминает решения confirm_pop."""
-
-    def __init__(self):
-        self.can_pop = True
-        self.on_confirm_pop = None
-        self.decisions = []
-
-    async def confirm_pop(self, should_pop):
-        self.decisions.append(should_pop)
-
-
-class FakeWindow:
-    """Замена ft.Window: запоминает, что приложение попросили закрыться."""
-
-    def __init__(self):
-        self.closed = False
-
-    async def close(self):
-        self.closed = True
-
-
-class StubPage:
-    """Минимальная замена ft.Page: запоминает добавленное, поток выполняет сразу."""
-
-    def __init__(self):
-        self.title = ""
-        self.added = []
-        self.services = []
-        self.updates = 0
-        self.views = [FakeView()]  # корневой вид: сюда Android-приложение вешает обработчик кнопки «Назад»
-        self.dialogs = []
-        self.orientation_calls = []
-        self.window = FakeWindow()
-        self.clean_calls = 0
-
-    def add(self, *controls):
-        self.added.extend(controls)
-
-    def clean(self):
-        self.added = []
-        self.clean_calls += 1
-
-    async def set_allowed_device_orientations(self, orientations):
-        self.orientation_calls.append(list(orientations))
-
-    def update(self):
-        self.updates += 1
-
-    def run_thread(self, handler, *args, **kwargs):
-        handler(*args, **kwargs)
-
-    def show_dialog(self, dialog):
-        self.dialogs.append(dialog)
-
-    def pop_dialog(self):
-        return self.dialogs.pop() if self.dialogs else None
-
-
-class FakePicker:
-    def __init__(self, folder=None, files=(), save_path=None):
-        self.folder = folder
-        self.files = list(files)
-        self.save_path = save_path  # путь, который «выбирает» пользователь в диалоге сохранения; None — отмена
-        self.saved = []  # (путь, содержимое) для каждого вызова save_file
-
-    async def get_directory_path(self, dialog_title=None, initial_directory=None):
-        return self.folder
-
-    async def pick_files(self, **kwargs):
-        return [SimpleNamespace(path=path, bytes=None) for path in self.files]
-
-    async def save_file(self, dialog_title=None, file_name=None, initial_directory=None, src_bytes=None, **kwargs):
-        if self.save_path is not None:
-            self.saved.append((self.save_path, src_bytes))
-        return self.save_path
-
-
-class FakeClipboard:
-    def __init__(self, image=None, files=()):
-        self.image = image
-        self.files = list(files)
-        self.copied = []
-
-    async def get_image(self):
-        return self.image
-
-    async def get_files(self):
-        return list(self.files)
-
-    async def set(self, value):
-        self.copied.append(value)
 
 
 class FakeServer:
@@ -167,16 +70,3 @@ class FakeUpdates:
             if cancel and cancel():
                 raise InstallCancelled()
         return Path("apply-update.cmd")
-
-
-def walk(control):
-    yield control
-    for attribute in ("content", "controls", "actions", "items", "leading", "title"):
-        value = getattr(control, attribute, None)
-        for child in value if isinstance(value, list) else [value] if value is not None else []:
-            if isinstance(child, ft.Control):
-                yield from walk(child)
-
-
-def texts(control):
-    return [c.value for c in walk(control) if isinstance(c, ft.Text)]
