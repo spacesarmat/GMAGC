@@ -104,3 +104,34 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --title "GMAGC $GITHUB_REF_NAME" --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  # Дымовая проверка: APK ставится в эмулятор, запускается и не падает. Не блокирует релиз (эмулятор x86_64 гоняет
+  # arm64-приложение через трансляцию), но показывает, что приложение стартует, и оставляет снимок экрана и лог.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: GMAGC-android
+          path: apk
+      - name: Включить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back virtualscene
+          script: bash packaging/android_qt/smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GMAGC-android-smoke
+          path: smoke/*
+          if-no-files-found: warn
