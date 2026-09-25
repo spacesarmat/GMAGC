@@ -45,6 +45,13 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/pyside6/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
           curl -fsSL -o "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/shiboken6/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
           ls -la "$RUNNER_TEMP/wheels"
+      - name: Шаблон buildozer.spec (для справки)
+        run: |
+          D="$(python -c 'import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), "scripts", "deploy_lib", "android"))')"
+          ls -la "$D"
+          echo "=== TEMPLATE ==="
+          cat "$D"/buildozer.spec 2>/dev/null || true
+          echo "=== END ==="
       - name: Сборка APK
         working-directory: apps/mobile_qt/src
         run: |
@@ -59,5 +66,6 @@ jobs:
           path: |
             apps/mobile_qt/src/**/*.apk
             apps/mobile_qt/src/pysidedeploy.spec
+            apps/mobile_qt/src/buildozer.spec
             apps/mobile_qt/src/deployment/**/*.log
           if-no-files-found: warn
