@@ -1,11 +1,11 @@
 [project]
 name = "gmagc-desktop"
-version = "1.4.0"
+version = "2.0.0"
 description = "GMAGC: поиск гобо по фото (ПК-приложение)"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "@ANDY_BUM" }]
 dependencies = [
-  "flet==1.0.0",
+  "PySide6-Essentials",
   "numpy",
   "opencv-python-headless",
   "Pillow",
@@ -15,15 +15,4 @@ dependencies = [
   "anthropic",  # облачное распознавание инструкции (по кнопке, ключ пользователя)
 ]
 
-[tool.flet]
-product = "GMAGC"
-company = "@ANDY_BUM"
-copyright = "Copyright (C) 2026 @ANDY_BUM"
-org = "com.spacesarmat"
-icon_background = "#040c1f"  # фон иконки (тёмно-синий рисунка): подложка Android и плитка macOS
-
-[tool.flet.app]
-path = "src"  # main.py лежит в src/
-
-[tool.flet.compile]
-packages = false  # OpenCV читает свой config.py как файл, поэтому исходники пакетов нужны
+# Сборка ПК-приложения — PyInstaller: packaging/pyinstaller/gmagc-desktop.spec (см. README)

@@ -1,7 +1,8 @@
-"""Точка входа Android-приложения для `flet build apk`."""
+"""Точка входа телефона (Qt for Android и запуск на ПК для отладки)."""
 
-import flet as ft
+import sys
 
-from gmagc_mobile.app import build_page
+from gmagc_phone.app import run
 
-ft.run(build_page)
+if __name__ == "__main__":
+    sys.exit(run())

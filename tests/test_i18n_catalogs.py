@@ -9,7 +9,7 @@ import pytest
 from gmagc_common.fixtures import TEMPLATES
 from gmagc_common.lang_en import EN as COMMON_EN
 from gmagc_desktop.lang_en import EN as DESKTOP_EN
-from gmagc_mobile.lang_en import EN as MOBILE_EN
+from gmagc_phone.lang_en import EN as PHONE_EN
 
 ROOT = Path(__file__).resolve().parents[1]
 PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
@@ -26,7 +26,7 @@ def used_keys(pattern: str) -> set[str]:
 
 
 CATALOGS = [
-    ("телефон", "apps/mobile/src/gmagc_mobile/*.py", MOBILE_EN),
+    ("телефон", "apps/mobile/src/gmagc_phone/**/*.py", PHONE_EN),
     ("ПК", "apps/desktop/src/gmagc_desktop/**/*.py", DESKTOP_EN),
     ("общее", "packages/common/gmagc_common/*.py", COMMON_EN),
 ]

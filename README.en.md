@@ -6,7 +6,7 @@ Author: @ANDY_BUM ([Telegram](https://t.me/Andy_bum)). The project is free; if i
 
 GMAGC finds, in a gobo library (a folder in the grandMA structure), the file that best matches a **photo of a projection** on a wall or screen. It returns several best candidates: name, path and match score; identical gobos from different manufacturer folders are gathered into one card.
 
-**Status: a desktop app with search and a server, an Android client with a camera, auto-update, a Windows installer (v1.4.0), and Windows, macOS and Android builds.** In the desktop window you choose the library folder, build the index and search for a gobo by photo (a file, the clipboard, or a phone over Wi-Fi); results show a preview, the name, the path (a click copies it to the clipboard) and the score. The Android app connects to the PC over Wi-Fi (it reads the QR code automatically, without pressing a button) and shoots the projection with a full-screen camera (with zoom and focus); the screen is locked in portrait. Fixture profiles for grandMA2/grandMA3 are created on the phone, including autofill from a photo or PDF of the manual and gobos from the library in wheels for grandMA2 and grandMA3 (recognition on the PC, offline or in the cloud on a button). The core, the server, the client, the command line, the benchmark and the helper scripts are covered by tests (see `docs/superpowers/specs`).
+**Status: a desktop app with search and a server, an Android client with a camera, auto-update, a Windows installer (v2.0.0), and Windows, macOS and Android builds.** In the desktop window you choose the library folder, build the index and search for a gobo by photo (a file, the clipboard, or a phone over Wi-Fi); results show a preview, the name, the path (a click copies it to the clipboard) and the score. The Android app connects to the PC over Wi-Fi (it reads the QR code automatically, without pressing a button) and shoots the projection with a full-screen camera (with zoom and focus); the screen is locked in portrait. Fixture profiles for grandMA2/grandMA3 are created on the phone, including autofill from a photo or PDF of the manual and gobos from the library in wheels for grandMA2 and grandMA3 (recognition on the PC, offline or in the cloud on a button). The core, the server, the client, the command line, the benchmark and the helper scripts are covered by tests (see `docs/superpowers/specs`).
 
 **Interface languages: Russian and English.** The language is chosen on the “Settings” screen of both apps (“Auto (as in the system)”, “Русский”, “English”) and switches at once, without a restart.
 
@@ -40,7 +40,7 @@ On 17 real photos (11 labeled; for 6 the needed gobo is not in the library): the
 
 ## Desktop app
 
-At start a splash with the logo is shown for a moment while the settings and the index load. The look is always dark. On the left is a sidebar with navigation across four screens: “Gobo search”, “Phone”, “Library” and “Settings” (at the bottom of the sidebar: the app status, the author and the version). The search screen header shows metrics: the number of gobos in the database, the time of the last search and the best match score. At the bottom of the window is a status bar (index built / not built, the device, the Python and Flet versions).
+At start a splash with the logo is shown for a moment while the settings and the index load. The look is always dark. On the left is a sidebar with navigation across four screens: “Gobo search”, “Phone”, “Library” and “Settings” (at the bottom of the sidebar: the app status, the author and the version). The search screen header shows metrics: the number of gobos in the database, the time of the last search and the best match score. At the bottom of the window is a status bar (index built / not built, the device, the Python and Qt versions).
 
 1. “Choose folder…”: the gobo library folder. The index is built in the background (with progress and cancel) and saved; “Update the index” (or **F5**) appends only new files. If the library changed after the index was built (new, changed or deleted files), a reminder to update it appears under the status. The previous index file is kept next to the new one as `index.npz.previous` before it is overwritten: if the new file is lost or damaged, the next start picks up the backup instead of a long rebuild from scratch.
 2. “Choose a photo…” or “Paste from clipboard” (**Ctrl+V**; a picture or a file copied in Explorer): the source photo, the found projection and the best matches are shown. Under the photo and under the projection there are three sliders each (brightness, contrast, exposure): the first ones adjust the source photo before the projection itself is found in the frame, the second ones adjust the already found projection before it is compared with the library. This helps when the photo is blurred or overexposed. They reset to neutral values with every new photo, each group with its own “Reset” button.
@@ -72,7 +72,7 @@ You can check without a phone with a script that does what the phone would do (s
 
 Exit codes: `0` success, `1` the server answered with an error, `2` no connection, `3` wrong arguments or an unreadable photo.
 
-The settings and the index cache are in `%LOCALAPPDATA%\@ANDY_BUM\GMAGC\` (macOS `~/Library/Application Support/GMAGC`, otherwise `~/.local/share/gmagc`); the path can be overridden with the `GMAGC_DATA_DIR` variable. Dragging files from the OS is not supported in Flet 1.0.0, so photos are chosen with buttons.
+The settings and the index cache are in `%LOCALAPPDATA%\@ANDY_BUM\GMAGC\` (macOS `~/Library/Application Support/GMAGC`, otherwise `~/.local/share/gmagc`); the path can be overridden with the `GMAGC_DATA_DIR` variable.
 
 ## Android app
 
@@ -85,7 +85,7 @@ Install `GMAGC-android-<version>.apk` (allow installation from unknown sources) 
 5. **Settings** are the language, the update check and “Change PC” (forgets the current connection).
 6. **About** shows the version, the author and the support links.
 
-Errors are shown in plain text (no connection, wrong code, the index on the PC is not built, too many wrong codes); on a network failure the “Retry” button sends the same shot again without shooting anew. At the bottom of the connection screen a “Last error” line stays for diagnostics. On a PC (`flet run apps/mobile/src/main.py`) a placeholder is shown instead of the camera; connecting and “Choose a photo” work (for debugging: `GMAGC_MOBILE_DEMO_LINK` connects using a QR link, `GMAGC_MOBILE_DEMO_PHOTO` searches for a file at once).
+Errors are shown in plain text (no connection, wrong code, the index on the PC is not built, too many wrong codes); on a network failure the “Retry” button sends the same shot again without shooting anew. At the bottom of the connection screen a “Last error” line stays for diagnostics. On a PC (`python apps/mobile/src/main.py`) a message is shown instead of the camera; connecting and “Choose a photo” work.
 
 The “Profiles” window creates fixture profiles for grandMA2 and grandMA3 from scratch: manufacturer, name, modes, channels (from templates: dimmer, Pan/Tilt, color, gobo, prism and others; 8 or 16 bit; the DMX address is filled in automatically), and value ranges with names. The check shows overlapping addresses and gaps in ranges; all edits are saved at once. The “Share” buttons hand over **ready files** through the system menu (to a messenger, mail, or a computer): the profile JSON, the fixture type XML for grandMA3 (put it into `C:\ProgramData\MALightingTechnology\gma3_library\fixturetypes` and import it in MA3) and one XML per mode for grandMA2 (into MA2's `importexport`; in MA2 one file describes one mode). The scripts `scripts/export_ma3.py` and `scripts/export_ma2.py` do the same from the profile JSON. The “Iris”, “Frost”, CTO, “Control” and “Custom channel” channels are exported empty for MA2 for now, and wheel slots are not created. The “Send to PC” button sends the profile over Wi-Fi (the phone must be connected to the PC): the PC itself puts the types for grandMA3 and grandMA2 into the console folders (found automatically or set in the PC app settings) and tells the phone which files were written (see `docs/superpowers/specs/2026-09-24-gmagc-fixture-editor-design.md`).
 
@@ -113,26 +113,26 @@ The desktop app searches by photo and accepts shots from the phone, the Android 
 
 **Android signing.** The APK is signed with a permanent key (otherwise the phone does not let a new version be installed over the old one): the key and the password are kept outside the repository by the author (`GMAGC-keys`) and in the GitHub secrets `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`; the workflow checks the signature fingerprint (`apksigner verify`). **Losing the key means the already installed apps cannot be updated**, so a copy of the key must be kept in a safe place. Builds from forks without the secrets are signed with a temporary debug key.
 
-The APK is built only for **arm64-v8a** (`target_arch`, about 58 MB; all modern phones; for 32-bit ARM and x86_64 emulators build your own APK: `flet build apk apps/mobile --arch armeabi-v7a`).
+The Android app is written with Qt for Python (PySide6) and built by `pyside6-android-deploy` (buildozer and python-for-android) for **arm64-v8a** only; the APK is large (about 150 MB: Python and the Qt libraries are inside). The package id `com.spacesarmat.gmagc` and the permanent signing key are the same as in the earlier (Flet) versions, so 2.0.0 installs over 1.x, but the settings and profiles of the old app are not carried over: before updating, share the profiles you need as a JSON file and import them with the “Import a profile from a file” button in the new app.
 
-The Android build settings are in `apps/mobile/pyproject.toml`: `permissions = ["camera"]` (the camera permission in the manifest) and `[tool.flet.android.manifest_application] usesCleartextTraffic = "true"` (HTTP over the local network). Reading QR codes needs the `pyzbar` and `Pillow` wheels (available on pypi.flet.dev); the QR reading tests in CI install the zbar library.
+The package parameters (name, version, the `CAMERA`, `INTERNET`, `ACCESS_NETWORK_STATE` permissions, the icon) are set by `packaging/android_qt/patch_buildozer.py` before the build from the variables `GMAGC_VERSION`, `GMAGC_VERSION_CODE`, `GMAGC_ICON` (HTTP goes over plain Python sockets, so the Android cleartext policy does not affect it). After the build the APK is signed with the permanent key (`apksigner`). QR reading is in pure Python (`gmagc_common/qr_decode.py`), without zbar.
 
-The Flet version is written in four places and changes together: `FLET_VERSION` in the three `build-*.yml`, `dependencies` in `apps/*/pyproject.toml` and `requirements-dev.txt`. The app version (`VERSION` in the `about.py` of both apps, `version` in their `pyproject.toml`) changes together with the tag.
+The app version (`VERSION` in the `about.py` of both apps, `version` in `apps/desktop/pyproject.toml`) changes together with the tag. The Qt for Python version is in `PYSIDE_VERSION` in `build-android.yml` and in the build requirements (`packaging/pyinstaller/requirements.txt`, `requirements-dev.txt`).
 
 ## Local development (Windows)
 
-Once: Python 3.12 (`winget install Python.Python.3.12`), Visual Studio 2022 with “Desktop development with C++”, Windows developer mode. The build environment: `py -3.12 -m venv $env:USERPROFILE\.venv312`, then `$env:USERPROFILE\.venv312\Scripts\python.exe -m pip install flet==1.0.0 -r requirements-dev.txt` (Flet downloads Flutter itself).
+Once: Python 3.12 (`winget install Python.Python.3.12`). The environment: `py -3.12 -m venv .venv`, then `.venv\Scripts\python.exe -m pip install -r requirements-dev.txt`. The Windows build of the desktop app is made by PyInstaller (`scriptsuild_windows.ps1`), Visual Studio is not needed.
 
 | What | Command | Time |
 |---|---|---|
 | Tests and linter | `.venv\Scripts\python.exe -m pytest -q`, `... -m ruff check .` | seconds |
-| The screen without packaging (hot reload) | `$env:USERPROFILE\.venv312\Scripts\flet.exe run apps/desktop/src/main.py -d` | seconds |
+| The desktop app without packaging | `.venv\Scripts\python.exe apps/desktop/src/main.py` | seconds |
 | Windows build + launch check | `.\scripts\build_windows.ps1` | a few minutes |
 | Final Windows, macOS, Android builds | a `v*` tag → GitHub Actions | ~10 minutes |
 
 Logs of the built app: `%LOCALAPPDATA%\@ANDY_BUM\GMAGC\console.log`. macOS cannot be built locally on Windows, only through GitHub.
 
-The app icon is in `apps/*/src/assets/icon.png` (Flet makes the Windows, macOS and Android icons from it itself); the source drawing: `docs/branding/icon.png`, the backing background is set by `icon_background` in `pyproject.toml`.
+The app icon is in `apps/*/src/assets/icon.png` (PyInstaller embeds it for Windows and macOS, the `patch_buildozer.py` build step for Android); the source drawing: `docs/branding/icon.png`.
 
 ## Development
 
@@ -147,15 +147,15 @@ The `gobos/` (library), `photo/` (real photos) and `models/` (downloaded models,
 
 ### Languages (i18n)
 
-The interface texts are written in Russian in the code and wrapped in `t("…")` (`gmagc_common/i18n.py`); the Russian text is the key. English translations are dictionaries “Russian → English” in `lang_en.py` (`packages/common/gmagc_common`, `apps/desktop/src/gmagc_desktop`, `apps/mobile/src/gmagc_mobile`). An untranslated text stays in Russian. The test `tests/test_i18n_catalogs.py` requires an English translation for every `t("…")` call, forbids leftover entries and checks that the `{placeholders}` match. Word forms use `plural(n, ru=(…), en=(…))`. A language change rebuilds the interface on the same services (`DesktopApp.rebuild()`, `MobileApp.rebuild()`), so texts must not be computed once at import time: module-level constants with texts are functions.
+The interface texts are written in Russian in the code and wrapped in `t("…")` (`gmagc_common/i18n.py`); the Russian text is the key. English translations are dictionaries “Russian → English” in `lang_en.py` (`packages/common/gmagc_common`, `apps/desktop/src/gmagc_desktop`, `apps/mobile/src/gmagc_phone`). An untranslated text stays in Russian. The test `tests/test_i18n_catalogs.py` requires an English translation for every `t("…")` call, forbids leftover entries and checks that the `{placeholders}` match. Word forms use `plural(n, ru=(…), en=(…))`. A language change rebuilds the window on the same services (`rebuild_window` on the PC, the window rebuild in `gmagc_phone.app.run`), so texts must not be computed once at import time: module-level constants with texts are functions.
 
 ```
 apps/desktop/src/gmagc_desktop/   the core: matcher/ (image, embeddings, search), library/ (walk, index, cache, duplicates), cli.py
-                                  service/ (settings, search service, access code), server/ (HTTP server, QR, addresses), ui/ (the Flet screen)
+                                  service/ (settings, search service, access code), server/ (HTTP server, QR, addresses), qt/ (the PySide6 screens)
 apps/desktop/src/gmagc_common/    a copy of the shared package (the original is in packages/common/gmagc_common; after edits: python scripts/sync_common.py)
 packages/common/gmagc_common/     the phone ↔ PC protocol, fixture profiles and console exports, i18n (standard library only)
-apps/desktop/src/main.py          the Flet desktop app
-apps/mobile/src/gmagc_mobile/     the Flet Android app: client (network), camera (zoom, focus), qr, store, imaging, texts, profiles_ui, app (the screen)
+apps/desktop/src/main.py          the desktop app (PySide6)
+apps/mobile/src/gmagc_phone/      the Android app (PySide6): controller (logic), camera, imaging, profiles (the profile editor), extras (updates, support), screens/, app (the window)
 apps/mobile/src/gmagc_common/     a copy of the shared package (the original is in packages/common; after edits: python scripts/sync_common.py)
 .github/workflows/                tests and Windows / macOS / Android builds
 scripts/                          benchmark, photo report, duplicate-group viewer, model download, window capture (capture_window.ps1), phone simulator (phone_sim.py), export to consoles (export_ma3.py, export_ma2.py), protocol sync (sync_common.py)

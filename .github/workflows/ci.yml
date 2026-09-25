@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - name: Библиотека zbar для тестов чтения QR
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libzbar0
+        run: sudo apt-get update && sudo apt-get install -y libzbar0 libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
       - name: Библиотека zbar для тестов чтения QR (macOS)
         if: runner.os == 'macOS'
         run: |

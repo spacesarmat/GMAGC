@@ -1,7 +1,8 @@
-"""Точка входа ПК-приложения для `flet build`."""
+"""Точка входа ПК-приложения (Qt); она же вход для сборки PyInstaller."""
 
-import flet as ft
+import sys
 
-from gmagc_desktop.ui.app import build_page
+from gmagc_desktop.qt.app import run
 
-ft.run(build_page)
+if __name__ == "__main__":
+    sys.exit(run())

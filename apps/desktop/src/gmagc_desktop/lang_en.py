@@ -30,12 +30,8 @@ EN = {
     "Сбросить": "Reset",
     "Поправка фото": "Photo adjustment",
     "Поправка найденной проекции": "Found projection adjustment",
-    "Яркость: 0": "Brightness: 0",
-    "Контраст: 1.0×": "Contrast: 1.0×",
-    "Экспозиция: 0 EV": "Exposure: 0 EV",
     "Яркость: {signed}": "Brightness: {signed}",
     "Контраст: {adjust_contrast:.1f}×": "Contrast: {adjust_contrast:.1f}×",
-    "Контраст: {proj_adjust_contrast:.1f}×": "Contrast: {proj_adjust_contrast:.1f}×",
     "Экспозиция: {signed} EV": "Exposure: {signed} EV",
     "{count} {results}": "{count} {results}",
     "ещё {count} {files}": "{count} more {files}",
@@ -120,6 +116,7 @@ EN = {
     "Диагностика": "Diagnostics",
     "Отправить лог по почте": "Send the log by email",
     "Настройки сохранены: {path}": "Settings saved: {path}",
+    "Не удалось записать файл: {error}": "Could not write the file: {error}",
     "Не удалось прочитать файл: {error}": "Could not read the file: {error}",
     "Настройки импортированы. Сервер для телефона и код доступа применятся после перезапуска приложения.": (
         "Settings imported. The phone server and access code will apply after the app is restarted."

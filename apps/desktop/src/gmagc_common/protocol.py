@@ -10,11 +10,12 @@ import binascii
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import NamedTuple, TypeVar
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from gmagc_common.i18n import t
 
+T = TypeVar("T")
 API_VERSION = 1
 APP_NAME = "GMAGC"
 DEFAULT_PORT = 8765
@@ -130,7 +131,7 @@ def _decode(value: str | None) -> bytes | None:
         raise ProtocolError(t("повреждённое изображение в ответе")) from error
 
 
-def _parse[T](build: Callable[[], T]) -> T:
+def _parse(build: Callable[[], T]) -> T:  # noqa: UP047 - синтаксис [T] не разбирает Python 3.11 сборщика Android
     """Вызывает build() и превращает любые ошибки разбора в ProtocolError."""
     try:
         return build()
