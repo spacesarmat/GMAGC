@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/build-android-qt.yml
       - apps/mobile_qt/**
+      - packaging/android_qt/**
 
 env:
   PYSIDE_VERSION: "6.11.2"
@@ -45,27 +46,50 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/pyside6/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
           curl -fsSL -o "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/shiboken6/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
           ls -la "$RUNNER_TEMP/wheels"
-      - name: Шаблон buildozer.spec (для справки)
+      - name: Версия и параметры пакета
         run: |
-          D="$(python -c 'import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), "scripts", "deploy_lib", "android"))')"
-          ls -la "$D"
-          echo "=== TEMPLATE ==="
-          cat "$D"/buildozer.spec 2>/dev/null || true
-          echo "=== END ==="
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$(grep -oP '(?<=^VERSION = ")[^"]+' apps/mobile_qt/src/gmagc_phone/about.py)"; fi
+          echo "GMAGC_VERSION=$VERSION" >> "$GITHUB_ENV"
+          # versionCode должен быть больше, чем у прежних сборок (там был номер запуска, единицы и десятки)
+          echo "GMAGC_VERSION_CODE=$((200000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "GMAGC_ICON=$GITHUB_WORKSPACE/apps/mobile_qt/src/assets/icon.png" >> "$GITHUB_ENV"
+      - name: Идентификатор пакета, версия, разрешения
+        run: python packaging/android_qt/patch_buildozer.py
       - name: Сборка APK
         working-directory: apps/mobile_qt/src
         run: |
-          pyside6-android-deploy --name GMAGC \
-            --wheel-pyside "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" \
-            --wheel-shiboken "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" \
-            --force -v
+          pyside6-android-deploy --name GMAGC             --wheel-pyside "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"             --wheel-shiboken "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"             --force -v
+      - name: Подпись постоянным ключом
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          # отпечаток SHA-256 сертификата постоянного ключа GMAGC (публичная информация)
+          EXPECTED_SHA256: "BE:7C:D5:91:1E:FC:B5:1E:1A:08:6F:5C:14:3A:A3:3D:18:B1:12:2A:34:D9:F9:F5:99:F6:8C:4F:5D:99:84:20"
+        run: |
+          APK=$(find apps/mobile_qt/src -maxdepth 1 -name "*.apk" | head -1)
+          SDK="$HOME/.pyside6_android_deploy/android-sdk"
+          APKSIGNER=$(find "$SDK/build-tools" -name apksigner 2>/dev/null | sort | tail -1)
+          mkdir -p dist
+          NAME="GMAGC-android-${GMAGC_VERSION}.apk"
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$APKSIGNER" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/gmagc-upload.p12"
+            "$APKSIGNER" sign --ks "$RUNNER_TEMP/gmagc-upload.p12" --ks-type PKCS12 --ks-key-alias gmagc               --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD --out "dist/$NAME" "$APK"
+            "$APKSIGNER" verify --print-certs "dist/$NAME" | tee signer.txt
+            ACTUAL=$(grep -i "SHA-256 digest" signer.txt | head -1 | sed 's/.*: //' | tr 'a-f' 'A-F')
+            EXPECTED=$(echo "$EXPECTED_SHA256" | tr -d ':')
+            if [ "$ACTUAL" != "$EXPECTED" ]; then echo "::error::APK подписан не постоянным ключом: $ACTUAL"; exit 1; fi
+            echo "APK подписан постоянным ключом GMAGC"
+          else
+            echo "::warning::Ключа подписи нет (запуск из форка): APK остаётся с отладочной подписью"
+            cp "$APK" "dist/$NAME"
+          fi
+          (cd dist && sha256sum "$NAME" > "$NAME.sha256")
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: GMAGC-android-qt
           path: |
-            apps/mobile_qt/src/**/*.apk
+            dist/*
             apps/mobile_qt/src/pysidedeploy.spec
             apps/mobile_qt/src/buildozer.spec
-            apps/mobile_qt/src/deployment/**/*.log
           if-no-files-found: warn
