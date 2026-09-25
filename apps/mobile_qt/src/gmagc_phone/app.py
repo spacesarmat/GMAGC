@@ -38,6 +38,7 @@ class MainWindow(QWidget):
         self.stack = QStackedWidget()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.top_layout = layout
         layout.addWidget(self.stack)
         for widget in screens.values():
             self.stack.addWidget(widget)
@@ -140,6 +141,30 @@ class _NoCamera(CameraBackend):
         self.error.emit(t("Камера доступна только на телефоне (Android)"))
 
 
+def attach_extras(window: MainWindow, settings: PhoneSettings, update_delay: float = 3.0, support_delay: float = 8.0):
+    """Обновления и просьба поддержать автора: отдельно от сборки окна, чтобы тесты не ходили в сеть."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QDesktopServices
+
+    from gmagc_phone.extras import SupportPrompt, UpdateBar, UpdateController
+
+    def open_url(url: str) -> None:
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl(url))
+
+    updates = UpdateController(settings, window.controller.executor, open_url, window.quit_app)
+    bar = UpdateBar(updates)
+    window.top_layout.insertWidget(0, bar)
+    window.screens["settings"].add_update_controls(updates)
+    QTimer.singleShot(int(update_delay * 1000), updates.startup)
+    support = SupportPrompt(
+        settings, window, open_url, delay=support_delay, busy=lambda: window.controller.busy or window.current != "camera"
+    )
+    support.start()
+    window.updates, window.support = updates, support
+
+
 def run(argv: list[str] | None = None) -> int:
     app = QApplication(argv if argv is not None else sys.argv)
     settings = PhoneSettings()
@@ -149,6 +174,7 @@ def run(argv: list[str] | None = None) -> int:
 
     def open_window() -> None:
         window = build_window(settings)
+        attach_extras(window, settings)
         old = holder.get("window")
         holder["window"] = window
         window.controller.language_changed.connect(lambda _choice: _rebuild())

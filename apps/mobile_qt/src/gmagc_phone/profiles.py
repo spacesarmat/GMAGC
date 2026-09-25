@@ -105,7 +105,8 @@ def upload_text(result: FixtureUploadResult) -> str:
     labels = {"ma3": "grandMA3", "ma2": "grandMA2"}
     lines = [t("Записано на ПК:")]
     for target, path in result.written:
-        lines.append(f"• {labels.get(target, target)}: {re.split(r'[\\\\/]', path)[-1]}")
+        file_name = re.split(r"[\/]", path)[-1]
+        lines.append(f"• {labels.get(target, target)}: {file_name}")
     lines.extend(t("Пропущено: {item}", item=skip_text(item)) for item in result.skipped)
     return "\n".join(lines)
 

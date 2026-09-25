@@ -41,6 +41,15 @@ class SettingsScreen(Page):
         self.finish()
         controller.diag_changed.connect(self._diag)
 
+    def add_update_controls(self, updates) -> None:
+        """Ручная проверка обновлений: кнопка и строка состояния."""
+        status = label("", "muted")
+        status.hide()
+        updates.status_changed.connect(lambda text: (status.setText(text), status.setVisible(bool(text))))
+        check = button(t("Проверить обновления"), "", lambda: updates.check(force=True))
+        self.layout_.insertWidget(self.layout_.count() - 1, check)
+        self.layout_.insertWidget(self.layout_.count() - 1, status)
+
     def _language_picked(self, index: int) -> None:
         self.controller.set_language(self.language.itemData(index))
 
