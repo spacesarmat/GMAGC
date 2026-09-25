@@ -316,3 +316,9 @@ def test_screen_back_leaves_to_previous_overlay(qtbot, env):
 
 def test_range_helper_dataclass_roundtrip():
     assert Range(0, 1, "x").start == 0
+
+
+def test_upload_text_shows_file_names_from_windows_paths():
+    result = FixtureUploadResult((("ma3", "C:\ma\types\a.xml"), ("ma2", "/x/b.xml")), ())
+    text = p.upload_text(result)
+    assert "a.xml" in text and "C:" not in text and "b.xml" in text
