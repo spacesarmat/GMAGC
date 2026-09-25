@@ -124,9 +124,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: 33
           arch: x86_64
-          target: google_apis
+          target: google_apis_playstore
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back virtualscene
           script: bash packaging/android_qt/smoke.sh
       - uses: actions/upload-artifact@v4

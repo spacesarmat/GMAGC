@@ -4,7 +4,9 @@ set -u
 PKG=com.spacesarmat.gmagc
 APK=$(ls apk/GMAGC-android-*.apk | head -1)
 mkdir -p smoke
-adb install -r "$APK" | tee smoke/install.txt
+adb shell getprop ro.product.cpu.abilist | tee smoke/abi.txt
+adb install -r "$APK" 2>&1 | tee smoke/install.txt
+adb shell pm list packages | grep gmagc | tee smoke/packages.txt
 adb shell pm grant "$PKG" android.permission.CAMERA || true
 adb logcat -c
 adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
