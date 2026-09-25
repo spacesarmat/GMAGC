@@ -16,6 +16,12 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, x86_64]  # x86_64 — только для проверки запуска в эмуляторе, в релиз не попадает
+    env:
+      ARCH: ${{ matrix.arch }}
     permissions:
       contents: write
     steps:
@@ -46,8 +52,8 @@ jobs:
         run: |
           BASE=https://download.qt.io/official_releases/QtForPython
           mkdir -p "$RUNNER_TEMP/wheels"
-          curl -fsSL -o "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/pyside6/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
-          curl -fsSL -o "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl" "$BASE/shiboken6/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"
+          curl -fsSL -o "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl" "$BASE/pyside6/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl"
+          curl -fsSL -o "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl" "$BASE/shiboken6/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl"
           ls -la "$RUNNER_TEMP/wheels"
       - name: Версия и параметры пакета
         run: |
@@ -61,7 +67,7 @@ jobs:
       - name: Сборка APK
         working-directory: apps/mobile/src
         run: |
-          pyside6-android-deploy --name GMAGC             --wheel-pyside "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"             --wheel-shiboken "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_aarch64.whl"             --force -v
+          pyside6-android-deploy --name GMAGC             --wheel-pyside "$RUNNER_TEMP/wheels/pyside6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl"             --wheel-shiboken "$RUNNER_TEMP/wheels/shiboken6-$PYSIDE_VERSION-$PYSIDE_VERSION-cp311-cp311-android_${ARCH}.whl"             --force -v
       - name: Подпись постоянным ключом
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -91,14 +97,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GMAGC-android
+          name: GMAGC-android-${{ matrix.arch }}
           path: |
             dist/*
             apps/mobile/src/pysidedeploy.spec
             apps/mobile/src/buildozer.spec
           if-no-files-found: warn
       - name: Публикация в релиз
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.arch == 'aarch64'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -115,7 +121,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: GMAGC-android
+          name: GMAGC-android-x86_64
           path: apk
       - name: Включить KVM
         run: |
@@ -124,9 +130,9 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: 34
           arch: x86_64
-          target: google_apis_playstore
+          target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back virtualscene
           script: bash packaging/android_qt/smoke.sh
       - uses: actions/upload-artifact@v4

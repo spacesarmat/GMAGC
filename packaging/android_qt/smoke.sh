@@ -2,7 +2,7 @@
 # Дымовая проверка APK в эмуляторе: установка, запуск, живой процесс, снимок экрана и лог.
 set -u
 PKG=com.spacesarmat.gmagc
-APK=$(ls apk/GMAGC-android-*.apk | head -1)
+APK=$(ls apk/dist/GMAGC-android-*.apk | head -1)
 mkdir -p smoke
 adb shell getprop ro.product.cpu.abilist | tee smoke/abi.txt
 adb install -r "$APK" 2>&1 | tee smoke/install.txt
