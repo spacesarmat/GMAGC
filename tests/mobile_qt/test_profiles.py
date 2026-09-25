@@ -319,6 +319,6 @@ def test_range_helper_dataclass_roundtrip():
 
 
 def test_upload_text_shows_file_names_from_windows_paths():
-    result = FixtureUploadResult((("ma3", "C:\ma\types\a.xml"), ("ma2", "/x/b.xml")), ())
+    result = FixtureUploadResult((("ma3", r"C:\ma\types\a.xml"), ("ma2", "/x/b.xml")), ())
     text = p.upload_text(result)
     assert "a.xml" in text and "C:" not in text and "b.xml" in text
