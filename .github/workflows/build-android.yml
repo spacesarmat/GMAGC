@@ -3,11 +3,6 @@ name: Build Android
 on:
   push:
     tags: ["v*"]
-    branches: [feat/pyside6]
-    paths:
-      - .github/workflows/build-android.yml
-      - apps/mobile/**
-      - packaging/android_qt/**
   workflow_dispatch:
 
 env:
