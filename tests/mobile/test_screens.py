@@ -235,3 +235,42 @@ def test_camera_stops_in_background_and_resumes(setup):
     assert backend.stopped == 1
     window._app_state_changed(Qt.ApplicationState.ApplicationActive)
     assert backend.started == started + 1
+
+
+def test_language_change_rebuilds_inside_one_window(qtbot, settings):
+    from gmagc_phone.app import Shell
+
+    def make():
+        return build_window(settings, backend=FakeCamera(), executor=InlineExecutor(), client_factory=FakeClient)
+
+    before = _visible_windows()
+    shell = Shell(settings, make_window=make, extras=False)
+    qtbot.addWidget(shell)
+    shell.show()
+    shell.open_content()
+    first = shell.content
+    first.screens["settings"]._language_picked(2)
+    qtbot.waitUntil(lambda: shell.content is not first)
+    assert settings.load_language() == "en"
+    assert shell.content.screens["connect"].scan.text() == "Scan the QR code from the PC"
+    qtbot.wait(50)
+    assert _visible_windows() - before == {shell}  # никаких лишних окон
+    i18n.set_language("ru")
+
+
+def test_pages_do_not_flash_stray_windows(qtbot, settings):
+    before = _visible_windows()
+    window = build_window(settings, backend=FakeCamera(), executor=InlineExecutor(), client_factory=FakeClient)
+    qtbot.addWidget(window)
+    window.show()
+    window.controller.connect_to(CONN)
+    window.controller.open_overlay("gallery")
+    window.controller.open_overlay("settings")
+    window.controller.open_overlay("profiles")
+    assert _visible_windows() - before == {window}
+
+
+def _visible_windows():
+    from PySide6.QtWidgets import QApplication
+
+    return {w for w in QApplication.topLevelWidgets() if w.isVisible()}

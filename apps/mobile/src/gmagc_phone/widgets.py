@@ -67,7 +67,8 @@ class Page(QWidget):
         row.setContentsMargins(8, 4, 8, 4)
         self.back = button("‹", "link", on_back)
         self.back.setAccessibleName(t("Назад"))
-        self.back.setVisible(on_back is not None)
+        if on_back is None:
+            self.back.hide()  # setVisible(True) до вставки в раскладку показал бы кнопку отдельным окном
         row.addWidget(self.back)
         self.title = label(title, "heading")
         row.addWidget(self.title, 1)
